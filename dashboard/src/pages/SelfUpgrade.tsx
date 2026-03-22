@@ -17,6 +17,7 @@ interface UpgradeStatus {
   scanProgress: { cursor: number; total: number; percent: number };
   dryRun: boolean;
   isContinuousActive: boolean;
+  isManualScanActive: boolean;
 }
 
 interface ProposalStats {
@@ -352,6 +353,18 @@ export default function SelfUpgrade() {
             }`}
           >
             {status?.paused ? '▶ เปิด Auto-Upgrade & Scan' : '⏸ พัก Auto-Upgrade & Scan'}
+          </button>
+
+          <button
+            onClick={triggerScan}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg font-bold text-xs transition-all duration-300 shadow-sm border ${
+              status?.isManualScanActive
+                ? 'bg-orange-500/10 text-orange-400 border-orange-500/20 hover:bg-orange-500/20 shadow-orange-500/10'
+                : 'bg-blue-600/10 text-blue-400 border-blue-500/20 hover:bg-blue-600/20 shadow-blue-500/10'
+            }`}
+          >
+            <Search className={`w-3.5 h-3.5 ${scanning || status?.isManualScanActive ? 'animate-spin' : ''}`} />
+            {(scanning || status?.isManualScanActive) ? 'หยุด Scan' : 'เริ่ม Scan ทันที'}
           </button>
 
           {/* Check Interval Dropdown */}

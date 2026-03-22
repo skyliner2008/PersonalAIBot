@@ -14,9 +14,28 @@ export interface PluginRuntimeSnapshot {
 }
 
 export function getPluginRuntimeSnapshots(): PluginRuntimeSnapshot[] {
-  const browserRunning = isRunning();
-  const chatMonitorActive = isChatMonitorActive();
-  const commentMonitorActive = isCommentMonitorActive();
+  let browserRunning = false;
+  let chatMonitorActive = false;
+  let commentMonitorActive = false;
+
+  try {
+    browserRunning = isRunning();
+  } catch (error) {
+    // Default to false to prevent crash
+  }
+
+  try {
+    chatMonitorActive = isChatMonitorActive();
+  } catch (error) {
+    // Default to false to prevent crash
+  }
+
+  try {
+    commentMonitorActive = isCommentMonitorActive();
+  } catch (error) {
+    // Default to false to prevent crash
+  }
+
   const monitorCount = (chatMonitorActive ? 1 : 0) + (commentMonitorActive ? 1 : 0);
 
   let status: PluginRuntimeStatus = 'offline';

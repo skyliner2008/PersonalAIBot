@@ -175,6 +175,33 @@ function runMigrations(dbInstance: SqliteDatabase): void {
       dependencies_json TEXT DEFAULT '[]',
       last_scanned DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
+
+    // --- Second Brain: Dependency Graph ---
+    // Explicit edges between files for fast graph traversal.
+    // source_file --[imports/exports/calls]--> target_file
+    // This enables multi-hop impact analysis: "if I change X, what breaks?"
+    dbInstance.exec(`CREATE TABLE IF NOT EXISTS codebase_edges (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source_file TEXT NOT NULL,
+      target_file TEXT NOT NULL,
+      edge_type TEXT NOT NULL DEFAULT 'imports',
+      symbols_json TEXT DEFAULT '[]',
+      weight REAL DEFAULT 1.0,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(source_file, target_file, edge_type)
+    )`);
+    dbInstance.exec(`CREATE INDEX IF NOT EXISTS idx_codebase_edges_src ON codebase_edges(source_file)`);
+    dbInstance.exec(`CREATE INDEX IF NOT EXISTS idx_codebase_edges_tgt ON codebase_edges(target_file)`);
+
+    // --- Second Brain: Code Embeddings ---
+    // Semantic vector for each file's summary — enables "find similar files" search.
+    // Stored separately from codebase_map to keep the main table lean.
+    dbInstance.exec(`CREATE TABLE IF NOT EXISTS codebase_embeddings (
+      file_path TEXT PRIMARY KEY,
+      embedding BLOB,
+      model_used TEXT,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
   } catch (e) {
     console.warn('[DB migration] unexpected error creating evolution/system tables:', String(e));
   }
@@ -526,6 +553,160 @@ export function searchCodebaseMapByDependencies(queryPath: string): CodebaseNode
 
 export function getCodebaseContextMap(): CodebaseNode[] {
   return allRows<CodebaseNode>(getDb(), `SELECT * FROM codebase_map`);
+}
+
+// -- Second Brain: Dependency Graph --
+
+export interface CodebaseEdge {
+  id: number;
+  source_file: string;
+  target_file: string;
+  edge_type: string;
+  symbols_json: string;
+  weight: number;
+}
+
+/**
+ * Upsert a directed edge: source_file --[imports]--> target_file
+ * symbols_json = which specific symbols are imported (e.g. ["getDb", "runSql"])
+ */
+export function upsertCodebaseEdge(
+  sourceFile: string, targetFile: string, edgeType: string, symbols: string[], weight: number = 1.0
+): void {
+  const src = sourceFile.replace(/\\/g, '/');
+  const tgt = targetFile.replace(/\\/g, '/');
+  runSql(getDb(), `
+    INSERT INTO codebase_edges (source_file, target_file, edge_type, symbols_json, weight, updated_at)
+    VALUES (?, ?, ?, ?, ?, datetime('now'))
+    ON CONFLICT(source_file, target_file, edge_type) DO UPDATE SET
+      symbols_json = excluded.symbols_json,
+      weight = excluded.weight,
+      updated_at = datetime('now')
+  `, [src, tgt, edgeType, JSON.stringify(symbols), weight]);
+}
+
+/**
+ * Get all files that directly import FROM the given file (downstream dependents).
+ * "Who depends on me?" — critical for impact analysis.
+ */
+export function getDownstreamDependents(filePath: string): CodebaseEdge[] {
+  const normalized = filePath.replace(/\\/g, '/');
+  return allRows<CodebaseEdge>(getDb(),
+    `SELECT * FROM codebase_edges WHERE target_file = ? ORDER BY weight DESC`, [normalized]
+  );
+}
+
+/**
+ * Get all files that the given file imports FROM (upstream dependencies).
+ * "Who do I depend on?" — critical for understanding context.
+ */
+export function getUpstreamDependencies(filePath: string): CodebaseEdge[] {
+  const normalized = filePath.replace(/\\/g, '/');
+  return allRows<CodebaseEdge>(getDb(),
+    `SELECT * FROM codebase_edges WHERE source_file = ? ORDER BY weight DESC`, [normalized]
+  );
+}
+
+/**
+ * Multi-hop graph traversal: find ALL files affected within N hops.
+ * Walks downstream from the target file to find the full impact radius.
+ * Returns files grouped by hop distance.
+ */
+export function getImpactRadius(filePath: string, maxHops: number = 3): Map<number, CodebaseEdge[]> {
+  const normalized = filePath.replace(/\\/g, '/');
+  const result = new Map<number, CodebaseEdge[]>();
+  const visited = new Set<string>([normalized]);
+  let frontier = [normalized];
+
+  for (let hop = 1; hop <= maxHops; hop++) {
+    const nextFrontier: string[] = [];
+    const hopEdges: CodebaseEdge[] = [];
+    for (const file of frontier) {
+      const edges = getDownstreamDependents(file);
+      for (const edge of edges) {
+        if (!visited.has(edge.source_file)) {
+          visited.add(edge.source_file);
+          nextFrontier.push(edge.source_file);
+          hopEdges.push(edge);
+        }
+      }
+    }
+    if (hopEdges.length > 0) result.set(hop, hopEdges);
+    frontier = nextFrontier;
+    if (frontier.length === 0) break;
+  }
+  return result;
+}
+
+/**
+ * Get the full dependency subgraph around a file (both upstream and downstream).
+ * Used by the implementation pipeline to give AI maximum context.
+ */
+export function getFileNeighborhood(filePath: string): { upstream: CodebaseEdge[]; downstream: CodebaseEdge[] } {
+  return {
+    upstream: getUpstreamDependencies(filePath),
+    downstream: getDownstreamDependents(filePath),
+  };
+}
+
+/**
+ * Delete all edges for a source file (used before re-building edges during scan).
+ */
+export function clearCodebaseEdgesForFile(sourceFile: string): void {
+  const normalized = sourceFile.replace(/\\/g, '/');
+  runSql(getDb(), `DELETE FROM codebase_edges WHERE source_file = ?`, [normalized]);
+}
+
+// -- Second Brain: Code Embeddings --
+
+/**
+ * Save embedding vector for a file's code summary.
+ */
+export function upsertCodebaseEmbedding(filePath: string, embedding: number[], modelUsed: string): void {
+  const normalized = filePath.replace(/\\/g, '/');
+  const buffer = Buffer.from(new Float32Array(embedding).buffer);
+  runSql(getDb(), `
+    INSERT INTO codebase_embeddings (file_path, embedding, model_used, updated_at)
+    VALUES (?, ?, ?, datetime('now'))
+    ON CONFLICT(file_path) DO UPDATE SET
+      embedding = excluded.embedding,
+      model_used = excluded.model_used,
+      updated_at = datetime('now')
+  `, [normalized, buffer, modelUsed]);
+}
+
+/**
+ * Find semantically similar files using cosine similarity on stored embeddings.
+ * Returns top-K files most similar to the query embedding.
+ */
+export function searchSimilarFiles(queryEmbedding: number[], topK: number = 5): Array<{ file_path: string; score: number }> {
+  const rows = allRows<{ file_path: string; embedding: Buffer }>(
+    getDb(), `SELECT file_path, embedding FROM codebase_embeddings WHERE embedding IS NOT NULL`
+  );
+
+  const results: Array<{ file_path: string; score: number }> = [];
+  for (const row of rows) {
+    try {
+      const stored = new Float32Array(row.embedding.buffer, row.embedding.byteOffset, row.embedding.byteLength / 4);
+      const score = cosineSim(queryEmbedding, Array.from(stored));
+      if (score > 0.3) results.push({ file_path: row.file_path, score });
+    } catch { /* skip corrupt embeddings */ }
+  }
+
+  return results.sort((a, b) => b.score - a.score).slice(0, topK);
+}
+
+/** Cosine similarity between two vectors */
+function cosineSim(a: number[], b: number[]): number {
+  if (a.length !== b.length || a.length === 0) return 0;
+  let dot = 0, magA = 0, magB = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    magA += a[i] * a[i];
+    magB += b[i] * b[i];
+  }
+  const denom = Math.sqrt(magA) * Math.sqrt(magB);
+  return denom === 0 ? 0 : dot / denom;
 }
 
 // -- Q&A --

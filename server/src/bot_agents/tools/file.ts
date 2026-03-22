@@ -65,6 +65,63 @@ function validateFilePath(filePath: string, mode: 'read' | 'write' = 'write'): {
   return { safe: true };
 }
 
+/**
+ * 🕵️ Pre-flight Syntax Validation — basic structural check before writing to disk
+ * Catches: unbalanced brackets, unterminated strings, and obvious syntax wreckage.
+ */
+function validateCodeSyntax(filePath: string, content: string): { ok: boolean; error?: string } {
+  const ext = path.extname(filePath).toLowerCase();
+  if (!['.ts', '.tsx', '.js', '.jsx', '.json'].includes(ext)) return { ok: true };
+
+  const basename = path.basename(filePath);
+  let braces = 0, parens = 0, brackets = 0;
+  let inString = false, stringChar = '', isEscaped = false;
+  let inTemplate = false;
+  let inLineComment = false, inBlockComment = false;
+
+  for (let i = 0; i < content.length; i++) {
+    const c = content[i];
+    const next = content[i + 1];
+
+    if (inLineComment) { if (c === '\n') inLineComment = false; continue; }
+    if (inBlockComment) { if (c === '*' && next === '/') { inBlockComment = false; i++; } continue; }
+    
+    if (inString) {
+      if (isEscaped) { isEscaped = false; continue; }
+      if (c === '\\') { isEscaped = true; continue; }
+      if (c === stringChar) inString = false;
+      continue;
+    }
+    
+    if (inTemplate) {
+      if (isEscaped) { isEscaped = false; continue; }
+      if (c === '\\') { isEscaped = true; continue; }
+      if (c === '`') inTemplate = false;
+      continue;
+    }
+
+    if (c === '/' && next === '/') { inLineComment = true; i++; continue; }
+    if (c === '/' && next === '*') { inBlockComment = true; i++; continue; }
+    if (c === '"' || c === "'") { inString = true; stringChar = c; continue; }
+    if (c === '`') { inTemplate = true; continue; }
+
+    if (c === '{') braces++;
+    else if (c === '}') braces--;
+    else if (c === '(') parens++;
+    else if (c === ')') parens--;
+    else if (c === '[') brackets++;
+    else if (c === ']') brackets--;
+  }
+
+  if (inString) return { ok: false, error: `❌ ${basename}: Unterminated string literal (${stringChar})` };
+  if (inTemplate) return { ok: false, error: `❌ ${basename}: Unterminated template literal (\`)` };
+  if (braces !== 0) return { ok: false, error: `❌ ${basename}: Unbalanced braces { } (diff: ${braces})` };
+  if (parens !== 0) return { ok: false, error: `❌ ${basename}: Unbalanced parentheses ( ) (diff: ${parens})` };
+  if (brackets !== 0) return { ok: false, error: `❌ ${basename}: Unbalanced square brackets [ ] (diff: ${brackets})` };
+
+  return { ok: true };
+}
+
 
 // ==========================================
 // 1. List Files in Directory
@@ -159,6 +216,11 @@ export async function writeFileContent({ file_path, content }: { file_path: stri
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
+    const syntaxCheck = validateCodeSyntax(resolvedPath, content);
+    if (!syntaxCheck.ok) {
+      return `Error: การบันทึกถูกระงับเนื่องจากพบ Syntax Error - ${syntaxCheck.error}. กรุณาตรวจสอบโค้ดให้ถูกต้องก่อนลองใหม่อีกครั้ง`;
+    }
+
     fs.writeFileSync(resolvedPath, content, 'utf8');
     
     // Allow external listeners (e.g. SelfUpgrade) to react before the server restarts
@@ -244,6 +306,12 @@ export async function replaceCodeBlock({ file_path, exact_old_string, new_string
       return `Error: ค้นหา exact_old_string ไม่เจอ กรุณาตรวจสอบว่าก็อปปี้มารวม \n และช่องว่าง (Space/Tab) ตรงตามต้นฉบับหรือไม่`;
     }
     const newContent = content.replace(exact_old_string, new_string);
+
+    const syntaxCheck = validateCodeSyntax(resolvedPath, newContent);
+    if (!syntaxCheck.ok) {
+      return `Error: การแก้ไขถูกระงับเนื่องจากพบ Syntax Error - ${syntaxCheck.error}. กรุณาตรวจสอบโค้ดให้ถูกต้องก่อนลองใหม่อีกครั้ง`;
+    }
+
     fs.writeFileSync(resolvedPath, newContent, 'utf8');
     
     // Allow external listeners (e.g. SelfUpgrade) to react

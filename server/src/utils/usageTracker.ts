@@ -80,6 +80,7 @@ function estimateCost(model: string, promptTokens: number, completionTokens: num
 // ============ DB Schema (ensure table exists) ============
 
 export function ensureUsageTable(): void {
+  // test
   const db = getDb();
   db.exec(`
     CREATE TABLE IF NOT EXISTS usage_tracking (

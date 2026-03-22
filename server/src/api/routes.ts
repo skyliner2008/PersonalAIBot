@@ -120,10 +120,10 @@ router.get('/status', asyncHandler(async (_req, res) => {
 }));
 
 // ============ Logs ============
-router.get('/logs', (req, res) => {
+router.get('/logs', asyncHandler(async (req, res) => {
   const limit = parseIntParam(req.query.limit, 100, 1, 500);
   res.json(getRecentLogs(limit));
-});
+}));
 
 // ============ Facebook Auth ============
 router.post('/fb/login', validateBody(fbLoginSchema), asyncHandler(async (req, res) => {
@@ -132,9 +132,9 @@ router.post('/fb/login', validateBody(fbLoginSchema), asyncHandler(async (req, r
   res.json({ success });
 }));
 
-router.get('/fb/status', async (req, res) => {
+router.get('/fb/status', asyncHandler(async (req, res) => {
   res.json({ loggedIn: isRunning() ? await isLoggedIn() : false });
-});
+}));
 
 // ============ Settings ============
 router.use(settingsRoutes);

@@ -48,23 +48,32 @@ export class GeminiProvider implements AIProvider {
     let lastError: string = '';
     for (const apiVer of apiVersions) {
       const url = `https://generativelanguage.googleapis.com/${apiVer}/models/${model}:generateContent`;
-      res = await fetch(url, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${key}`
-        },
-        body: JSON.stringify(body),
-      });
-      if (res.ok) break;
-      const err = await res.json().catch(() => ({}));
-      lastError = err.error?.message || res.statusText;
-      // Only retry on 404 NOT_FOUND (model not available on this version)
-      if (res.status === 404 && apiVer !== apiVersions[apiVersions.length - 1]) {
-        log.info(`Model "${model}" not found on ${apiVer}, trying next API version...`);
-        continue;
+      try {
+        res = await fetch(url, {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${key}`
+          },
+          body: JSON.stringify(body),
+        });
+        if (res.ok) break;
+        const err = await res.json().catch(() => ({}));
+        lastError = err.error?.message || res.statusText;
+        // Only retry on 404 NOT_FOUND (model not available on this version)
+        if (res.status === 404 && apiVer !== apiVersions[apiVersions.length - 1]) {
+          log.info(`Model "${model}" not found on ${apiVer}, trying next API version...`);
+          continue;
+        }
+        throw new Error(`Gemini error ${res.status}: ${lastError}`);
+      } catch (e: any) {
+        lastError = e instanceof Error ? e.message : String(e);
+        if (apiVer !== apiVersions[apiVersions.length - 1]) {
+          log.warn(`Gemini API call to ${apiVer} failed: ${lastError}. Trying next API version...`);
+          continue;
+        }
+        throw new Error(`Gemini API call failed for all versions: ${lastError}`);
       }
-      throw new Error(`Gemini error ${res.status}: ${lastError}`);
     }
     if (!res || !res.ok) {
       throw new Error(`Gemini error: ${lastError}`);

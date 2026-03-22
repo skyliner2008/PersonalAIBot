@@ -57,14 +57,19 @@ export class OpenRouterProvider implements AIProvider {
       throw new Error(`OpenRouter error ${res.status}: ${err.error?.message || res.statusText}`);
     }
 
-    const data = await res.json();
-    const text = data.choices?.[0]?.message?.content?.trim() || '';
-    const usage = data.usage ? {
-      promptTokens: data.usage.prompt_tokens || 0,
-      completionTokens: data.usage.completion_tokens || 0,
-      totalTokens: data.usage.total_tokens || 0,
-    } : undefined;
-    return { text, usage };
+    try {
+      const data = await res.json();
+      const text = data.choices?.[0]?.message?.content?.trim() || '';
+      const usage = data.usage ? {
+        promptTokens: data.usage.prompt_tokens || 0,
+        completionTokens: data.usage.completion_tokens || 0,
+        totalTokens: data.usage.total_tokens || 0,
+      } : undefined;
+      return { text, usage };
+    } catch (e) {
+      console.error('[OpenRouter] Failed to parse chat response or extract data:', e);
+      throw new Error(`OpenRouter API response processing failed: ${String(e)}`);
+    }
   }
 
   async testConnection(): Promise<boolean> {

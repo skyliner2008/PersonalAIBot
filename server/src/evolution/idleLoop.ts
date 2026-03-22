@@ -24,6 +24,11 @@ export function startIdleLoop(aiAgent: Agent | null) {
         log.info(`Started. Checking for inactivity every ${IDLE_CHECK_INTERVAL_MS / 60000} minutes.`);
     }
 
+    // Clear any existing interval to prevent multiple loops running
+    if (idleInterval !== null) {
+        clearInterval(idleInterval);
+    }
+
     idleInterval = setInterval(async () => {
         // Prevent overlapping executions if async callback takes longer than interval
         if (isIdleLoopRunning) {

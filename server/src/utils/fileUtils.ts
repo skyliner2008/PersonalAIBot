@@ -6,5 +6,11 @@
  */
 export function getFileExtension(filename: string): string {
   if (!filename) return '.bin';
-  return '.' + (filename.split('.').pop()?.toLowerCase() || 'bin');
+
+  const lastDotIndex = filename.lastIndexOf('.');
+  if (lastDotIndex === -1 || lastDotIndex === filename.length - 1) {
+    return '.bin';
+  }
+
+  return filename.substring(lastDotIndex).toLowerCase();
 }

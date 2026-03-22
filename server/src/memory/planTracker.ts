@@ -29,35 +29,45 @@ export interface AgentPlan {
  */
 export function createPlan(chatId: string, objective: string, steps: string[]): AgentPlan {
     const db = getDb();
-    
-    // Auto-pause any existing active plans for this chat to prevent confusion
-    db.prepare(`UPDATE agent_plans SET status = 'paused', updated_at = CURRENT_TIMESTAMP WHERE chat_id = ? AND status = 'active'`).run(chatId);
+    db.exec('BEGIN EXCLUSIVE;');
+    let plan: AgentPlan;
 
-    const planId = randomUUID();
-    const planSteps: PlanStep[] = steps.map((desc, idx) => ({
-        id: `step-${idx + 1}`,
-        description: desc,
-        status: 'pending'
-    }));
+    try {
+        // Auto-pause any existing active plans for this chat to prevent confusion
+        db.prepare(`UPDATE agent_plans SET status = 'paused', updated_at = CURRENT_TIMESTAMP WHERE chat_id = ? AND status = 'active'`).run(chatId);
 
-    const stepsJson = JSON.stringify(planSteps);
-    
-    db.prepare(`
-        INSERT INTO agent_plans (id, chat_id, objective, steps_json, status)
-        VALUES (?, ?, ?, ?, 'active')
-    `).run(planId, chatId, objective, stepsJson);
+        const planId = randomUUID();
+        const planSteps: PlanStep[] = steps.map((desc, idx) => ({
+            id: `step-${idx + 1}`,
+            description: desc,
+            status: 'pending'
+        }));
 
-    log.info(`New active plan created`, { planId, chatId, objective });
+        const stepsJson = JSON.stringify(planSteps);
+        
+        db.prepare(`
+            INSERT INTO agent_plans (id, chat_id, objective, steps_json, status)
+            VALUES (?, ?, ?, ?, 'active')
+        `).run(planId, chatId, objective, stepsJson);
 
-    return {
-        id: planId,
-        chatId,
-        objective,
-        steps: planSteps,
-        status: 'active',
-        createdAt: Date.now(),
-        updatedAt: Date.now()
-    };
+        plan = {
+            id: planId,
+            chatId,
+            objective,
+            steps: planSteps,
+            status: 'active',
+            createdAt: Date.now(),
+            updatedAt: Date.now()
+        };
+
+        db.exec('COMMIT;');
+        log.info(`New active plan created`, { planId, chatId, objective });
+        return plan;
+    } catch (e) {
+        db.exec('ROLLBACK;');
+        log.error(`Failed to create plan for chat ${chatId} due to transaction error`, { objective, error: e });
+        throw e;
+    }
 }
 
 /**
@@ -65,7 +75,13 @@ export function createPlan(chatId: string, objective: string, steps: string[]): 
  */
 export function getActivePlan(chatId: string): AgentPlan | null {
     const db = getDb();
-    const row = db.prepare(`SELECT * FROM agent_plans WHERE chat_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1`).get(chatId) as any;
+    let row: any;
+    try {
+        row = db.prepare(`SELECT * FROM agent_plans WHERE chat_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1`).get(chatId) as any;
+    } catch (e) {
+        log.error(`Failed to retrieve active plan from DB for chat ${chatId}`, { error: e });
+        return null;
+    }
     
     if (!row) return null;
 
@@ -120,11 +136,15 @@ export function updatePlanStep(chatId: string, stepId: string, status: StepStatu
  */
 export function closeActivePlan(chatId: string, status: 'completed' | 'failed' | 'paused'): boolean {
     const db = getDb();
-    const result = db.prepare(`
-        UPDATE agent_plans 
-        SET status = ?, updated_at = CURRENT_TIMESTAMP
-        WHERE chat_id = ? AND status = 'active'
-    `).run(status, chatId);
-
-    return result.changes > 0;
+    try {
+        const result = db.prepare(`
+            UPDATE agent_plans 
+            SET status = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE chat_id = ? AND status = 'active'
+        `).run(status, chatId);
+        return result.changes > 0;
+    } catch (e) {
+        log.error(`Failed to close active plan in DB for chat ${chatId}`, { status, error: e });
+        return false;
+    }
 }

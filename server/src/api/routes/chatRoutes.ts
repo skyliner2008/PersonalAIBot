@@ -72,12 +72,21 @@ chatRoutes.post('/chat/reply', validateBody(chatReplySchema), asyncHandler(async
   }
 
   const personaConfig = personaManager.loadPersona('web' as any);
+  if (!personaConfig) {
+    addLog('chat', 'Error', 'Web persona configuration not found', 'error');
+    return res.status(500).json({ success: false, error: 'Persona configuration missing' });
+  }
   const chatMemId = `dash_${convId}`;
   umAddMessage(chatMemId, 'user', message);
   const memCtx = await buildMemoryContext(chatMemId, message);
 
   const chatProvider = getProviderForTask('chat');
   const chatProviderModel = getSetting('ai_task_chat_model') || 'default';
+
+  if (!chatProvider) {
+    addLog('chat', 'Error', 'AI chat provider not found for task "chat"', 'error');
+    return res.status(500).json({ success: false, error: 'AI chat provider not configured' });
+  }
 
   if (!memCtx) {
     return res.status(500).json({ success: false, error: 'Failed to build memory context' });
@@ -186,7 +195,7 @@ chatRoutes.post('/chat/reply', validateBody(chatReplySchema), asyncHandler(async
 }));
 
 // Streaming chat reply (SSE)
-chatRoutes.post('/chat/stream', validateBody(chatReplySchema), async (req, res) => {
+chatRoutes.post('/chat/stream', validateBody(chatReplySchema), asyncHandler(async (req, res) => {
   const { conversationId, userName, message } = req.body;
   const writer = new SSEWriter(res);
 
@@ -217,6 +226,10 @@ chatRoutes.post('/chat/stream', validateBody(chatReplySchema), async (req, res) 
     }
 
     const personaConfig = personaManager.loadPersona('fb-extension');
+    if (!personaConfig) {
+      writer.sendError('Persona configuration missing for streaming chat');
+      return;
+    }
     const aiMessages = buildChatMessages(personaConfig.systemInstruction, memCtx, message);
 
     if (memCtx.archivalFacts.length > 0) {
@@ -265,6 +278,6 @@ chatRoutes.post('/chat/stream', validateBody(chatReplySchema), async (req, res) 
   } catch (err: any) {
     writer.sendError(err.message || 'Unknown error');
   }
-});
+}));
 
 export default chatRoutes;

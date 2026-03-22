@@ -78,7 +78,7 @@ router.post('/execute', async (req: AuthenticatedRequest, res: Response) => {
     // and escape shell metacharacters to prevent unintended shell execution.
     const sanitizedCommand = command
       .replace(/\0/g, '')
-      .replace(/([\\\\\\'"\\!&\\*\\(\\)\\|;<>\\?\\[\\]{}])/g, '\\\\$1')
+      .replace(/([\\'"!#$&*()|;<>?\[\]{}])/g, '\\$1')
       .trim();
 
     // Validate and sanitize platform: must be alphanumeric, underscore, or hyphen; otherwise, default to 'api'

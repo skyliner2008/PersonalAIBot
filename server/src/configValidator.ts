@@ -9,6 +9,7 @@
 
 import { z } from 'zod';
 import { createLogger } from './utils/logger';
+import { listBots } from './bot_agents/registries/botRegistry.js';
 
 const STARTUP_COMPACT = process.env.STARTUP_COMPACT === '1';
 const logger = createLogger('Config');
@@ -146,12 +147,14 @@ export function validateConfig(): ValidationResult {
   result.info.push(`Auth: ${process.env.AUTH_DISABLED === 'true' ? 'DISABLED' : 'enabled'}`);
   result.info.push(`Headless: ${process.env.HEADLESS === 'true' ? 'yes' : 'no'}`);
 
-  const platformCount = [
-    process.env.TELEGRAM_BOT_TOKEN,
-    process.env.LINE_CHANNEL_ACCESS_TOKEN,
-    process.env.FB_PAGE_ACCESS_TOKEN,
-  ].filter(Boolean).length;
-  result.info.push(`Platform tokens configured: ${platformCount}/3`);
+  // Platform count is now tracked in DB (bot_instances table), not .env
+  try {
+    const bots = listBots();
+    const activeBotCount = bots.filter((b: any) => b.status === 'active').length;
+    result.info.push(`Registered bots: ${bots.length} (${activeBotCount} active)`);
+  } catch {
+    result.info.push(`Registered bots: (unable to query)`);
+  }
 
   return result;
 }

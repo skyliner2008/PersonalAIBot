@@ -190,7 +190,7 @@ adminRoutes.post('/backup/export-json', asyncHandler(async (req, res) => {
   const options = req.body || {};
   const result = exportDataAsJSON(options);
   addLog('system', 'JSON export', result.filename, 'success');
-  res.json({ success: true, filename: result.filename, tables: Object.keys(result.data) });
+  res.json({ success: true, filename: result.filename, tables: result.data ? Object.keys(result.data) : [] });
 }));
 
 adminRoutes.get('/backup/conversation/:chatId', (req, res) => {

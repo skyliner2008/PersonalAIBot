@@ -471,8 +471,8 @@ async function handleGetSessionStats() {
       const tt = run.taskType || 'unknown';
       if (!taskTypeStats[tt]) taskTypeStats[tt] = { count: 0, avgTokens: 0, avgDuration: 0 };
       taskTypeStats[tt].count++;
-      taskTypeStats[tt].avgTokens += run.totalTokens;
-      taskTypeStats[tt].avgDuration += run.durationMs || 0;
+      taskTypeStats[tt].avgTokens += run.totalTokens ?? 0;
+      taskTypeStats[tt].avgDuration += run.durationMs ?? 0;
     }
     for (const tt of Object.keys(taskTypeStats)) {
       const s = taskTypeStats[tt];
@@ -483,8 +483,10 @@ async function handleGetSessionStats() {
     // Tool usage frequency
     const toolUsage: Record<string, number> = {};
     for (const run of runs) {
-      for (const tc of run.toolCalls) {
-        toolUsage[tc.name] = (toolUsage[tc.name] || 0) + 1;
+      if (run.toolCalls) {
+        for (const tc of run.toolCalls) {
+          toolUsage[tc.name] = (toolUsage[tc.name] || 0) + 1;
+        }
       }
     }
     const topTools = Object.entries(toolUsage)
@@ -505,7 +507,7 @@ async function handleGetSessionStats() {
         time: new Date(r.startTime).toLocaleString('th-TH'),
         task: r.taskType,
         tokens: r.totalTokens,
-        tools: r.toolCalls.length,
+        tools: r.toolCalls?.length ?? 0,
         success: !r.error,
       })),
     };

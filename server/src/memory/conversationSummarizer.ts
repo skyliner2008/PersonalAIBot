@@ -90,7 +90,7 @@ export async function maybeSummarize(chatId: string): Promise<void> {
 
         const existing = conv.summary || '';
         const recentText = msgs.reverse()
-            .map(m => `${m.role}: ${m.content.substring(0, 200)}`)
+            .map(m => `${m.role}: ${(m.content || '').substring(0, 200)}`)
             .join('\n');
 
         const prompt = existing

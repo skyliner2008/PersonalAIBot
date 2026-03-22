@@ -349,7 +349,7 @@ router.post('/task-chain', async (req, res) => {
       taskType: t.taskType as any,
       payload: { message: t.message, context: t.context },
       toSpecialist: t.specialist,
-      maxRetries: t.maxRetries || 1,
+      maxRetries: t.maxRetries ?? 1,
     }));
 
     const taskIds = await coordinator.delegateTaskChain(ctx, chainTasks, {
@@ -697,8 +697,9 @@ router.post('/meeting/start', async (req, res) => {
         placeholder.status = status;
       }
     }).then((session) => {
-      meetingSessions.delete(placeholderId);
-      storeMeeting(session);
+      // Update the existing entry rather than deleting and re-adding
+      // This preserves its position and avoids unnecessary eviction logic
+      meetingSessions.set(session.id, session);
     }).catch((err) => {
       placeholder.status = 'failed';
       placeholder.synthesis = `Meeting failed: ${err instanceof Error ? err.message : String(err)}`;

@@ -64,8 +64,22 @@ export function isUpgradeLockActive(): boolean {
   try {
     if (!fs.existsSync(UPGRADE_LOCK_PATH)) return false;
     const lock = JSON.parse(fs.readFileSync(UPGRADE_LOCK_PATH, 'utf-8'));
-    // Lock expires after 12 minutes (longest possible timeout + buffer)
-    if (Date.now() - lock.startedAt > 720000) {
+    
+    // Check if the process that created the lock is still alive
+    let isAlive = false;
+    if (lock.pid) {
+      try {
+        process.kill(lock.pid, 0);
+        isAlive = true;
+      } catch (e) {
+        // process.kill(pid, 0) throws if process doesn't exist
+        isAlive = false;
+      }
+    }
+
+    // Lock expires after 12 minutes OR if the process is dead
+    if (!isAlive || (Date.now() - lock.startedAt > 720000)) {
+      log.info(`[SelfUpgrade] Releasing stale/dead lock (isAlive=${isAlive}, age=${Math.round((Date.now() - lock.startedAt)/1000)}s)`);
       releaseUpgradeLock();
       return false;
     }
@@ -208,17 +222,13 @@ export function ensureUpgradeTable(): void {
     const db = getDb();
     const checkStmt = db.prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name='upgrade_proposals'`).get() as { sql: string } | undefined;
     
-    // Auto-migrate if the table exists but is missing the new columns or has the restrictive CHECK constraint
+    // 1. Table & Migration Logic for upgrade_proposals
     const currentCols = checkStmt ? (db.prepare(`PRAGMA table_info(upgrade_proposals)`).all() as { name: string }[]).map(c => c.name) : [];
     
     if (checkStmt && (!currentCols.includes('affected_files'))) {
       log.info('Migrating upgrade_proposals table to add new columns and remove CHECK constraint...');
-      db.exec(`DROP TABLE IF EXISTS upgrade_proposals_new`); // Clean up from any previous failed migration
-
-      // Detect current columns so SELECT matches exactly
+      db.exec(`DROP TABLE IF EXISTS upgrade_proposals_new`);
       const colList = currentCols.join(', ');
-
-      // New table always has the full 15-column schema
       db.exec(`
         CREATE TABLE upgrade_proposals_new (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -238,12 +248,12 @@ export function ensureUpgradeTable(): void {
           impact_analysis TEXT DEFAULT NULL
         );
       `);
-      // Copy only the columns that exist in the old table
       db.exec(`INSERT INTO upgrade_proposals_new (${colList}) SELECT ${colList} FROM upgrade_proposals`);
       db.exec(`DROP TABLE upgrade_proposals`);
       db.exec(`ALTER TABLE upgrade_proposals_new RENAME TO upgrade_proposals`);
       log.info('Migration complete: upgrade_proposals now has flexible status + new columns');
     } else if (!checkStmt) {
+      log.info('Creating new upgrade_proposals table...');
       db.exec(`
         CREATE TABLE IF NOT EXISTS upgrade_proposals (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -258,15 +268,16 @@ export function ensureUpgradeTable(): void {
           model_used TEXT DEFAULT 'local-analysis',
           confidence REAL DEFAULT 0.5,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-          reviewed_at DATETIME
+          reviewed_at DATETIME,
+          affected_files TEXT DEFAULT NULL,
+          impact_analysis TEXT DEFAULT NULL
         );
-        CREATE INDEX IF NOT EXISTS idx_upgrade_status ON upgrade_proposals(status, priority);
-        CREATE INDEX IF NOT EXISTS idx_upgrade_type ON upgrade_proposals(type);
-        CREATE INDEX IF NOT EXISTS idx_upgrade_file ON upgrade_proposals(file_path);
       `);
     }
 
+    // 2. Index & Logs Initialization
     db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_upgrade_status ON upgrade_proposals(status, priority);
       CREATE TABLE IF NOT EXISTS upgrade_scan_log (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         file_path TEXT NOT NULL,
@@ -277,50 +288,32 @@ export function ensureUpgradeTable(): void {
       CREATE INDEX IF NOT EXISTS idx_scan_file ON upgrade_scan_log(file_path);
     `);
     
-    // Auto-migrate: Add affected_files and impact_analysis columns if not exist
-    try {
-      const tableInfo = db.prepare(`PRAGMA table_info(upgrade_proposals)`).all() as { name: string }[];
-      const colNames = new Set(tableInfo.map(c => c.name));
-      if (!colNames.has('affected_files')) {
-        db.exec(`ALTER TABLE upgrade_proposals ADD COLUMN affected_files TEXT DEFAULT NULL`);
-        log.info('Migrated: added affected_files column');
-      }
-      if (!colNames.has('impact_analysis')) {
-        db.exec(`ALTER TABLE upgrade_proposals ADD COLUMN impact_analysis TEXT DEFAULT NULL`);
-        log.info('Migrated: added impact_analysis column');
-      }
-    } catch (migErr: any) {
-      log.debug('Column migration skipped (may already exist)', { error: migErr.message });
-    }
-
-    // Auto-recovery: If the server crashed while 'implementing', count retries.
-    // BUT: if upgrade lock is active, another process is still working — don't touch anything.
+    // 3. Auto-recovery: If the server crashed while 'implementing'
     if (isUpgradeLockActive()) {
       log.info('Upgrade lock is active — skipping stuck proposal recovery (another process is still working)');
-    }
-    const stuckProposals = isUpgradeLockActive() ? [] : db.prepare("SELECT id, description FROM upgrade_proposals WHERE status = 'implementing'").all() as { id: number; description: string }[];
-    let resetCount = 0;
-    let rejectCount = 0;
-    for (const stuck of stuckProposals) {
-      const retryMarkers = (stuck.description?.match(/\[Retry #\d+\]/g) || []).length;
-      if (retryMarkers >= 2) {
-        // Too many retries — permanently reject
-        db.prepare("UPDATE upgrade_proposals SET status = 'rejected', description = description || ? WHERE id = ?")
-          .run(`\n\n[Auto-Rejected]: Stuck in 'implementing' after ${retryMarkers + 1} attempts. Likely un-implementable.`, stuck.id);
-        rejectCount++;
-      } else {
-        // Allow retry but mark it
-        db.prepare("UPDATE upgrade_proposals SET status = 'approved', description = description || ? WHERE id = ?")
-          .run(`\n[Retry #${retryMarkers + 1}]: Reset from 'implementing' after server restart.`, stuck.id);
-        resetCount++;
+    } else {
+      const stuckProposals = db.prepare("SELECT id, description FROM upgrade_proposals WHERE status = 'implementing'").all() as { id: number; description: string }[];
+      let resetCount = 0;
+      let rejectCount = 0;
+      for (const stuck of stuckProposals) {
+        const retryMarkers = (stuck.description?.match(/\[Retry #\d+\]/g) || []).length;
+        if (retryMarkers >= 2) {
+          db.prepare("UPDATE upgrade_proposals SET status = 'rejected', description = description || ? WHERE id = ?")
+            .run(`\n\n[Auto-Rejected]: Stuck in 'implementing' after ${retryMarkers + 1} attempts. Likely un-implementable.`, stuck.id);
+          rejectCount++;
+        } else {
+          db.prepare("UPDATE upgrade_proposals SET status = 'approved', description = description || ? WHERE id = ?")
+            .run(`\n[Retry #${retryMarkers + 1}]: Reset from 'implementing' after server restart.`, stuck.id);
+          resetCount++;
+        }
       }
+      if (resetCount > 0) log.info(`Recovered ${resetCount} stuck proposals from 'implementing' back to 'approved'`);
+      if (rejectCount > 0) log.warn(`Auto-rejected ${rejectCount} proposals that were stuck in 'implementing' after 3+ attempts`);
     }
-    if (resetCount > 0) log.info(`Recovered ${resetCount} stuck proposals from 'implementing' back to 'approved'`);
-    if (rejectCount > 0) log.warn(`Auto-rejected ${rejectCount} proposals that were stuck in 'implementing' after 3+ attempts`);
 
-    log.info('Upgrade tables ensured');
+    log.info('Upgrade tables ensured and recovery check complete');
   } catch (err: any) {
-    log.error('Failed to create upgrade tables', { error: err.message });
+    log.error('Failed to ensure upgrade table or recover stuck proposals', { error: err.message });
   }
 }
 
@@ -991,6 +984,219 @@ ${content}`;
   return llmFindings;
 }
 
+// ── Second Brain: Map Protected Core Files (read-only architecture) ──
+
+/**
+ * Protected Core Files are invisible to the scanner (no proposals created),
+ * but their architecture MUST be in Second Brain so the AI specialist understands
+ * what they export and depend on when editing files that import from them.
+ *
+ * Uses lightweight static analysis (no LLM calls) — parses import/export lines directly.
+ */
+async function mapProtectedCoresToSecondBrain(rootDir: string): Promise<void> {
+  const PROTECTED_CORE_FILES = new Set([
+    'index.ts', 'config.ts', 'configValidator.ts',
+    'database/db.ts', 'evolution/selfUpgrade.ts', 'evolution/selfReflection.ts',
+    'terminal/terminalGateway.ts', 'api/socketHandlers.ts', 'api/upgradeRoutes.ts',
+    'automation/chatBot.ts', 'automation/browser.ts',
+    'bot_agents/tools/index.ts', 'bot_agents/agent.ts',
+  ]);
+
+  let mapped = 0;
+  for (const relPath of PROTECTED_CORE_FILES) {
+    try {
+      const fullPath = path.join(rootDir, relPath);
+      if (!fs.existsSync(fullPath)) continue;
+      const content = fs.readFileSync(fullPath, 'utf-8');
+      const lines = content.split('\n');
+
+      // Extract exports via regex
+      const exports: string[] = [];
+      for (const line of lines) {
+        // export function foo / export async function foo
+        const fnMatch = line.match(/export\s+(?:async\s+)?function\s+(\w+)/);
+        if (fnMatch) { exports.push(fnMatch[1]); continue; }
+        // export class Foo
+        const clsMatch = line.match(/export\s+class\s+(\w+)/);
+        if (clsMatch) { exports.push(clsMatch[1]); continue; }
+        // export const/let/var foo
+        const varMatch = line.match(/export\s+(?:const|let|var)\s+(\w+)/);
+        if (varMatch) { exports.push(varMatch[1]); continue; }
+        // export interface/type Foo
+        const typeMatch = line.match(/export\s+(?:interface|type)\s+(\w+)/);
+        if (typeMatch) { exports.push(typeMatch[1]); continue; }
+        // export { a, b, c }
+        const reExportMatch = line.match(/export\s+\{([^}]+)\}/);
+        if (reExportMatch) {
+          const names = reExportMatch[1].split(',').map(s => s.trim().split(/\s+as\s+/).pop()?.trim()).filter(Boolean);
+          exports.push(...(names as string[]));
+        }
+        // export default
+        if (/export\s+default\s/.test(line)) exports.push('default');
+      }
+
+      // Extract dependencies via regex
+      const deps: string[] = [];
+      for (const line of lines) {
+        const importMatch = line.match(/from\s+['"]([^'"]+)['"]/);
+        if (importMatch) deps.push(importMatch[1]);
+        // require('...')
+        const reqMatch = line.match(/require\s*\(\s*['"]([^'"]+)['"]\s*\)/);
+        if (reqMatch && !deps.includes(reqMatch[1])) deps.push(reqMatch[1]);
+      }
+
+      // Generate summary from first few meaningful lines
+      const commentLines = lines.filter(l => l.trim().startsWith('//') || l.trim().startsWith('*'));
+      let summary = `[Protected Core] ${relPath} — exports ${exports.length} symbols`;
+      if (commentLines.length > 0) {
+        const firstComment = commentLines.slice(0, 3).map(l => l.replace(/^[\s/*]+/, '').trim()).join(' ').substring(0, 200);
+        if (firstComment.length > 10) summary += `. ${firstComment}`;
+      }
+
+      upsertCodebaseNode(relPath, summary, exports, deps);
+      mapped++;
+    } catch { /* skip unreadable */ }
+  }
+  if (mapped > 0) log.info(`🧠 Second Brain: mapped ${mapped} protected core files (read-only architecture)`);
+}
+
+// ── Second Brain: Dependency Graph Builder ──
+
+/**
+ * Build explicit dependency edges from all known codebase_map entries.
+ * Parses each file's dependencies_json and resolves relative import paths
+ * to create directed edges: source --imports(symbols)--> target.
+ *
+ * This creates a traversable graph that enables:
+ * - Multi-hop impact analysis ("if I change db.ts, what breaks 3 levels deep?")
+ * - Accurate upstream context ("what modules does this file depend on?")
+ * - Risk scoring based on dependency fan-out/fan-in
+ */
+async function buildDependencyGraph(rootDir: string): Promise<number> {
+  let edgeCount = 0;
+  try {
+    const { getCodebaseContextMap, upsertCodebaseEdge, clearCodebaseEdgesForFile } = await import('../database/db.js');
+    const allNodes = getCodebaseContextMap();
+    const nodeMap = new Map(allNodes.map(n => [n.file_path, n]));
+
+    // Also build a lookup by possible import paths (without extension, with .js/.ts variants)
+    const pathLookup = new Map<string, string>();
+    for (const node of allNodes) {
+      pathLookup.set(node.file_path, node.file_path);
+      // Map common import variants: 'database/db.js' → 'database/db.ts'
+      pathLookup.set(node.file_path.replace(/\.ts$/, '.js'), node.file_path);
+      pathLookup.set(node.file_path.replace(/\.tsx$/, '.jsx'), node.file_path);
+      // Without extension
+      pathLookup.set(node.file_path.replace(/\.\w+$/, ''), node.file_path);
+    }
+
+    for (const node of allNodes) {
+      try {
+        const deps: string[] = JSON.parse(node.dependencies_json || '[]');
+        if (deps.length === 0) continue;
+
+        // Clear old edges for this source before rebuilding
+        clearCodebaseEdgesForFile(node.file_path);
+
+        for (const dep of deps) {
+          // Skip external packages (no relative path)
+          if (!dep.startsWith('.') && !dep.startsWith('/')) continue;
+
+          // Resolve relative path
+          const resolved = path.posix.normalize(
+            path.posix.join(path.posix.dirname(node.file_path), dep)
+          );
+
+          // Try to find the target file in our codebase map
+          const targetPath = pathLookup.get(resolved)
+            || pathLookup.get(resolved.replace(/\.js$/, '.ts'))
+            || pathLookup.get(resolved.replace(/\.jsx$/, '.tsx'))
+            || pathLookup.get(resolved.replace(/\.\w+$/, ''));
+
+          if (targetPath && nodeMap.has(targetPath)) {
+            // Parse what specific symbols are imported
+            // We don't have exact import info in deps, but we know what the target exports
+            const targetNode = nodeMap.get(targetPath)!;
+            let targetExports: string[] = [];
+            try { targetExports = JSON.parse(targetNode.exports_json || '[]'); } catch {}
+
+            // Weight = number of exported symbols (higher = more important dependency)
+            const weight = Math.min(targetExports.length / 10, 1.0) + 0.1;
+
+            upsertCodebaseEdge(node.file_path, targetPath, 'imports', targetExports.slice(0, 20), weight);
+            edgeCount++;
+          }
+        }
+      } catch { /* skip individual file errors */ }
+    }
+
+    log.info(`🧠 Second Brain Graph: built ${edgeCount} dependency edges from ${allNodes.length} files`);
+  } catch (err: any) {
+    log.warn(`[SecondBrain] Graph build error: ${err.message}`);
+  }
+  return edgeCount;
+}
+
+// ── Second Brain: Code Embeddings (Semantic Fingerprints) ──
+
+/**
+ * Generate embeddings for file summaries that don't have one yet.
+ * Uses the existing VectorStore's embedding infrastructure.
+ * Enables "find similar files" for deduplication and pattern detection.
+ */
+async function updateCodeEmbeddings(rootDir: string): Promise<number> {
+  let indexed = 0;
+  try {
+    const { getCodebaseContextMap, upsertCodebaseEmbedding } = await import('../database/db.js');
+    const allNodes = getCodebaseContextMap();
+
+    // Check which files already have embeddings
+    const db = getDb();
+    const existingPaths = new Set(
+      (db.prepare('SELECT file_path FROM codebase_embeddings').all() as { file_path: string }[])
+        .map(r => r.file_path)
+    );
+
+    // Find files that need embeddings
+    const needsEmbedding = allNodes.filter(n =>
+      n.summary && n.summary.length > 20 && !existingPaths.has(n.file_path)
+    );
+
+    if (needsEmbedding.length === 0) return 0;
+
+    // Batch embed: max 10 per cycle to avoid rate limits
+    const batch = needsEmbedding.slice(0, 10);
+
+    try {
+      const { embedText } = await import('../memory/embeddingProvider.js');
+      if (!embedText) return 0;
+
+      for (const node of batch) {
+        try {
+          // Create a rich text representation for embedding
+          let exportsStr = '';
+          try { exportsStr = JSON.parse(node.exports_json || '[]').join(', '); } catch {}
+          const text = `File: ${node.file_path}\nPurpose: ${node.summary}\nExports: ${exportsStr}`;
+
+          const embedding = await embedText(text);
+          if (embedding && embedding.length > 0) {
+            upsertCodebaseEmbedding(node.file_path, embedding, 'embedding_provider');
+            indexed++;
+          }
+        } catch { /* skip individual failures */ }
+      }
+    } catch {
+      // Embedding provider not available — skip embedding generation
+      return 0;
+    }
+
+    if (indexed > 0) log.info(`🧠 Second Brain Embeddings: indexed ${indexed} new file summaries`);
+  } catch (err: any) {
+    log.warn(`[SecondBrain] Embedding update error: ${err.message}`);
+  }
+  return indexed;
+}
+
 // ── Auto Implementation Helpers ──
 
 /** Helper to save file diffs for history */
@@ -1077,13 +1283,11 @@ function quickStructuralCheck(filePath: string): { ok: boolean; errors: string[]
     const content = fs.readFileSync(filePath, 'utf-8');
     const basename = path.basename(filePath);
 
-    // 1. Bracket balance check
+    // 🕵️ Pre-flight Syntax Validation Logic
     let braces = 0, parens = 0, brackets = 0;
-    let inString = false;
-    let stringChar = '';
-    let inTemplate = 0;
-    let inLineComment = false;
-    let inBlockComment = false;
+    let inString = false, stringChar = '', isEscaped = false;
+    let inTemplate = false;
+    let inLineComment = false, inBlockComment = false;
 
     for (let i = 0; i < content.length; i++) {
       const c = content[i];
@@ -1091,20 +1295,25 @@ function quickStructuralCheck(filePath: string): { ok: boolean; errors: string[]
 
       if (inLineComment) { if (c === '\n') inLineComment = false; continue; }
       if (inBlockComment) { if (c === '*' && next === '/') { inBlockComment = false; i++; } continue; }
+      
       if (inString) {
-        if (c === '\\') { i++; continue; }
+        if (isEscaped) { isEscaped = false; continue; }
+        if (c === '\\') { isEscaped = true; continue; }
         if (c === stringChar) inString = false;
         continue;
       }
-      if (inTemplate > 0) {
-        if (c === '\\') { i++; continue; }
-        if (c === '`') inTemplate = 0;
+      
+      if (inTemplate) {
+        if (isEscaped) { isEscaped = false; continue; }
+        if (c === '\\') { isEscaped = true; continue; }
+        if (c === '`') inTemplate = false;
         continue;
       }
-      if (c === '/' && next === '/') { inLineComment = true; continue; }
+
+      if (c === '/' && next === '/') { inLineComment = true; i++; continue; }
       if (c === '/' && next === '*') { inBlockComment = true; i++; continue; }
       if (c === '"' || c === "'") { inString = true; stringChar = c; continue; }
-      if (c === '`') { inTemplate = 1; continue; }
+      if (c === '`') { inTemplate = true; continue; }
 
       if (c === '{') braces++;
       else if (c === '}') braces--;
@@ -1114,8 +1323,11 @@ function quickStructuralCheck(filePath: string): { ok: boolean; errors: string[]
       else if (c === ']') brackets--;
     }
 
+    if (inString) errors.push(`${basename}: Unterminated string literal (${stringChar})`);
+    if (inTemplate) errors.push(`${basename}: Unterminated template literal (\`)`);
     if (braces !== 0) errors.push(`${basename}: Unbalanced braces — ${braces > 0 ? `${braces} unclosed {` : `${-braces} extra }`}`);
     if (parens !== 0) errors.push(`${basename}: Unbalanced parentheses — ${parens > 0 ? `${parens} unclosed (` : `${-parens} extra )`}`);
+    if (brackets !== 0) errors.push(`${basename}: Unbalanced square brackets — ${brackets > 0 ? `${brackets} unclosed [` : `${-brackets} extra ]`}`);
 
     // 2. Duplicate top-level declarations
     const lines = content.split('\n');
@@ -1150,14 +1362,41 @@ async function verifyEsbuildSyntax(modifiedFiles: string[], proposalId: number):
       const ext = path.extname(filePath).toLowerCase();
       const loader = ext === '.tsx' ? 'tsx' : ext === '.jsx' ? 'jsx' : 'ts';
       const basename = path.basename(filePath);
-      // Pass content via base64 to avoid path escaping issues on Windows
+      // Use a temp script file + stdin pipe to avoid ENAMETOOLONG on large files.
+      // Previous approach embedded base64 in `node -e "..."` which exceeded OS command line limits
+      // for files > ~50KB (e.g. adminTools.ts, socketHandlers.ts).
       const content = fs.readFileSync(filePath, 'utf-8');
-      const b64 = Buffer.from(content).toString('base64');
-      const script = `const esbuild=require('esbuild');const code=Buffer.from('${b64}','base64').toString('utf-8');esbuild.transform(code,{loader:'${loader}',sourcefile:'${basename}'}).then(()=>process.exit(0)).catch(e=>{console.error(e.errors?e.errors.map(x=>x.text).join('\\n'):e.message);process.exit(1)})`;
-      await execPromise(`node -e "${script.replace(/"/g, '\\"')}"`, {
-        cwd: path.resolve(filePath, '..'),
-        timeout: 15000,
-      });
+      const scriptFile = path.resolve(filePath, '..', `__esbuild_check_${proposalId}.cjs`);
+      const script = `const esbuild=require('esbuild');
+let chunks=[];
+process.stdin.on('data',c=>chunks.push(c));
+process.stdin.on('end',()=>{
+  const code=Buffer.concat(chunks).toString('utf-8');
+  esbuild.transform(code,{loader:'${loader}',sourcefile:'${basename}'})
+    .then(()=>process.exit(0))
+    .catch(e=>{console.error(e.errors?e.errors.map(x=>x.text).join('\\n'):e.message);process.exit(1)});
+});`;
+      fs.writeFileSync(scriptFile, script, 'utf-8');
+      try {
+        const { execFile } = await import('child_process');
+        const { promisify } = await import('util');
+        const execFileAsync = promisify(execFile);
+        // Pipe file content via stdin to avoid command line length limits
+        await new Promise<void>((resolve, reject) => {
+          const child = execFile('node', [scriptFile], {
+            cwd: path.resolve(filePath, '..'),
+            timeout: 15000,
+            maxBuffer: 10 * 1024 * 1024,
+          }, (err, stdout, stderr) => {
+            if (err) reject({ stderr: stderr || stdout || err.message, message: stderr || stdout || err.message });
+            else resolve();
+          });
+          child.stdin?.write(content);
+          child.stdin?.end();
+        });
+      } finally {
+        try { fs.unlinkSync(scriptFile); } catch { /* cleanup best effort */ }
+      }
     } catch (err: any) {
       const msg = (err.stderr || err.stdout || err.message || 'Unknown esbuild error').toString().trim();
       errors.push(`${path.basename(filePath)}: ${msg.substring(0, 300)}`);
@@ -1679,27 +1918,161 @@ export async function implementProposalById(id: number, rootDir: string): Promis
     phaseLog('📚 Learning Feedback', 'no relevant lessons found');
   }
 
-  // ── Phase 7.5: Assemble Second Brain Context ──
-  phaseLog('🧠 Second Brain', 'extracting architecture blueprints...');
+  // ── Phase 7.5: Assemble Second Brain Context (Graph-Enhanced) ──
+  // Uses the dependency graph + node architecture + semantic search to give AI
+  // maximum understanding of the codebase before making changes.
+  //
+  // Sources:
+  //  1. Target file node (summary, exports, deps)
+  //  2. Graph: upstream dependencies (files the target imports FROM)
+  //  3. Graph: downstream dependents (files that import FROM the target) — multi-hop
+  //  4. Semantic: similar files (code that does similar things — for pattern reference)
+  phaseLog('🧠 Second Brain', 'assembling graph-enhanced context...');
   let codebaseContext = '';
   try {
-    const { getCodebaseContextMap } = await import('../database/db.js');
+    const {
+      getCodebaseContextMap, getFileNeighborhood, getImpactRadius, searchSimilarFiles
+    } = await import('../database/db.js');
     const allNodes = getCodebaseContextMap();
-    const relevantPaths = new Set([relativePath, ...impact.affectedFiles]);
+    const nodeMap = new Map(allNodes.map(n => [n.file_path, n]));
+
+    // ── Layer 1: Graph-based neighborhood ──
+    const neighborhood = getFileNeighborhood(relativePath);
+    const upstreamPaths = new Set(neighborhood.upstream.map(e => e.target_file));
+    const downstreamPaths = new Set(neighborhood.downstream.map(e => e.source_file));
+
+    // ── Layer 2: Multi-hop impact radius (2 hops) ──
+    const impactMap = getImpactRadius(relativePath, 2);
+    const hop2Paths = new Set<string>();
+    for (const [hop, edges] of impactMap) {
+      for (const e of edges) hop2Paths.add(e.source_file);
+    }
+
+    // ── Layer 3: Semantic search for similar files ──
+    let semanticPaths = new Set<string>();
+    try {
+      const db = getDb();
+      const targetEmb = db.prepare('SELECT embedding FROM codebase_embeddings WHERE file_path = ?').get(relativePath) as { embedding: Buffer } | undefined;
+      if (targetEmb?.embedding) {
+        const vec = Array.from(new Float32Array(
+          targetEmb.embedding.buffer, targetEmb.embedding.byteOffset, targetEmb.embedding.byteLength / 4
+        ));
+        const similar = searchSimilarFiles(vec, 3);
+        semanticPaths = new Set(similar.filter(s => s.file_path !== relativePath).map(s => s.file_path));
+      }
+    } catch { /* semantic search not available yet */ }
+
+    // Combine all relevant paths (deduplicated)
+    const relevantPaths = new Set([
+      relativePath,
+      ...impact.affectedFiles,
+      ...upstreamPaths,
+      ...downstreamPaths,
+      ...hop2Paths,
+    ]);
+
+    // Fallback: if graph is empty, parse imports from file content directly
+    if (upstreamPaths.size === 0) {
+      try {
+        const importLines = originalContent.split('\n').filter(l => /^\s*import\s/.test(l));
+        for (const line of importLines) {
+          const m = line.match(/from\s+['"]([^'"]+)['"]/);
+          if (m && m[1].startsWith('.')) {
+            const resolved = path.posix.normalize(path.posix.join(path.posix.dirname(relativePath), m[1]))
+              .replace(/\.js$/, '.ts').replace(/\.jsx$/, '.tsx');
+            if (nodeMap.has(resolved)) {
+              relevantPaths.add(resolved);
+              upstreamPaths.add(resolved);
+            }
+          }
+        }
+      } catch { /* ignore */ }
+    }
+
     const relevantNodes = allNodes.filter(n => relevantPaths.has(n.file_path));
-    
+
     if (relevantNodes.length > 0) {
-      codebaseContext = `\n[🧠 CODEBASE ARCHITECTURE MAP]\n`;
-      relevantNodes.forEach(node => {
-        let exportsList = '[]', depsList = '[]';
+      codebaseContext = `\n[🧠 CODEBASE ARCHITECTURE MAP — Graph-Enhanced]\n`;
+
+      // Format each node with its role label and edge info
+      const formatNode = (node: typeof allNodes[0]) => {
+        let exportsList = '', depsList = '';
         try { exportsList = JSON.parse(node.exports_json).join(', '); } catch {}
         try { depsList = JSON.parse(node.dependencies_json).join(', '); } catch {}
-        
-        codebaseContext += `File: ${node.file_path}\n - Purpose: ${node.summary || 'N/A'}\n`;
-        if (exportsList !== '[]') codebaseContext += ` - Exports: ${exportsList}\n`;
-        if (depsList !== '[]') codebaseContext += ` - Depends On: ${depsList}\n`;
-      });
-      phaseLog('🧠 Second Brain', `injected map for ${relevantNodes.length} files`);
+
+        const isTarget = node.file_path === relativePath;
+        const isUpstream = upstreamPaths.has(node.file_path);
+        const isDownstream = downstreamPaths.has(node.file_path);
+        const isHop2 = hop2Paths.has(node.file_path) && !isDownstream;
+        const isSemantic = semanticPaths.has(node.file_path);
+        const isAffected = impact.affectedFiles.includes(node.file_path);
+
+        let label = '';
+        if (isTarget) label = '🎯 TARGET';
+        else if (isUpstream) label = '⬆️ IMPORTS FROM';
+        else if (isAffected || isDownstream) label = '⬇️ DEPENDS ON TARGET';
+        else if (isHop2) label = '⬇️⬇️ 2-HOP DEPENDENT';
+        else if (isSemantic) label = '🔗 SIMILAR PATTERN';
+        else label = '📄 RELATED';
+
+        let out = `[${label}] ${node.file_path}\n  Purpose: ${node.summary || 'N/A'}\n`;
+        if (exportsList) out += `  Exports: ${exportsList}\n`;
+
+        // Show specific imported symbols from graph edges
+        if (isUpstream) {
+          const edge = neighborhood.upstream.find(e => e.target_file === node.file_path);
+          if (edge) {
+            try {
+              const syms = JSON.parse(edge.symbols_json || '[]');
+              if (syms.length > 0) out += `  Symbols available: ${syms.join(', ')}\n`;
+            } catch {}
+          }
+        }
+
+        if (isDownstream) {
+          const edge = neighborhood.downstream.find(e => e.source_file === node.file_path);
+          if (edge) {
+            try {
+              const syms = JSON.parse(edge.symbols_json || '[]');
+              if (syms.length > 0) out += `  Uses from target: ${syms.join(', ')}\n`;
+            } catch {}
+          }
+        }
+
+        return out;
+      };
+
+      // Order: target first, then upstream, downstream, hop2, semantic
+      const target = relevantNodes.filter(n => n.file_path === relativePath);
+      const upstream = relevantNodes.filter(n => upstreamPaths.has(n.file_path));
+      const downstream = relevantNodes.filter(n =>
+        (downstreamPaths.has(n.file_path) || impact.affectedFiles.includes(n.file_path)) && n.file_path !== relativePath
+      );
+      const hop2 = relevantNodes.filter(n => hop2Paths.has(n.file_path) && !downstreamPaths.has(n.file_path));
+      const semantic = allNodes.filter(n => semanticPaths.has(n.file_path) && !relevantPaths.has(n.file_path));
+
+      for (const n of target) codebaseContext += formatNode(n);
+      if (upstream.length > 0) {
+        codebaseContext += `\n── Upstream Dependencies (${upstream.length} files this target imports from) ──\n`;
+        for (const n of upstream) codebaseContext += formatNode(n);
+      }
+      if (downstream.length > 0) {
+        codebaseContext += `\n── Downstream Dependents (${downstream.length} files that will break if exports change) ──\n`;
+        for (const n of downstream.slice(0, 8)) codebaseContext += formatNode(n);
+        if (downstream.length > 8) codebaseContext += `  ... and ${downstream.length - 8} more files\n`;
+      }
+      if (hop2.length > 0) {
+        codebaseContext += `\n── 2-Hop Impact Zone (${hop2.length} files indirectly affected) ──\n`;
+        for (const n of hop2.slice(0, 5)) codebaseContext += formatNode(n);
+        if (hop2.length > 5) codebaseContext += `  ... and ${hop2.length - 5} more files\n`;
+      }
+      if (semantic.length > 0) {
+        codebaseContext += `\n── Semantically Similar Files (reference patterns) ──\n`;
+        for (const n of semantic.slice(0, 3)) codebaseContext += formatNode(n);
+      }
+
+      const totalContext = upstream.length + downstream.length + hop2.length + semantic.length;
+      phaseLog('🧠 Second Brain', `graph context: ${upstream.length} upstream, ${downstream.length} downstream, ${hop2.length} hop-2, ${semantic.length} semantic (${relevantNodes.length} total nodes)`);
     } else {
       phaseLog('🧠 Second Brain', `no architectural map available yet`);
     }
@@ -1950,6 +2323,14 @@ ${originalContent}
           if (isTargetFile) {
             modifiedFiles.add(resolvedWritten);
             log.info(`[SelfUpgrade] Intercepted file write: ${path.relative(rootDir, writtenPath)} (${modifiedFiles.size}/${allTargetFiles.length})`);
+            
+            // Mark as implemented EARLY — prevents infinite loops in 'tsx watch' environments
+            // where the server restarts as soon as the first file is saved.
+            try {
+              updateProposalStatus(id, 'implemented');
+            } catch (statusErr: any) {
+              log.error(`[SelfUpgrade] Failed to mark proposal #${id} as implemented early: ${statusErr.message}`);
+            }
           }
         };
 
@@ -2031,6 +2412,13 @@ ${originalContent}
               fs.writeFileSync(fullPath, longestBlock, 'utf-8');
               saveUpgradeDiff(id, originalContent, longestBlock);
               primaryModified = true;
+              
+              // Mark as implemented EARLY (extraction fallback)
+              try {
+                updateProposalStatus(id, 'implemented');
+              } catch (statusErr: any) {
+                log.error(`[SelfUpgrade] Failed to mark proposal #${id} as implemented early (extraction): ${statusErr.message}`);
+              }
             }
           }
 
@@ -2144,19 +2532,8 @@ ${originalContent}
             throw new Error(`Runtime boot test failed (${totalModified} file(s) rolled back): ${errMsg.substring(0, 300)}`);
           }
 
-          // Mark as implemented — wrap in try/catch to prevent stuck 'implementing' on DB errors.
-          // At this point, files are already modified and boot-tested, so we must NOT rollback.
-          try {
-            updateProposalStatus(id, 'implemented');
-          } catch (statusErr: any) {
-            log.error(`[SelfUpgrade] CRITICAL: Failed to mark proposal #${id} as implemented (files already modified): ${statusErr.message}`);
-            // Retry once with direct SQL
-            try {
-              db.prepare(`UPDATE upgrade_proposals SET status = 'implemented', reviewed_at = datetime('now') WHERE id = ?`).run(id);
-            } catch {
-              log.error(`[SelfUpgrade] CRITICAL: Proposal #${id} stuck as 'implementing' — files were modified successfully. Will be caught by stuck-recovery on restart.`);
-            }
-          }
+          // ── TSC Verification ──
+          phaseLog('🔨 TSC Check', 'running TypeScript compiler...');
           invalidateBaselineCache(); // Reset TSC baseline after successful edit
 
           // Record successful implementation as positive learning (non-critical, ignore errors)
@@ -2408,6 +2785,15 @@ async function runUpgradeCycle(rootDir: string, forceStart: boolean = false): Pr
     log.info(`Self-upgrade cycle starting (idle ${Math.round((Date.now() - lastUserActivity) / 60000)}min)${DRY_RUN ? ' [DRY RUN]' : ''}`);
     addLog('evolution', 'Self-Upgrade', 'เริ่มรอบสแกนอัตโนมัติ', 'info');
 
+    // Pre-scan: Ensure Protected Core Files are in Second Brain (read-only architecture).
+    // These files are not scanned for proposals but their exports/deps MUST be known
+    // so the AI specialist can understand cross-file dependencies when implementing fixes.
+    try { await mapProtectedCoresToSecondBrain(rootDir); } catch { /* non-critical */ }
+
+    // Build Dependency Graph + update embeddings (non-critical, runs after nodes are populated)
+    try { await buildDependencyGraph(rootDir); } catch { /* non-critical */ }
+    try { await updateCodeEmbeddings(rootDir); } catch { /* non-critical */ }
+
     // Queue Zero First: Auto-implement approved or pending proposals
     // Native Bypass: If user is running a Manual Continuous Scan, they
     // normally start with `_paused=true` so Auto-Implement is skipped.
@@ -2586,15 +2972,17 @@ export function getUpgradeStatus(): {
   scanProgress: { cursor: number; total: number; percent: number };
   dryRun: boolean;
   isContinuousActive: boolean;
+  isManualScanActive: boolean;
 } {
   const idleMs = getOsIdleTimeMs();
   const total = _fileIndex.length || 1;
   return {
     running: !!upgradeInterval || !!_continuousScanTimeout,
     isContinuousActive: !!_continuousScanTimeout,
+    isManualScanActive: _isManualScanActive,
     paused: _paused,
-    isIdle: _isManualScanActive ? false : isSystemIdle(), // Manual scan doesn't count as "Idle" system
-    idleMinutes: _isManualScanActive ? 0 : Math.round(idleMs / 60000), // Stop showing huge/fake idle times during manual scan
+    isIdle: _isManualScanActive ? false : isSystemIdle(),
+    idleMinutes: _isManualScanActive ? 0 : Math.round(idleMs / 60000),
     idleThresholdMinutes: Math.round(IDLE_THRESHOLD_MS / 60000),
     checkIntervalMs: CHECK_INTERVAL_MS,
     scanProgress: {

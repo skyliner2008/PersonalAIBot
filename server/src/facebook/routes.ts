@@ -76,8 +76,8 @@ function verifyFacebookSignature(req: any): boolean {
   try {
     // Parse signature: sha1=...
     const [algorithm, providedHash] = xHubSignature.split('=');
-    if (algorithm !== 'sha1') {
-      console.warn('[Webhook] Unexpected signature algorithm:', algorithm);
+    if (algorithm !== 'sha1' || !providedHash) {
+      console.warn('[Webhook] Unexpected signature algorithm or format:', xHubSignature);
       return false;
     }
 
@@ -116,7 +116,7 @@ fbRouter.post('/webhook', (req, res) => {
 
   const body = req.body;
 
-  if (body.object !== 'page') {
+  if (!body || body.object !== 'page') {
     return res.sendStatus(404);
   }
 

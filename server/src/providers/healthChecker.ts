@@ -136,7 +136,11 @@ export async function checkProviderHealth(provider: ProviderDefinition): Promise
     // Auto-disable after consecutive failures
     if (shouldDisable && provider.enabled) {
       log.warn(`Auto-disabling provider after ${failures} failures`, { providerId: provider.id, error: err.message });
-      toggleProvider(provider.id, false);
+      try {
+        toggleProvider(provider.id, false);
+      } catch (toggleErr) {
+        log.error('Failed to toggle provider status', { providerId: provider.id, error: String(toggleErr) });
+      }
       addLog('system', 'Provider auto-disabled', `${provider.name}: ${failures} consecutive failures — ${err.message}`, 'warning');
       broadcast('provider:disabled', { providerId: provider.id, reason: err.message, failures });
     }

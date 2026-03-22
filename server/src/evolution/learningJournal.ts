@@ -51,12 +51,16 @@ export function addLearning(
             `INSERT INTO learning_journal (category, insight, source, confidence) VALUES (?, ?, ?, ?)`
         ).run(category, insight, source, confidence);
 
-        const newId = (result as any).lastInsertRowid || Date.now();
+        const newId = (result as any).lastInsertRowid;
+        if (newId === undefined || newId === null) {
+            log.error('Failed to get lastInsertRowid after adding learning. Skipping vector store indexing.', { category, insight: insight.substring(0, 80) });
+            return;
+        }
         log.info('New learning recorded', { category, insight: insight.substring(0, 80) });
 
         // Index in vector store asynchronously (non-blocking)
         setImmediate(() => {
-            indexLearningInVectorStore(newId, insight).catch(err => {
+            indexLearningInVectorStore(Number(newId), insight).catch(err => {
                 log.warn('Async learning indexing failed', { error: String(err) });
             });
         });

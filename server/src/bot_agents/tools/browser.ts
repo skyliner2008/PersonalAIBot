@@ -9,6 +9,7 @@ const logger = createLogger('browser-tool');
 let browser: Browser | null = null;
 let context: BrowserContext | null = null;
 let page: Page | null = null;
+let getPageLock: Promise<Page> | null = null;
 
 /**
  * ฟังก์ชันจัดการเบราว์เซอร์ให้มีเพียงตัวเดียวและเสถียร

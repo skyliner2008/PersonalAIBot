@@ -204,17 +204,25 @@ export function spawnCLI(
   };
 
   const useShell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(command.trim());
-  const spawnCommand = useShell && /\s/.test(command.trim())
-    ? `"${command.trim().replace(/"/g, '\\"')}"`
-    : command;
-  const spawnArgs = useShell
-    ? args.map((arg) => {
-      const clean = String(arg ?? '');
-      if (!/[ \t"]/.test(clean)) return clean;
-      return `"${clean.replace(/"/g, '\\"')}"`;
-    })
-    : args;
-  const proc = spawn(spawnCommand, spawnArgs, {
+  let effectiveCommand = command;
+  let effectiveArgs = args;
+
+  if (useShell) {
+    // When shell: true on Windows, the command and arguments must be combined into a single string.
+    // Node.js will then execute this string via `cmd.exe /d /s /c "..."`.
+    // Arguments with spaces should be wrapped in quotes. Quotes within arguments should be escaped as "" for cmd.exe.
+    const quoteForCmd = (str: string) => {
+      const clean = String(str ?? '');
+      if (/[ \t"]/.test(clean) || clean === '') {
+        return `"${clean.replace(/"/g, '""')}"`;
+      }
+      return clean;
+    };
+    effectiveCommand = `${quoteForCmd(command)} ${args.map(quoteForCmd).join(' ')}`.trim();
+    effectiveArgs = [];
+  }
+
+  const proc = spawn(effectiveCommand, effectiveArgs, {
     cwd,
     env,
     stdio: ['pipe', 'pipe', 'pipe'],

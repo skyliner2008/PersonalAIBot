@@ -9,11 +9,11 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import { config } from './config.js';
-import { initDb, addLog, upsertConversation } from './database/db.js';
+import { initDb, addLog, upsertConversation, getCredential } from './database/db.js';
 import { ensureBotTables } from './bot_agents/registries/botRegistry.js';
 import { setupSocketHandlers, attachSocketAuth } from './api/socketHandlers.js';
 import { setSocketIO } from './utils/socketBroadcast.js';
-import { startBots, stopBots } from './bot_agents/botManager.js';
+import { startBots, stopBots, stopBotsAsync } from './bot_agents/botManager.js';
 import { Agent } from './bot_agents/agent.js';
 import { startIdleLoop } from './evolution/idleLoop.js';
 import { startSubconsciousSleepJob } from './scheduler/subconscious.js';
@@ -442,8 +442,9 @@ async function main() {
   ensureQueueTable();
   await initSelfReflection();
   
-  if (process.env.GEMINI_API_KEY) {
-    initEmbeddingProvider(process.env.GEMINI_API_KEY);
+  const geminiKey = getCredential('provider_key_gemini') || getCredential('GEMINI_API_KEY') || process.env.GEMINI_API_KEY;
+  if (geminiKey) {
+    initEmbeddingProvider(geminiKey);
   }
   
   await initUnifiedMemory();
@@ -470,7 +471,7 @@ async function main() {
     message: { error: 'Too many token requests' },
   });
   app.get('/api/auth/socket-token', socketTokenLimiter, (_req, res) => {
-    const token = process.env.SOCKET_AUTH_TOKEN;
+    const token = getCredential('SOCKET_AUTH_TOKEN') || process.env.SOCKET_AUTH_TOKEN;
     if (!token) {
       return res.json({ token: null, message: 'No auth required' });
     }
@@ -709,7 +710,7 @@ async function main() {
 
     try { shutdownTerminalGateway(); console.log('[Server] Terminal sessions closed'); } catch { /* ignore */ }
     try { stopHealthChecker(); } catch { /* ignore */ }
-    try { stopBots(); console.log('[Server] Bot agents stopped'); }
+    try { await stopBotsAsync(); console.log('[Server] Bot agents stopped'); }
     catch (err) { console.error('[Server] Error stopping bots:', err); }
 
     try {
@@ -734,6 +735,8 @@ async function main() {
 
   process.on('SIGINT', () => gracefulShutdown('SIGINT'));
   process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  process.on('SIGHUP', () => gracefulShutdown('SIGHUP'));
+  process.on('SIGUSR2', () => gracefulShutdown('SIGUSR2'));
 }
 
 main().catch(console.error);

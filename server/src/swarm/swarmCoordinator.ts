@@ -251,8 +251,12 @@ export class SwarmCoordinator {
 
     if (options?.onComplete || options?.onFail) {
       this.taskQueue.onTaskDone(taskId, async (task) => {
-        if (task.status === 'completed' && options.onComplete) await options.onComplete(task);
-        if (task.status === 'failed' && options.onFail) await options.onFail(task);
+        try {
+          if (task.status === 'completed' && options.onComplete) await options.onComplete(task);
+          if (task.status === 'failed' && options.onFail) await options.onFail(task);
+        } catch (err) {
+          console.error(`[SwarmCoordinator] Error in onTaskDone callback for task ${taskId}:`, err);
+        }
       });
     }
 
@@ -296,12 +300,16 @@ export class SwarmCoordinator {
     if (options?.onChainComplete && taskIds.length > 0) {
       const lastId = taskIds[taskIds.length - 1];
       this.taskQueue.onTaskDone(lastId, async () => {
-        const results: SwarmTask[] = [];
-        for (const id of taskIds) {
-          const task = await this.taskQueue.getStatus(id);
-          if (task) results.push(task);
+        try {
+          const results: SwarmTask[] = [];
+          for (const id of taskIds) {
+            const task = await this.taskQueue.getStatus(id);
+            if (task) results.push(task);
+          }
+          await options.onChainComplete!(results);
+        } catch (err) {
+          console.error(`[SwarmCoordinator] Error in onChainComplete callback for chain ending with task ${lastId}:`, err);
         }
-        await options.onChainComplete!(results);
       });
     }
 
@@ -1762,74 +1770,78 @@ export class SwarmCoordinator {
   }
 
   private async handleTaskLifecycleUpdate(task: SwarmTask): Promise<void> {
-    const batchId = this.stateStore.getBatchIdForTask(task.id);
-    if (!batchId) return;
+    try {
+      const batchId = this.stateStore.getBatchIdForTask(task.id);
+      if (!batchId) return;
 
-    const batch = this.stateStore.getBatch(batchId);
-    if (!batch) return;
+      const batch = this.stateStore.getBatch(batchId);
+      if (!batch) return;
 
-    const assignment = batch.assignments.find((item) => item.taskId === task.id);
-    if (!assignment) return;
+      const assignment = batch.assignments.find((item) => item.taskId === task.id);
+      if (!assignment) return;
 
-    if (task.toSpecialist) {
-      assignment.specialist = task.toSpecialist;
-      assignment.specialistHistory = Array.from(new Set([...(assignment.specialistHistory || []), task.toSpecialist]));
-    }
-    if (typeof task.metadata?.batchStage === 'string') {
-      assignment.batchStage = task.metadata.batchStage;
-    }
-    if (typeof task.metadata?.workIntent === 'string') {
-      assignment.workIntent = task.metadata.workIntent;
-    }
-    if (typeof task.metadata?.supervisorAction === 'string') {
-      assignment.supervisorAction = task.metadata.supervisorAction as SwarmBatchAssignment['supervisorAction'];
-    }
-    if (typeof task.metadata?.sourceTaskId === 'string') {
-      assignment.sourceTaskId = task.metadata.sourceTaskId;
-    }
-    assignment.status = task.status;
-    assignment.result = task.result;
-    assignment.error = task.error;
-    const synthesisAssignment = batch.assignments.find((item) => item.batchStage === 'synthesis');
-
-    if (assignment.batchStage === 'synthesis' && typeof task.result === 'string' && task.result.trim()) {
-      batch.summary = this.sanitizeAssignmentOutput(task.result);
-    }
-    if (SWARM_LOCAL_SYNTHESIS && synthesisAssignment && synthesisAssignment.status === 'completed') {
-      const refreshedSummary = this.batchManager.buildLocalSynthesisForBatch(
-        batch,
-        (output) => this.sanitizeAssignmentOutput(output),
-        (output) => this.batchManager.extractLaneHighlights(output, (o) => this.sanitizeAssignmentOutput(o)),
-      );
-      batch.summary = refreshedSummary;
-      synthesisAssignment.result = refreshedSummary;
-    }
-
-    if (!batch.startedAt && (task.status === 'processing' || task.status === 'completed' || task.status === 'failed')) {
-      batch.startedAt = new Date().toISOString();
-    }
-
-    await this.maybeRunSupervisorLoop(batch.id);
-    this.batchManager.recomputeBatchProgress(batch);
-    await this.emitBatchUpdate(batch);
-
-    const doneCount = batch.progress.completed + batch.progress.failed;
-    const allDone = doneCount >= batch.progress.total;
-    if (allDone && !batch.completedAt) {
-      batch.completedAt = new Date().toISOString();
-      batch.status = batch.progress.failed === 0
-        ? 'completed'
-        : batch.progress.completed === 0
-          ? 'failed'
-          : 'partial';
-      if (!batch.summary?.trim()) {
-        batch.summary = this.batchManager.buildBatchSummary(batch, (output) => this.sanitizeAssignmentOutput(output));
+      if (task.toSpecialist) {
+        assignment.specialist = task.toSpecialist;
+        assignment.specialistHistory = Array.from(new Set([...(assignment.specialistHistory || []), task.toSpecialist]));
       }
-      await this.emitBatchComplete(batch);
-      // Save batch results to archival memory for future recall
-      this.saveBatchToArchival(batch).catch((err) =>
-        console.error('[SwarmCoordinator] Failed to save batch to archival:', err),
-      );
+      if (typeof task.metadata?.batchStage === 'string') {
+        assignment.batchStage = task.metadata.batchStage;
+      }
+      if (typeof task.metadata?.workIntent === 'string') {
+        assignment.workIntent = task.metadata.workIntent;
+      }
+      if (typeof task.metadata?.supervisorAction === 'string') {
+        assignment.supervisorAction = task.metadata.supervisorAction as SwarmBatchAssignment['supervisorAction'];
+      }
+      if (typeof task.metadata?.sourceTaskId === 'string') {
+        assignment.sourceTaskId = task.metadata.sourceTaskId;
+      }
+      assignment.status = task.status;
+      assignment.result = task.result;
+      assignment.error = task.error;
+      const synthesisAssignment = batch.assignments.find((item) => item.batchStage === 'synthesis');
+
+      if (assignment.batchStage === 'synthesis' && typeof task.result === 'string' && task.result.trim()) {
+        batch.summary = this.sanitizeAssignmentOutput(task.result);
+      }
+      if (SWARM_LOCAL_SYNTHESIS && synthesisAssignment && synthesisAssignment.status === 'completed') {
+        const refreshedSummary = this.batchManager.buildLocalSynthesisForBatch(
+          batch,
+          (output) => this.sanitizeAssignmentOutput(output),
+          (output) => this.batchManager.extractLaneHighlights(output, (o) => this.sanitizeAssignmentOutput(o)),
+        );
+        batch.summary = refreshedSummary;
+        synthesisAssignment.result = refreshedSummary;
+      }
+
+      if (!batch.startedAt && (task.status === 'processing' || task.status === 'completed' || task.status === 'failed')) {
+        batch.startedAt = new Date().toISOString();
+      }
+
+      await this.maybeRunSupervisorLoop(batch.id);
+      this.batchManager.recomputeBatchProgress(batch);
+      await this.emitBatchUpdate(batch);
+
+      const doneCount = batch.progress.completed + batch.progress.failed;
+      const allDone = doneCount >= batch.progress.total;
+      if (allDone && !batch.completedAt) {
+        batch.completedAt = new Date().toISOString();
+        batch.status = batch.progress.failed === 0
+          ? 'completed'
+          : batch.progress.completed === 0
+            ? 'failed'
+            : 'partial';
+        if (!batch.summary?.trim()) {
+          batch.summary = this.batchManager.buildBatchSummary(batch, (output) => this.sanitizeAssignmentOutput(output));
+        }
+        await this.emitBatchComplete(batch);
+        // Save batch results to archival memory for future recall
+        this.saveBatchToArchival(batch).catch((err) =>
+          console.error('[SwarmCoordinator] Failed to save batch to archival:', err),
+        );
+      }
+    } catch (err) {
+      console.error(`[SwarmCoordinator] Unhandled error in handleTaskLifecycleUpdate for task ${task.id}:`, err);
     }
   }
 

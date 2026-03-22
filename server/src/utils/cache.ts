@@ -113,7 +113,7 @@ export class LRUCache<T = unknown> {
   }
 
   private estimateSize(value: unknown): number {
-    if (typeof value === 'string') return value.length * 2;
+    if (typeof value === 'string') return (value as string).length * 2;
     if (Array.isArray(value)) {
       // For embedding vectors (number[])
       if (typeof value[0] === 'number') return value.length * 8;

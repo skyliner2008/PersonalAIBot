@@ -46,3 +46,17 @@ check_models.ts
 
 # MiniMax config
 .minimax/
+
+# AI Agent Sessions & Workspace
+.codex-swarm/
+.agent/
+.tmp/
+*.jsonl
+*.json.bak
+check_*.ts
+test_*.ts
+fix_*.ts
+dump_*.ts
+recover*.cjs
+analyze*.js
+analyze*.cjs

@@ -271,62 +271,100 @@ async function adminReadProjectFile(args: { path: string }): Promise<string> {
   const filePath = path.resolve(PROJECT_ROOT, args.path);
   auditLog('read_file', filePath);
 
-  if (!fs.existsSync(filePath)) {
-    return `Error: File not found: ${args.path}`;
-  }
+  try {
+    if (!fs.existsSync(filePath)) {
+      return `Error: File not found: ${args.path}`;
+    }
 
-  const stat = fs.statSync(filePath);
-  if (stat.size > 1024 * 1024) {
-    return `Error: File too large (${(stat.size / 1024 / 1024).toFixed(1)}MB). Max 1MB.`;
-  }
+    const stat = fs.statSync(filePath);
+    if (!stat.isFile()) {
+      return `Error: Path is not a file: ${args.path}`;
+    }
+    if (stat.size > 1024 * 1024) {
+      return `Error: File too large (${(stat.size / 1024 / 1024).toFixed(1)}MB). Max 1MB.`;
+    }
 
-  return fs.readFileSync(filePath, 'utf-8');
+    return fs.readFileSync(filePath, 'utf-8');
+  } catch (err: any) {
+    return `Error reading file ${args.path}: ${err.message || err}`;
+  }
 }
 
 async function adminWriteProjectFile(args: { path: string; content: string }): Promise<string> {
   const filePath = path.resolve(PROJECT_ROOT, args.path);
   auditLog('write_file', `${filePath} (${args.content.length} bytes)`);
 
-  // Create parent directories
-  const dir = path.dirname(filePath);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
+  try {
+    // Create parent directories
+    const dir = path.dirname(filePath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
 
-  // Backup existing file
-  if (fs.existsSync(filePath)) {
-    const backupPath = filePath + `.bak.${Date.now()}`;
-    fs.copyFileSync(filePath, backupPath);
-  }
+    // Backup existing file
+    if (fs.existsSync(filePath)) {
+      const stat = fs.statSync(filePath);
+      if (!stat.isFile()) {
+        return `Error: Cannot write to path ${args.path} because it is a directory or other non-file type.`;
+      }
+      const backupPath = filePath + `.bak.${Date.now()}`;
+      fs.copyFileSync(filePath, backupPath);
+    }
 
-  fs.writeFileSync(filePath, args.content, 'utf-8');
-  return `File written: ${args.path} (${args.content.length} bytes)`;
+    fs.writeFileSync(filePath, args.content, 'utf-8');
+    return `File written: ${args.path} (${args.content.length} bytes)`;
+  } catch (err: any) {
+    return `Error writing file ${args.path}: ${err.message || err}`;
+  }
 }
 
 async function adminListProjectFiles(args: { dir: string; pattern?: string }): Promise<string> {
   const dirPath = path.resolve(PROJECT_ROOT, args.dir);
   auditLog('list_files', dirPath);
 
-  if (!fs.existsSync(dirPath)) {
-    return `Error: Directory not found: ${args.dir}`;
+  try {
+    if (!fs.existsSync(dirPath)) {
+      return `Error: Directory not found: ${args.dir}`;
+    }
+
+    const stat = fs.statSync(dirPath);
+    if (!stat.isDirectory()) {
+      return `Error: Path is not a directory: ${args.dir}`;
+    }
+
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    let items = entries.map(e => {
+      let size = 0;
+      if (e.isFile()) {
+        try {
+          size = fs.statSync(path.join(dirPath, e.name)).size;
+        } catch (statErr) {
+          log.warn(`Could not get size for file ${e.name}: ${statErr}`);
+        }
+      }
+      return {
+        name: e.name,
+        type: e.isDirectory() ? 'dir' : 'file',
+        size,
+      };
+    });
+
+    // Filter by pattern if provided
+    if (args.pattern) {
+      try {
+        const regex = new RegExp(args.pattern.replace(/\*/g, '.*').replace(/\?/g, '.'), 'i');
+        items = items.filter(i => regex.test(i.name));
+      } catch (regexErr: any) {
+        return `Error parsing pattern "${args.pattern}": ${regexErr.message}`;
+      }
+    }
+
+    return items.map(i =>
+      `${i.type === 'dir' ? '📁' : '📄'} ${i.name}${i.size ? ` (${(i.size / 1024).toFixed(1)}KB)` : ''}`
+    ).join('\n') || '(empty directory)';
+  } catch (err: any) {
+    return `Error listing files in ${args.dir}: ${err.message || err}`;
   }
-
-  const entries = fs.readdirSync(dirPath, { withFileTypes: true });
-  let items = entries.map(e => ({
-    name: e.name,
-    type: e.isDirectory() ? 'dir' : 'file',
-    size: e.isFile() ? fs.statSync(path.join(dirPath, e.name)).size : 0,
-  }));
-
-  // Filter by pattern if provided
-  if (args.pattern) {
-    const regex = new RegExp(args.pattern.replace(/\*/g, '.*').replace(/\?/g, '.'), 'i');
-    items = items.filter(i => regex.test(i.name));
-  }
-
-  return items.map(i =>
-    `${i.type === 'dir' ? '📁' : '📄'} ${i.name}${i.size ? ` (${(i.size / 1024).toFixed(1)}KB)` : ''}`
-  ).join('\n') || '(empty directory)';
 }
 
 async function adminRunCommand(args: { command: string; cwd?: string; timeout?: number }): Promise<string> {

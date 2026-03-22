@@ -60,6 +60,14 @@ function handleBrowserEvents(socket: Socket, io: SocketServer): void {
 function handleFacebookEvents(socket: Socket, io: SocketServer): void {
   socket.on('fb:login', async (data: { email: string; password: string }) => {
     try {
+      // Validate incoming data to prevent null/undefined dereference
+      if (!data || typeof data.email !== 'string' || typeof data.password !== 'string') {
+        const msg = 'Invalid or missing email/password for Facebook login.';
+        addLog('facebook', 'Login attempt failed', msg, 'error');
+        logger.error(`[FB] Login error: ${msg}`);
+        io.emit('fb:loginResult', { success: false, message: msg });
+        return;
+      }
       addLog('facebook', 'Login attempt...', undefined, 'info');
       logger.info(`[FB] Login attempt`);
       // Auto-launch browser if not running
@@ -155,9 +163,9 @@ export function setupSocketHandlers(io: SocketServer): void {
     logger.info(`[Socket] Client connected: ${socket.id}`);
     // Send initial status
     socket.emit('status', {
-      browser: isRunning(),
-      chatBot: isChatMonitorActive(),
-      commentBot: isCommentMonitorActive(),
+      browser: (() => { try { return isRunning(); } catch (e: any) { logger.error(`[Socket] Error getting browser status: ${String(e)}`); return false; } })(),
+      chatBot: (() => { try { return isChatMonitorActive(); } catch (e: any) { logger.error(`[Socket] Error getting chat bot status: ${String(e)}`); return false; } })(),
+      commentBot: (() => { try { return isCommentMonitorActive(); } catch (e: any) { logger.error(`[Socket] Error getting comment bot status: ${String(e)}`); return false; } })(),
     });
     // Attach all specific event handlers
     handleBrowserEvents(socket, io);

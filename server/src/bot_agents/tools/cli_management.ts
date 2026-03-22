@@ -8,6 +8,8 @@ const log = createLogger('CLIManagementTool');
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '../../../');
 
+let fileUpdateLock: Promise<any> = Promise.resolve();
+
 export const addCliAgentDeclaration: FunctionDeclaration = {
   name: "add_cli_agent",
   description: "เพิ่ม CLI Agent ใหม่เข้าไปในระบบโดยอัตโนมัติ (Discovery, Messaging, Swarm, Voice). ต้องระบุชื่อ executable และข้อมูลพื้นฐาน.",
@@ -50,15 +52,25 @@ export async function addCliAgent(args: {
   const cli = cliName.toLowerCase();
   const logs: string[] = [];
 
-  try {
-    updateCommandRouter(executable, logs);
-    updateMessagingBridge(cli, displayName, logs);
-    updateMeetingRoom(cli, icon, description, logs);
-    updateSocketHandlers(cli, icon, logs);
+  const currentOperation = fileUpdateLock.then(async () => {
+    try {
+      updateCommandRouter(executable, logs);
+      updateMessagingBridge(cli, displayName, logs);
+      updateMeetingRoom(cli, icon, description, logs);
+      updateSocketHandlers(cli, icon, logs);
 
-    return `🚀 Successfully integrated ${displayName} (@${cli}):\n${logs.join('\n')}\n\nPlease restart the server or wait for the next health check to see the changes.`;
+      return `🚀 Successfully integrated ${displayName} (@${cli}):\n${logs.join('\n')}\n\nPlease restart the server or wait for the next health check to see the changes.`;
+    } catch (err: any) {
+      log.error('Failed to add CLI agent', { cli, error: err.message });
+      throw err;
+    }
+  });
+
+  fileUpdateLock = currentOperation.catch(() => {});
+
+  try {
+    return await currentOperation;
   } catch (err: any) {
-    log.error('Failed to add CLI agent', { cli, error: err.message });
     return `❌ Failed to add CLI agent: ${err.message}`;
   }
 }

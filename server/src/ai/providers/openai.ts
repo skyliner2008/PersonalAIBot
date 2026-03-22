@@ -17,30 +17,34 @@ export class OpenAIProvider implements AIProvider {
     const key = this.getKey();
     if (!key) throw new Error('OpenAI API key not configured');
 
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: options?.model || this.getModel(),
-        messages,
-        temperature: options?.temperature ?? 0.7,
-        max_tokens: options?.maxTokens ?? 500,
-      }),
-    });
+    try {
+      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: options?.model || this.getModel(),
+          messages,
+          temperature: options?.temperature ?? 0.7,
+          max_tokens: options?.maxTokens ?? 500,
+        }),
+      });
 
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(`OpenAI error ${res.status}: ${err.error?.message || res.statusText}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(`OpenAI error ${res.status}: ${err.error?.message || res.statusText}`);
+      }
+
+      const data = await res.json();
+      const text = data.choices?.[0]?.message?.content?.trim() || '';
+      const usage = data.usage ? {
+        promptTokens: data.usage.prompt_tokens || 0,
+        completionTokens: data.usage.completion_tokens || 0,
+        totalTokens: data.usage.total_tokens || 0,
+      } : undefined;
+      return { text, usage };
+    } catch (e) {
+      throw new Error(`OpenAI chat request failed: ${String(e)}`);
     }
-
-    const data = await res.json();
-    const text = data.choices?.[0]?.message?.content?.trim() || '';
-    const usage = data.usage ? {
-      promptTokens: data.usage.prompt_tokens || 0,
-      completionTokens: data.usage.completion_tokens || 0,
-      totalTokens: data.usage.total_tokens || 0,
-    } : undefined;
-    return { text, usage };
   }
 
   async testConnection(): Promise<boolean> {
@@ -57,11 +61,16 @@ export class OpenAIProvider implements AIProvider {
   async listModels(): Promise<string[]> {
     const key = this.getKey();
     if (!key) return [];
-    const res = await fetch('https://api.openai.com/v1/models', {
-      headers: { 'Authorization': `Bearer ${key}` },
-    });
-    if (!res.ok) return [];
-    const data = await res.json();
-    return data.data?.map((m: any) => m.id).filter((id: string) => id.startsWith('gpt-')) || [];
+    try {
+      const res = await fetch('https://api.openai.com/v1/models', {
+        headers: { 'Authorization': `Bearer ${key}` },
+      });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.data?.map((m: any) => m.id).filter((id: string) => id.startsWith('gpt-')) || [];
+    } catch (e) {
+      console.debug('[OpenAI] Model list failed:', String(e));
+      return [];
+    }
   }
 }

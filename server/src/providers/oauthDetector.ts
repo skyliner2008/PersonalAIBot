@@ -564,9 +564,22 @@ function detectClaudeCLI(): OAuthCredential | null {
   const version = execSafe('claude --version 2>&1')
     || execSafe('claude -v 2>&1')
     || execSafe('claude --help 2>&1');
+
+  if (!version) {
+    return {
+      providerId: 'claude-cli',
+      name: 'Claude Code CLI',
+      cliTool: 'claude',
+      source: `Claude CLI — ${claudePath.split('\n')[0].trim()}`,
+      valid: false,
+      providerType: 'anthropic',
+      category: 'llm',
+      error: 'Claude CLI found but could not verify functionality.',
+    };
+  }
+
   // Valid if we get any output that isn't an OS "not found" error
-  const valid = !!version
-    && !version.toLowerCase().includes('is not recognized')
+  const valid = !version.toLowerCase().includes('is not recognized')
     && !version.toLowerCase().includes('not found')
     && !version.toLowerCase().includes('no such file');
 
@@ -595,12 +608,22 @@ function detectOpenAICLI(): OAuthCredential | null {
   if (!openaiPath) return null;
 
   const version = execSafe('openai --version 2>&1') || execSafe('openai --help 2>&1');
+  if (!version) {
+    return {
+      providerId: 'openai-cli',
+      name: 'OpenAI CLI',
+      cliTool: 'openai',
+      source: `OpenAI CLI — ${openaiPath.split('\n')[0].trim()}`,
+      valid: false,
+      providerType: 'openai-compatible',
+      category: 'llm',
+      error: 'OpenAI CLI found but could not verify functionality.',
+    };
+  }
   const apiKey = '';
 
-  // Valid if: (1) openai binary exists AND (2) either version check passes or API key is set
-  // The node_modules/.bin/openai binary is functional for API calls when OPENAI_API_KEY is set
   // Valid if: openai binary exists AND version check passes
-  const valid = !!version && !version.includes('not found') && !version.includes('is not recognized');
+  const valid = !version.includes('not found') && !version.includes('is not recognized');
 
   return {
     providerId: 'openai-cli',
@@ -657,6 +680,29 @@ function detectKiloCLI(): OAuthCredential | null {
   if (!kiloPath) return null;
 
   const version = execSafe('kilo --version 2>&1') || execSafe('kilo --help 2>&1');
+  if (!version) {
+    return {
+      providerId: 'kilo-cli',
+      name: 'Kilo Code CLI',
+      cliTool: 'kilo',
+      source: `Kilo CLI — ${kiloPath.split('\n')[0].trim()}`,
+      valid: false,
+      baseUrl: '',
+      defaultModel: 'kilo/kilo-auto/free',
+      models: [
+        'kilo/kilo-auto/free',
+        'kilo/kilo-auto/small',
+        'kilo/kilo-auto/balanced',
+        'kilo/kilo-auto/frontier',
+        'kilo/anthropic/claude-sonnet-4',
+        'kilo/openai/gpt-4o',
+        'kilo/google/gemini-2.5-flash',
+      ],
+      providerType: 'openai-compatible',
+      category: 'llm',
+      error: 'Kilo CLI found but could not verify functionality.',
+    };
+  }
   const valid = !!version && !version.includes('not found') && !version.includes('is not recognized');
 
   return {

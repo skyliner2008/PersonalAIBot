@@ -60,6 +60,7 @@ export const deleteCronJobDeclaration: FunctionDeclaration = {
 // ==========================================
 
 export function createCronHandlers(context: any) {
+  const safeContext = context || {};
   return {
     create_cron_job: async (args: any) => {
       try {

@@ -25,9 +25,10 @@ export interface CoreAgentDefinition {
   platform?: 'line' | 'telegram' | 'custom';
 }
 
+const adminIdentity = getRootAdminIdentity();
 export const JARVIS_ROOT_ADMIN = {
-  botId: getRootAdminIdentity().botId,
-  name: getRootAdminIdentity().botName,
+  botId: adminIdentity?.botId ?? 'jarvis-root-admin',
+  name: adminIdentity?.botName ?? 'Jarvis Root Admin',
 } as const;
 
 export const GEMINI_CLI_AGENT = {
@@ -104,8 +105,8 @@ export function listCoreAgents(): CoreAgentDefinition[] {
   const staticAgents = Object.values(CORE_AGENT_DEFINITIONS).map(cloneAgent);
   
   // Dynamically resolve installed CLIs
-  const backends = getAvailableBackends().filter(b => b.kind === 'cli');
-  const cliAgents: CoreAgentDefinition[] = backends.map(b => ({
+  const backends = getAvailableBackends() ?? [];
+  const cliAgents: CoreAgentDefinition[] = backends.filter(b => b.kind === 'cli').map(b => ({
     id: b.id as `${string}-cli`,
     name: b.name,
     kind: 'cli-bridge',

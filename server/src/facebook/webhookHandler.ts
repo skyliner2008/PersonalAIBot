@@ -67,6 +67,10 @@ export async function processWebhookEntries(entries: FBWebhookEntry[]): Promise<
 
 async function handleMessagingEvent(event: FBMessagingEvent): Promise<void> {
   const cfg = getFBConfig();
+  if (!cfg) {
+    addLog('webhook', 'Config Error', 'Facebook config not found, cannot process message', 'error');
+    return;
+  }
 
   // Skip if it's from the page itself (echo)
   if (event.sender.id === cfg.pageId) return;
@@ -97,10 +101,23 @@ async function handleMessagingEvent(event: FBMessagingEvent): Promise<void> {
   if (event.message?.text) {
     const mid = event.message.mid;
 
-    // Deduplicate — atomic check+set to prevent race condition
-    if (processedMessageIds.has(mid)) return;
-    processedMessageIds.add(mid); // memory gate first
-    try { getDb().prepare('INSERT OR IGNORE INTO processed_messages (mid) VALUES (?)').run(mid); } catch (e) { console.debug('[WebhookHandler]', String(e)); }
+    // Deduplicate — atomic check via DB to prevent race condition
+    try {
+      const db = getDb();
+      const result = db.prepare('INSERT OR IGNORE INTO processed_messages (mid) VALUES (?)').run(mid);
+      if (result.changes === 0) {
+        // Message already processed (either by another instance or previously)
+        processedMessageIds.add(mid); // Ensure in-memory cache is up-to-date
+        return; // Do not process
+      }
+      // Successfully inserted, this is a new message.
+      processedMessageIds.add(mid); // Add to in-memory cache
+    } catch (e) {
+      console.debug('[WebhookHandler] DB deduplication insert error, falling back to in-memory check:', String(e));
+      // If DB fails, fall back to in-memory check for within-session duplicates.
+      if (processedMessageIds.has(mid)) return;
+      processedMessageIds.add(mid);
+    }
     // Evict old entries
     if (processedMessageIds.size > MAX_PROCESSED) {
       const toDelete = [...processedMessageIds].slice(0, 1000);
@@ -193,7 +210,7 @@ async function processAndReplyMessage(senderId: string, text: string, messageId:
     });
 
     // 7. Strip thinking tags
-    let reply = stripThinkTags(aiResult.text);
+    let reply = stripThinkTags(aiResult.text ?? '');
 
     if (!reply) {
       reply = 'ขอตรวจสอบข้อมูลก่อนนะคะ แล้วจะแจ้งกลับค่ะ';

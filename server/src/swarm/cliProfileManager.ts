@@ -73,6 +73,5 @@ export function saveCliProfiles(profiles: Record<string, CliProfileConfig>): voi
     fs.writeFileSync(PROFILES_PATH, JSON.stringify(profiles, null, 2), 'utf-8');
   } catch (err) {
     log.error('Failed to save CLI profiles', err);
-    throw err;
   }
 }

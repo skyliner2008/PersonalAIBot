@@ -124,9 +124,9 @@ export function createAgentRuntimeProvider(
     case 'gemini':
       return new GeminiProvider(resolvedKey, { providerId: provider.id });
     case 'openai-compatible':
-      return new OpenAICompatibleProvider(resolvedKey, provider.baseUrl, provider.id);
+      return new OpenAICompatibleProvider(resolvedKey, provider.baseUrl ?? '', provider.id);
     case 'anthropic':
-      return new AnthropicProvider(resolvedKey, provider.baseUrl);
+      return new AnthropicProvider(resolvedKey, provider.baseUrl ?? '');
     default:
       return null;
   }

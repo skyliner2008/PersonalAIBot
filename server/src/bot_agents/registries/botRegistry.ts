@@ -189,7 +189,11 @@ export function createBot(data: {
   );
 
   invalidateBotCache();
-  return getBot(data.id)!;
+  const newBot = getBot(data.id);
+  if (!newBot) {
+    throw new Error(`Failed to retrieve bot ${data.id} immediately after creation. Data inconsistency detected.`);
+  }
+  return newBot;
 }
 
 /** Update a bot instance (partial update) */

@@ -266,8 +266,15 @@ export class EmbeddingProvider {
     let lastError: Error | null = null;
     const failedModels: string[] = [];
 
-    const { getProviderApiKey } = await import('../config/settingsSecurity.js');
-    const ai = new GoogleGenAI({ apiKey: getProviderApiKey('gemini') || '' });
+    let currentApiKey: string;
+    try {
+      const { getProviderApiKey } = await import('../config/settingsSecurity.js');
+      currentApiKey = getProviderApiKey('gemini') || '';
+    } catch (keyErr) {
+      log.error('Failed to retrieve Gemini API key', { error: toErrorMessage(keyErr) });
+      throw new Error(`Failed to retrieve Gemini API key: ${toErrorMessage(keyErr)}`);
+    }
+    const ai = new GoogleGenAI({ apiKey: currentApiKey });
 
     for (const model of candidates) {
       try {

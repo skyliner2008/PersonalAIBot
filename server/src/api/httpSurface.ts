@@ -118,8 +118,8 @@ async function handleHealthCheck(
       rss: Math.round(mem.rss / 1024 / 1024) + 'MB',
     },
     queues: {
-      chat: chatQueue.getStats(),
-      webhook: webhookQueue.getStats(),
+      chat: chatQueue?.getStats() || { pending: 0, active: 0, completed: 0, failed: 0, delayed: 0 },
+      webhook: webhookQueue?.getStats() || { pending: 0, active: 0, completed: 0, failed: 0, delayed: 0 },
     },
     database: dbStats,
     rateLimits: rateLimitInfo,

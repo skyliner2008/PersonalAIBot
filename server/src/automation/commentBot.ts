@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer';
 import type { Page } from 'playwright';
 import { newPage, humanDelay, humanType, isRunning, navigateWithRetry } from './browser.js';
 import { addLog, dbAll, dbGet, dbRun } from '../database/db.js';

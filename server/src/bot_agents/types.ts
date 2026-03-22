@@ -59,6 +59,8 @@ export interface BotContext {
     platform: 'telegram' | 'line' | 'facebook' | 'discord' | 'custom';
     /** Platform-specific file reply callback */
     replyWithFile: (filePath: string, caption?: string) => Promise<string>;
+    /** (Optional) Hint for task classification / model routing */
+    taskType?: string;
 }
 
 // ──────────────────────────────────────────────

@@ -118,7 +118,9 @@ export class AnthropicProvider implements AIProvider {
 
     for (const block of data.content || []) {
       if (block.type === 'text') {
-        text += block.text;
+        if (typeof block.text === 'string') {
+          text += block.text;
+        }
       } else if (block.type === 'tool_use') {
         toolCalls.push({
           name: block.name,

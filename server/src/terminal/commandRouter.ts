@@ -1,22 +1,5 @@
 /**
  * Command Router - Routes terminal commands to built-in and discovered CLI backends.
- *
- * Prefix examples:
- *   @agent <msg>   -> Root Admin Agent
- *   @jarvis <msg>  -> alias of @agent
-/**
- * Command Router - Routes terminal commands to built-in and discovered CLI backends.
- *
- * Prefix examples:
- *   @agent <msg>   -> Root Admin Agent
- *   @jarvis <msg>  -> alias of @agent
- *   @admin <msg>   -> alias of @agent
- *   @gemini <msg>  -> Gemini CLI
- *   @claude <msg>  -> Claude CLI
- *   @openai <msg>  -> OpenAI CLI
- *   @kilo <msg>    -> Kilo CLI
- *   @<any> <msg>   -> dynamic <any>-cli backend (if installed)
- *   no prefix      -> native shell
  */
 
 import path from 'path';
@@ -239,7 +222,7 @@ function getAllCandidates(): CliCandidate[] {
   return Array.from(byId.values());
 }
 
-function resolveExecutablePath(inputPath: string): string {
+function resolveExecutablePath(inputPath: string): string | null {
   const cleanPath = inputPath.trim().replace(/^"|"$/g, '');
   if (process.platform !== 'win32') return cleanPath;
   if (/\.[^\\/]+$/.test(cleanPath)) return cleanPath;
@@ -257,8 +240,8 @@ function resolveExecutablePath(inputPath: string): string {
 
 function findExecutable(name: string, customPath?: string): string | null {
   if (customPath) {
-    const resolvedCustomPath = resolveExecutablePath(customPath);
-    if (fs.existsSync(resolvedCustomPath)) {
+    const resolvedCustomPath = resolveExecutablePath(String(customPath));
+    if (resolvedCustomPath && fs.existsSync(resolvedCustomPath)) {
       return resolvedCustomPath;
     }
     log.warn(`Custom path for ${name} was not found: ${customPath}`);
@@ -289,7 +272,8 @@ function findExecutable(name: string, customPath?: string): string | null {
 
     if (process.platform === 'win32') {
       // Prefer user/global CLI shims over protected WindowsApps package paths.
-      const score = (p: string): number => {
+      const score = (p: string | null): number => {
+        if (!p) return 1000;
         const lower = p.toLowerCase();
         if (lower.includes('\\program files\\windowsapps\\')) return 100;
         if (lower.endsWith('.cmd') || lower.endsWith('.bat')) return 0;
@@ -298,7 +282,7 @@ function findExecutable(name: string, customPath?: string): string | null {
       };
 
       const sorted = [...resolvedPaths].sort((a, b) => score(a) - score(b));
-      const chosen = sorted.find(Boolean);
+      const chosen = sorted.find(p => !!p);
       if (chosen) return chosen;
       return name;
     }
@@ -515,8 +499,6 @@ export function getCLIConfig(backend: BackendType): CliConfig | null {
     }
 
     if (known.id === 'codex-cli') {
-      // Prefer a directly-runnable binary, but avoid WindowsApps aliases
-      // because they often fail with EPERM when spawned from Node.
       if (resolved && !isWindowsAppsPath(resolved)) {
         return { command: resolved, args: known.args || [] };
       }
@@ -530,7 +512,6 @@ export function getCLIConfig(backend: BackendType): CliConfig | null {
         return { command: resolved, args: known.args || [] };
       }
 
-      // Last-resort best effort to surface clear ENOENT/permission errors.
       return { command: known.command, args: known.args || [] };
     }
 
@@ -539,7 +520,6 @@ export function getCLIConfig(backend: BackendType): CliConfig | null {
     }
   }
 
-  // Best-effort dynamic fallback for unknown @<name> prefixes.
   if (backend.endsWith('-cli')) {
     const commandName = backend.slice(0, -4);
     const resolved = findExecutable(commandName);
@@ -586,8 +566,6 @@ export function getHelpText(): string {
   }
 
   lines.push('');
-
-  lines.push('');
   lines.push('\x1b[1;33m  Special Commands:\x1b[0m');
   lines.push('  @help              -> Show this help');
   lines.push('  @backends          -> List available backends');
@@ -597,15 +575,8 @@ export function getHelpText(): string {
   return lines.join('\r\n') + '\r\n';
 }
 
-/**
- * Actively ping discovered CLIs to check for API Rate Limits or Quota Exceeded errors.
- * Uses the same execution pipeline (buildCliInvocationArgs + runCliCommand) that the
- * terminal gateway uses, so the prompt is properly formatted for each CLI backend
- * (e.g. `codex exec "Reply OK"`, `gemini -p "Reply OK"`, `claude --print "Reply OK"`).
- */
 export async function verifyCliConnections(): Promise<void> {
-  // Lazy-import to avoid circular dependency at module load time
-  const { buildCliInvocationArgs, runCliCommand, getCliEnvironmentOverrides } = await import('./cliCommandExecutor.js');
+  const { buildCliInvocationArgs, runCliCommand } = await import('./cliCommandExecutor.js');
 
   const state = discover(true);
   const cliBackends = state.backends.filter(b => b.kind === 'cli' && b.available);
@@ -620,22 +591,17 @@ export async function verifyCliConnections(): Promise<void> {
     const testPrompt = 'Reply with OK';
 
     try {
-      // Build proper CLI arguments using the same logic the terminal gateway uses
       const args = buildCliInvocationArgs(backendId, testPrompt, config.args, 'pipe');
 
-      // Use a short timeout (15s) — we only care about fast rate-limit rejections
       const rawOutput = await runCliCommand(
         config.command,
         args,
         backendId,
-        undefined,   // no stdin
+        undefined,
         'pipe',
-        15_000,      // 15s timeout for health check
+        15_000,
       );
 
-      // Strip the internal "CLI timeout exceeded" suffix that runCliCommand appends on timeout.
-      // We need to check the REAL CLI output for API error keywords, not the internal marker.
-      const didTimeout = /CLI timeout exceeded/i.test(rawOutput);
       const output = rawOutput.replace(/\n?CLI timeout exceeded$/i, '').trim();
 
       const ERROR_PATTERN = /rate.?limit|quota.?exceeded|too many requests|usage.?limit|upgrade to pro|hit your.*limit|resource.?exhausted|credits/i;
@@ -645,8 +611,7 @@ export async function verifyCliConnections(): Promise<void> {
         log.warn(`[Health] CLI ${backend.id} degraded: ${output.slice(0, 120)}`);
         reportCliError(backend.id, `API Error: ${output.slice(0, 200)}`);
       } else {
-        // Timeout with no API error keywords = CLI is just slow or interactive, not rate-limited
-        log.info(`[Health] CLI ${backend.id} verified as healthy.${didTimeout ? ' (timed out but no API errors)' : ''}`);
+        log.info(`[Health] CLI ${backend.id} verified as healthy.`);
         reportCliError(backend.id, null);
       }
     } catch (err: any) {

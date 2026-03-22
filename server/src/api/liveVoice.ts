@@ -297,36 +297,16 @@ export class LiveVideoClient extends EventEmitter {
       },
     };
     const jsonStr = JSON.stringify(payload).replace(
-      /[€-]/g,
+      /[^\x00-\x7F]/g,
       (ch) => '\\u' + ch.charCodeAt(0).toString(16).padStart(4, '0'),
     );
 
-    // Add escaping for HTML special characters to prevent XSS.
-    const escapedJsonStr = jsonStr.replace(/[&<>'"/]/g, (match) => {
-      switch (match) {
-        case '&':
-          return '&amp;';
-        case '<':
-          return '&lt;';
-        case '>':
-          return '&gt;';
-        case '\'':
-          return '&#39;';
-        case '"':
-          return '&quot;';
-        case '/':
-          return '&#x2F;';
-        default:
-          return match;
-      }
-    });
-
     console.log('[LiveVoice] Sending tool response', {
       responseCount: functionResponses.length,
-      payloadLength: escapedJsonStr.length,
+      payloadLength: jsonStr.length,
       firstResponsePreview: JSON.stringify(functionResponses[0]?.response)?.slice(0, 200),
     });
-    this.ws.send(escapedJsonStr);
+    this.ws.send(jsonStr);
   }
 
   private handleMessage(message: any) {
@@ -348,18 +328,22 @@ export class LiveVideoClient extends EventEmitter {
 
     if (message.serverContent?.modelTurn?.parts) {
       const parts = message.serverContent.modelTurn.parts;
-      for (const part of parts) {
-        if (part.inlineData && part.inlineData.mimeType.startsWith('audio/pcm')) {
-          this.emit('audioPart', part.inlineData.data);
+      if (Array.isArray(parts)) {
+        for (const part of parts) {
+          if (part.inlineData && part.inlineData.mimeType.startsWith('audio/pcm')) {
+            this.emit('audioPart', part.inlineData.data);
+          }
         }
       }
     }
 
     if (message.serverContent?.modelTurn?.parts) {
       const parts = message.serverContent.modelTurn.parts;
-      for (const part of parts) {
-        if (part.text) {
-          this.emit('textPart', part.text);
+      if (Array.isArray(parts)) {
+        for (const part of parts) {
+          if (part.text) {
+            this.emit('textPart', part.text);
+          }
         }
       }
     }

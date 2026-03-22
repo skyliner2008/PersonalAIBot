@@ -9,6 +9,7 @@
 
 import crypto from 'crypto';
 import { config } from './config.js';
+import { getCredential } from './database/db.js';
 
 // Error classes for better error handling
 export class EncryptionError extends Error {
@@ -26,11 +27,12 @@ export class DecryptionError extends Error {
 }
 
 function getCipherKey(): Buffer {
-  const rawKey = config.encryption.key;
+  const dbKey = getCredential('ENCRYPTION_KEY');
+  const rawKey = dbKey || config.encryption.key;
+  
   if (!rawKey && config.security.requireEncryptionKey) {
     throw new EncryptionError(
-      'ENCRYPTION_KEY is not set and REQUIRE_ENCRYPTION_KEY is enabled. ' +
-      'Set ENCRYPTION_KEY in your .env file before using encryption in production.'
+      'ENCRYPTION_KEY is not set in DB or .env and REQUIRE_ENCRYPTION_KEY is enabled.'
     );
   }
   const key = rawKey || crypto.randomBytes(32).toString('hex');
@@ -159,7 +161,11 @@ export function encryptObject(obj: object): string {
  */
 export function decryptObject<T>(encryptedText: string): T {
   const decrypted = decrypt(encryptedText);
-  return JSON.parse(decrypted) as T;
+  try {
+    return JSON.parse(decrypted) as T;
+  } catch (error) {
+    throw new DecryptionError(`Failed to parse decrypted data as JSON: ${error instanceof Error ? error.message : 'Unknown parsing error'}`);
+  }
 }
 
 // Export utility functions

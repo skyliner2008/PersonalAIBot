@@ -31,7 +31,15 @@ export class SSEWriter {
 
     // Keep connection alive
     const keepAlive = setInterval(() => {
-      if (!this.closed) this.res.write(':keepalive\n\n');
+      if (!this.closed) {
+        try {
+          this.res.write(':keepalive\n\n');
+        } catch (err) {
+          log.debug('SSE keepalive write failed', { error: String(err) });
+          this.closed = true;
+          clearInterval(keepAlive);
+        }
+      }
     }, 15_000);
 
     res.on('close', () => {

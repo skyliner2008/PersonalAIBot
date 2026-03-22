@@ -114,6 +114,7 @@ Cross-provider: cycles through `Agent.FALLBACK_CHAIN` (openai, openrouter, minim
 - Circuit breaker per tool (auto-disable after repeated failures)
 - Per-user message queue (prevents concurrent processing for same user)
 - Consecutive error threshold: 3 → forces text response, abandons plan
+- **Syntax Guard**: Pre-flight code validation in `file.ts` (esbuild + bracket balance) blocks malformed writes before disk impact.
 
 ### Key Dependencies
 
@@ -284,11 +285,11 @@ Planning algorithm:
 
 ### Self-Upgrade System (Core)
 
-**File**: `server/src/evolution/selfUpgrade.ts` (~1700 lines)
+**File**: `server/src/evolution/selfUpgrade.ts` (~2800 lines)
 
-The autonomous code modification engine. Scans the codebase for bugs/improvements, proposes fixes, and implements them with multi-layer safety gates.
+The autonomous code modification engine. Scans the codebase for bugs/improvements, proposes fixes, and implements them with multi-layer safety gates. Features a **Graph-Enhanced Second Brain** that gives the AI deep understanding of the codebase architecture before making changes.
 
-#### 9-Phase Implementation Pipeline
+#### 11-Phase Implementation Pipeline
 
 | Phase | Name | Description |
 |-------|------|-------------|
@@ -297,10 +298,70 @@ The autonomous code modification engine. Scans the codebase for bugs/improvement
 | 3 | **Validate** | Pre-implementation gate: checks file exists, is production source, not in Protected Core |
 | 4 | **Impact Analysis** | Static analysis of exported symbols → finds all caller files → assigns risk level (safe/moderate/high) |
 | 5 | **Learning Feedback** | Queries Learning Journal for relevant past failures, semantic search by proposal title, same-file rejection history |
-| 6 | **Planning** | LLM generates step-by-step implementation plan with risk assessment; can reject proposal before any code is written |
-| 7 | **Implement** | Delegates to specialist agents (coder → reviewer → codex-cli → claude-cli fallback chain) with plan context injected |
-| 8 | **TSC Verification** | Baseline comparison: captures pre-existing errors, only rejects on NEW compile errors introduced by the change |
-| 9 | **Runtime Boot Test** | Spawns a child process on a test port, waits for `/health` endpoint to respond OK within 4 seconds |
+| 6 | **Trauma Memory** | Injects recent failure patterns (TSC errors, runtime crashes) to prevent repeating mistakes |
+| 7 | **Second Brain (Graph-Enhanced)** | Assembles multi-layer context from Dependency Graph + Architecture Map + Semantic Search (see below) |
+| 8 | **Planning** | LLM generates step-by-step implementation plan with risk assessment; can reject proposal before any code is written |
+| 9 | **Implement** | Delegates to specialist agents (coder → reviewer → codex-cli → claude-cli fallback chain) with full context injected |
+| 10 | **Gatekeeper Checks** | TSC baseline comparison + esbuild syntax validation (stdin-piped) — only rejects on NEW errors |
+| 11 | **Runtime Boot Test** | Spawns a child process on a test port, waits for `/health` endpoint to respond OK within 4 seconds |
+
+#### Second Brain — Graph-Enhanced Architecture Intelligence
+
+The Second Brain (`codebase_map` + `codebase_edges` + `codebase_embeddings`) gives the AI a deep understanding of the entire codebase before making any changes.
+
+**3 Layers:**
+
+| Layer | Table | Purpose |
+|-------|-------|---------|
+| **Architecture Map** | `codebase_map` | Summary, exports, dependencies for every scanned file (200+ files) |
+| **Dependency Graph** | `codebase_edges` | Explicit directed edges: `source --imports(symbols)--> target`. Enables multi-hop traversal |
+| **Semantic Embeddings** | `codebase_embeddings` | Vector embeddings of code summaries for "find similar files" semantic search |
+
+**Graph Capabilities:**
+
+- `getFileNeighborhood(path)` — immediate upstream + downstream neighbors
+- `getImpactRadius(path, hops)` — multi-hop blast radius (default 2 hops deep)
+- `searchSimilarFiles(embedding, topK)` — cosine similarity search for similar code patterns
+- `getDownstreamDependents(path)` — all files that import from this file
+- `getUpstreamDependencies(path)` — all files this file imports from
+
+**How it assembles context for the AI (Phase 7):**
+
+1. **Target file** architecture (exports, imports, purpose)
+2. **Upstream deps** — files the target imports from + their available symbols (e.g. `database/db.ts` exports `getDb, runSql, ...`)
+3. **Downstream dependents** — files that will break if exports change (with specific symbols they use)
+4. **2-hop impact zone** — indirect dependents for ripple effect awareness
+5. **Semantically similar files** — reference patterns the AI can learn from
+
+**Auto-Population:**
+
+- Normal files: populated during LLM scan phase (`analyzeBatchWithLLM`)
+- Protected Core Files: populated via static analysis (`mapProtectedCoresToSecondBrain`) — no LLM needed
+- Graph edges: rebuilt every cycle via `buildDependencyGraph` from `dependencies_json`
+- Embeddings: updated incrementally (10 files/cycle) via `updateCodeEmbeddings`
+
+#### Implementation Protections & Resilience
+
+- **Resilient Status Updates**: `updateProposalStatus` wrapped in try/catch with retry — DB errors no longer leave proposals stuck in `implementing`
+- **PID-Aware Locking**: Lock files include the process ID (PID). Stale locks from crashed processes are automatically ignored during startup
+- **Stuck Recovery**: On server boot, any proposals stuck in `implementing` are automatically recovered or rejected after 3+ retries
+- **Immortal Core Sandbox**: Critical system files are hard-protected from modification but their architecture IS mapped into Second Brain for context
+- **esbuild Syntax Check (stdin-piped)**: Uses temp script file + stdin pipe instead of command line to avoid OS ENAMETOOLONG errors on large files
+
+#### Boot Guardian Integration
+
+**File**: `server/src/bootGuardian.ts`
+
+Safety net that auto-rollbacks failed self-upgrades on server crash:
+
+1. selfUpgrade writes `latest_upgrade.json` breadcrumb before each implementation
+2. selfUpgrade acquires `upgrade_in_progress.lock` to signal active upgrade
+3. If server crashes within 15 seconds of boot:
+   - BootGuardian reads breadcrumb → restores all backed-up files (multi-file rollback)
+   - Updates DB status to `rejected` + WAL checkpoint (ensures persistence across rapid restarts)
+   - Deletes breadcrumb to prevent rollback loop
+4. If upgrade lock is active during restart + not a syntax error → skip rollback (tsx watch restart)
+5. If server survives 15+ seconds → clears breadcrumb (upgrade confirmed safe)
 
 #### Scan Filtering
 
@@ -311,8 +372,8 @@ The autonomous code modification engine. Scans the codebase for bugs/improvement
 
 #### Two-Mode Implementation
 
-- **SINGLE-FILE mode** (risk = safe): Only primary file edited, strict "no signature changes" rule, injected with Second Brain context
-- **MULTI-FILE mode** (risk = moderate/high): AI receives dependency map + second brain architectural blueprints + affected file previews, authorized to edit primary + all dependent files, 4-step process (Plan → Verify → Edit → Check)
+- **SINGLE-FILE mode** (risk = safe): Only primary file edited, strict "no signature changes" rule, injected with full Second Brain graph context
+- **MULTI-FILE mode** (risk = moderate/high): AI receives dependency graph + architecture map + affected file previews, authorized to edit primary + all dependent files
 
 #### Multi-File Backup & Rollback
 
@@ -327,17 +388,11 @@ The autonomous code modification engine. Scans the codebase for bugs/improvement
 - Same-file rejection history injected into prompt
 - On TSC/runtime failure: automatically records lesson with 0.8 confidence
 - On success: records positive learning for pattern reinforcement
-
-#### Planning Phase
-
-- Uses `gemini-2.0-flash` for fast, cheap plan generation
-- Plan includes: concrete steps with function/line references, files to edit, risk assessment
-- `shouldProceed: false` → proposal rejected before any code changes
-- Plan steps injected into implementation prompt as ordered checklist
+- Circular feedback prevention: rejection reasons are NOT saved as learnings (only real errors)
 
 #### Protected Core Files (Immortal Sandbox)
 
-Cannot be auto-upgraded: `index.ts`, `config.ts`, `configValidator.ts`, `queue.js`, `database/db.ts`, `evolution/selfUpgrade.ts`, `evolution/selfReflection.ts`, `terminal/terminalGateway.ts`, `api/socketHandlers.ts`, `api/upgradeRoutes.ts`
+Cannot be auto-upgraded but ARE mapped in Second Brain: `index.ts`, `config.ts`, `configValidator.ts`, `queue.js`, `database/db.ts`, `evolution/selfUpgrade.ts`, `evolution/selfReflection.ts`, `terminal/terminalGateway.ts`, `api/socketHandlers.ts`, `api/upgradeRoutes.ts`, `bot_agents/tools/index.ts`, `bot_agents/agent.ts`, `automation/chatBot.ts`, `automation/browser.ts`
 
 #### Key Functions
 
@@ -345,10 +400,14 @@ Cannot be auto-upgraded: `index.ts`, `config.ts`, `configValidator.ts`, `queue.j
 |----------|---------|
 | `startSelfUpgrade()` | Initialize idle-triggered scan loop |
 | `scanAndPropose()` | Batch scan files → LLM analysis → insert proposals |
-| `implementProposalById()` | Full 9-phase implementation pipeline |
+| `implementProposalById()` | Full 11-phase implementation pipeline |
 | `analyzeImpact()` | Static cross-file dependency analysis |
 | `createImplementationPlan()` | LLM-generated step-by-step plan |
 | `buildUpgradeLearningContext()` | Query Learning Journal for relevant lessons |
+| `mapProtectedCoresToSecondBrain()` | Static analysis of core files into Second Brain |
+| `buildDependencyGraph()` | Build `codebase_edges` from import analysis |
+| `updateCodeEmbeddings()` | Generate semantic vectors for code summaries |
+| `verifyEsbuildSyntax()` | stdin-piped esbuild syntax validation |
 | `runtimeBootTest()` | Spawn test server and hit /health |
 | `verifyUpgrade()` | TSC baseline comparison |
 | `captureBaselineErrors()` | Cache pre-existing compile errors |
@@ -359,7 +418,9 @@ Cannot be auto-upgraded: `index.ts`, `config.ts`, `configValidator.ts`, `queue.j
 
 - Catches crashes within 15 seconds of startup
 - Checks for recent upgrade breadcrumb (`latest_upgrade.json`)
-- Auto-rollbacks the last change if crash detected post-upgrade
+- **Syntax Error Bypass**: Detects "TransformError" or "Unterminated string" in logs and forces rollback regardless of upgrade lock status.
+- Auto-rollbacks the last change if crash detected post-upgrade.
+- Stable heart-beat required for 15s before clearing breadcrumb.
 
 ### Self-Reflection
 
@@ -486,6 +547,8 @@ Additional tables created at runtime:
 - `goal_*` — goal tracker tables
 - `persistent_queue` — crash-safe message queue
 - `codebase_map` — Second Brain architecture map (file_path, summary, exports, dependencies)
+- `codebase_edges` — Second Brain dependency graph (source→target directed edges with imported symbols)
+- `codebase_embeddings` — Second Brain semantic vectors (code summary embeddings for similarity search)
 - Bot registry tables
 
 ---
@@ -650,35 +713,17 @@ PersonalAIBotV2/
 
 ## 14. Required Environment Variables
 
-Minimum practical keys in `server/.env`:
+The system follows a **Database-First** configuration for sensitive secrets. Most keys are managed via the Dashboard and stored encrypted in SQLite.
+
+Minimum required in `server/.env`:
 
 ```env
-GEMINI_API_KEY=
-LINE_CHANNEL_ACCESS_TOKEN=
-LINE_CHANNEL_SECRET=
-TELEGRAM_BOT_TOKEN=
-SOCKET_AUTH_TOKEN=
-JWT_SECRET=
-ADMIN_USER=admin
-ADMIN_PASSWORD=admin
-LOG_LEVEL=info
-HTTP_CONSOLE_MODE=errors
-SWARM_VERBOSE_LOGS=0
-JARVIS_MULTIPASS=0
+PORT=3000
+# Master key to decrypt the database (REQUIRED)
+CRED_SECRET=pAIbV2-xxx...
 ```
 
-Optional:
-
-```env
-GEMINI_CLI_PATH=
-CODEX_CLI_PATH=
-CLAUDE_CLI_PATH=
-GEMINI_EMBEDDING_MODEL=gemini-embedding-001
-JARVIS_TERMINAL_DIRECT_MODE=1
-SWARM_SKIP_REVIEWER_GATE=1
-SWARM_SKIP_BACKGROUND_ENRICHMENT=1
-STARTUP_COMPACT=1
-```
+**Note**: Other variables like `GEMINI_API_KEY`, `JWT_SECRET`, and `ADMIN_PASSWORD` are now primarily sourced from the database. The `.env` file serves as an infrastructure configuration and a recovery fallback.
 
 ---
 
@@ -803,6 +848,23 @@ Recommended quick validation after deploy:
 Outcome:
 - Agents are vastly smarter, safer, and capable of fully autonomous, self-correcting operations without human-in-the-loop intervention.
 
+### 18.6 Security Hardening & Bot Resilience (2026-03-22)
+
+- **Secrets-to-DB Migration** (`server/src/database/db.ts` & `auth.ts`):
+  - Moved `JWT_SECRET`, `ADMIN_PASSWORD`, and API keys from `.env` to encrypted SQLite storage (AES-256-GCM).
+  - Maintained `.env` only for non-sensitive infrastructure config (e.g. `PORT`).
+- **Self-Upgrade Brain Audit**:
+  - Verified and restored the 3-layer memory system: **Architecture Map** (146 nodes), **Dependency Graph** (328 edges), and **Semantic Embeddings**.
+  - Fixed `EmbeddingProvider` initialization by ensuring database-stored API keys are fetched on startup.
+- **Telegram 409 Conflict Resilience** (`server/src/index.ts` & `botManager.ts`):
+  - Added `SIGUSR2` (nodemon/tsx) and `SIGHUP` signal handlers for guaranteed graceful shutdown of bot polling.
+  - Implemented `deleteWebhook()` cleanup and a 2-second retry mechanism for Telegram polling conflicts.
+- **TypeScript Build Resolution**:
+  - Fixed pre-existing type mismatches in `cli_management.ts` and `auth.ts`, ensuring a clean `npm run build` process.
+
+Outcome:
+- The system is now significantly more secure and resilient to restarts, with a fully audited and functioning self-learning brain.
+
 ### 18.6 Immortal Core & Boot Guardian (Fail-Safe Systems)
 - `server/src/bootGuardian.ts` ensures that a bad auto-upgrade rolls back automatically.
 - Security hard-fail states push Telegram/LINE alerts immediately (`botManager.ts:broadcastToAdmins()`).
@@ -838,9 +900,14 @@ Outcome:
 Outcome:
 - The `jarvis_self_upgrade` autonomous agent now "looks before it leaps," acting with human-like analytical caution.
 
-### 18.8 Deep System Audit (2026-03-22)
+### 18.9 Infinite Loop & Scan Now UI Fix (2026-03-22)
 
-- **9-Phase Self-Upgrade Pipeline**: Verified that `implementProposalById` strictly enforces the 9 phases, including pre-validation, trauma memory injection, and strict runtime/syntax verifications. 
-- **Multi-File Rollback Resilience**: Verified `bootGuardian.ts` and `selfUpgrade.ts` successfully map, backup, and restore N overlapping file paths identically in memory and on disk if a multi-file dependency implementation fails at any layer.
-- **Tuning and Flow Validation**: Verified `idleLoop.ts` strict 2-hour idle threshold and `selfReflection.ts` 25-run triggering baseline.
-- **Outcome**: The AI evolution loop is officially hardened for full background multi-file operations with zero risk of irreversible, environment-breaking code corruption.
+- `server/src/evolution/selfUpgrade.ts`
+  - **Loop Resilience Update**: Augmented the `implementProposalById` logic to update the database status to `implemented` **immediately after the first successful file write**. This ensures that if the server restarts (via `tsx watch`), the proposal is already marked as finished, preventing an infinite "Implement -> Restart -> Implement" loop.
+  - **PID-Aware Locking**: Enhanced the locking mechanism to include the Process ID (PID) in lock files. Stale locks from crashed or killed processes are now automatically detected and ignored during server startup, unblocking the stuck recovery process.
+  - **Status Synchronization**: Updated `getUpgradeStatus` to correctly report `isManualScanActive`, reflecting the current state of manual/continuous scanning to the frontend.
+- `dashboard/src/pages/SelfUpgrade.tsx`
+  - **Manual Scan UI**: Restored the **"Start Scan / Stop Scan"** toggle button. The button dynamically updates its label, icon, and styling based on the `isManualScanActive` state from the backend, providing clear operational feedback to the user.
+
+Outcome:
+- The Self-Upgrade system is now fully resilient against server restarts and provides improved manual control and visibility through the Dashboard UI.

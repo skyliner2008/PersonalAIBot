@@ -67,7 +67,13 @@ export async function processFile(filePath: string): Promise<ProcessedFile> {
     throw new Error(`File not found: ${filePath}`);
   }
 
-  const stat = fs.statSync(filePath);
+  let stat;
+  try {
+    stat = fs.statSync(filePath);
+  } catch (error: any) {
+    throw new Error(`Could not get file stats for ${filePath}: ${error.message}`);
+  }
+
   const sizeKB = Math.round(stat.size / 1024);
   const originalName = path.basename(filePath);
   const mimeType = getMimeType(filePath);
@@ -96,44 +102,82 @@ export async function processFile(filePath: string): Promise<ProcessedFile> {
 }
 
 function processImage(filePath: string, mimeType: string, originalName: string, sizeKB: number): ProcessedFile {
-  const data = fs.readFileSync(filePath);
-  return {
-    type: 'image',
-    content: `[Image: ${originalName} (${sizeKB}KB)]`,
-    mimeType,
-    originalName,
-    sizeKB,
-    base64: data.toString('base64'),
-  };
+  try {
+    const data = fs.readFileSync(filePath);
+    return {
+      type: 'image',
+      content: `[Image: ${originalName} (${sizeKB}KB)]`,
+      mimeType,
+      originalName,
+      sizeKB,
+      base64: data.toString('base64'),
+    };
+  } catch (err: any) {
+    log.error(`Failed to read image file ${filePath}: ${err.message}`);
+    return {
+      type: 'text',
+      content: `[Error processing image ${originalName}: ${err.message}]`,
+      mimeType: 'text/plain',
+      originalName,
+      sizeKB: 0,
+    };
+  }
 }
 
 function processAudio(filePath: string, mimeType: string, originalName: string, sizeKB: number): ProcessedFile {
-  const data = fs.readFileSync(filePath);
-  return {
-    type: 'audio',
-    content: `[Audio file: ${originalName} (${sizeKB}KB) - send to AI for transcription]`,
-    mimeType,
-    originalName,
-    sizeKB,
-    base64: data.toString('base64'),
-  };
+  try {
+    const data = fs.readFileSync(filePath);
+    return {
+      type: 'audio',
+      content: `[Audio file: ${originalName} (${sizeKB}KB) - send to AI for transcription]`,
+      mimeType,
+      originalName,
+      sizeKB,
+      base64: data.toString('base64'),
+    };
+  } catch (err: any) {
+    log.error(`Failed to read audio file ${filePath}: ${err.message}`);
+    return {
+      type: 'text',
+      content: `[Error processing audio ${originalName}: ${err.message}]`,
+      mimeType: 'text/plain',
+      originalName,
+      sizeKB: 0,
+    };
+  }
 }
 
 function processDocument(filePath: string, mimeType: string, originalName: string, sizeKB: number): ProcessedFile {
   let content = '';
 
   if (mimeType === 'text/plain' || mimeType === 'text/markdown') {
-    content = fs.readFileSync(filePath, 'utf-8');
+    try {
+      content = fs.readFileSync(filePath, 'utf-8');
+    } catch (err: any) {
+      log.error(`Failed to read text/markdown file ${filePath}: ${err.message}`);
+      content = `[Error reading document ${originalName}: ${err.message}]`;
+    }
   } else if (mimeType === 'application/pdf') {
-    const data = fs.readFileSync(filePath);
-    return {
-      type: 'image',
-      content: `[PDF document: ${originalName} (${sizeKB}KB)]`,
-      mimeType,
-      originalName,
-      sizeKB,
-      base64: data.toString('base64'),
-    };
+    try {
+      const data = fs.readFileSync(filePath);
+      return {
+        type: 'image',
+        content: `[PDF document: ${originalName} (${sizeKB}KB)]`,
+        mimeType,
+        originalName,
+        sizeKB,
+        base64: data.toString('base64'),
+      };
+    } catch (err: any) {
+      log.error(`Failed to read PDF file ${filePath}: ${err.message}`);
+      return {
+        type: 'text',
+        content: `[Error processing PDF document ${originalName}: ${err.message}]`,
+        mimeType: 'text/plain',
+        originalName,
+        sizeKB: 0,
+      };
+    }
   } else if (mimeType.includes('wordprocessingml')) {
     content = extractDocxText(filePath);
   } else {

@@ -110,7 +110,11 @@ export function sanitizePath(input: string): string {
 /**
  * Recursively sanitize all string values in an object/array
  */
-export function sanitizeDeep(obj: unknown, options: { stripXSS?: boolean; logInjection?: boolean } = {}): unknown {
+export function sanitizeDeep(
+  obj: unknown,
+  options: { stripXSS?: boolean; logInjection?: boolean } = {},
+  visited = new Set<object>()
+): unknown {
   const { stripXSS: doStripXSS = true, logInjection = true } = options;
 
   if (typeof obj === 'string') {

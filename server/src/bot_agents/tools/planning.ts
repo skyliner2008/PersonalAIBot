@@ -43,6 +43,10 @@ async function createPlanToolForChat(
 
   const plan = createPlan(chatId, objective, steps);
 
+  if (!plan) {
+    return 'Error: Failed to create plan.';
+  }
+
   let output = `Plan created successfully.\nObjective: ${plan.objective}\nSteps:\n`;
   plan.steps.forEach((s) => {
     output += `  [ ] ${s.id}: ${s.description}\n`;

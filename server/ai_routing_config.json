@@ -68,7 +68,20 @@
         "provider": "gemini",
         "modelName": "gemini-3-flash-preview"
       },
-      "fallbacks": []
+      "fallbacks": [
+        {
+          "provider": "gemini",
+          "modelName": "gemini-2.5-pro"
+        },
+        {
+          "provider": "gemini",
+          "modelName": "gemini-2.5-flash"
+        },
+        {
+          "provider": "minimax",
+          "modelName": "MiniMax-M2.7"
+        }
+      ]
     },
     "data": {
       "active": {

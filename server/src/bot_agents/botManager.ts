@@ -52,7 +52,8 @@ function formatChatId(platform: string, id: string | number): string {
 function hasConfiguredLlmApiKey(): boolean {
     try {
         return getAgentCompatibleProviders({ enabledOnly: true }).some((provider) => Boolean(getProviderApiKey(provider.id)));
-    } catch {
+    } catch (err) {
+        logger.warn('Failed to check configured providers, falling back to environment variables:', err);
         return Boolean(
             process.env.GEMINI_API_KEY?.trim() ||
             process.env.OPENAI_API_KEY?.trim() ||
@@ -77,7 +78,7 @@ function getAiAgent(): Agent | null {
         aiAgent = new Agent();
         return aiAgent;
     } catch (err) {
-        console.error('[BotManager] Failed to initialize shared AI Agent:', err);
+        logger.error('[BotManager] Failed to initialize shared AI Agent:', err);
         return null;
     }
 }
@@ -122,7 +123,9 @@ function runTelegramAdminCommandAsync(
     userId: string
 ): void {
     const typingPulse = setInterval(() => {
-        void bot.telegram.sendChatAction(chatId, 'typing').catch(() => undefined);
+        void bot.telegram.sendChatAction(chatId, 'typing').catch((err) => {
+            logger.debug(`[Telegram:${botId}] Failed to send typing action: ${err.message}`);
+        });
     }, TELEGRAM_TYPING_PULSE_MS);
 
     void (async () => {
@@ -201,7 +204,7 @@ async function handleTelegramText(ctx: any, bot: Telegraf<any>, agent: Agent, bo
     }
 
     logger.info(`[Telegram:${botConfig.id}] ${chatId}: ${userMessage}`);
-    await ctx.sendChatAction('typing');
+    await ctx.sendChatAction('typing').catch((err: any) => logger.debug(`[Telegram:${botConfig.id}] Failed to send typing action: ${err?.message}`));
 
     try {
         upsertConversation(chatId, ctx.chat.id.toString(), "Telegram User");
@@ -224,12 +227,12 @@ async function handleTelegramText(ctx: any, bot: Telegraf<any>, agent: Agent, bo
 function setupTelegramBotHandlers(bot: Telegraf<any>, agent: Agent, botConfig: BotInstance) {
     bot.catch(async (err, ctx) => {
         const errorText = String((err as any)?.message || err || '');
-        console.error(`[Telegram:${botConfig.id}] Update handler error:`, err);
+        logger.error(`[Telegram:${botConfig.id}] Update handler error:`, err);
         if (/Promise timed out/i.test(errorText)) {
             try {
                 await ctx.reply('Command is taking too long. Please try again.');
-            } catch {
-                // ignore reply failure
+            } catch (replyErr) {
+                logger.warn(`[Telegram:${botConfig.id}] Failed to send timeout notification:`, replyErr);
             }
         }
     });
@@ -279,31 +282,63 @@ function startTelegramBot(botConfig: BotInstance): void {
         return;
     }
 
+    // Check if another active bot is already using the same token (prevent 409)
+    for (const [activeId, activeBot] of activeBots.entries()) {
+        if (activeId !== botConfig.id && activeBot.type === 'telegram') {
+            const otherConfig = getBot(activeId);
+            if (otherConfig?.credentials?.bot_token === token) {
+                const msg = `Cannot start — same Telegram token already in use by active bot "${activeId}"`;
+                console.warn(`[BotManager] ${msg}`);
+                updateBotStatusOnError(botConfig.id, msg);
+                return;
+            }
+        }
+    }
+
     try {
         const bot = new Telegraf(token, { handlerTimeout: TELEGRAM_HANDLER_TIMEOUT_MS });
-
         setupTelegramBotHandlers(bot, agent, botConfig);
 
         botInfo(`[BotManager] Telegram bot "${botConfig.id}" starting...`);
         updateBot(botConfig.id, { status: 'active', last_error: null });
 
-        bot.launch({ dropPendingUpdates: true }).then(() => {
-            botInfo(`[BotManager] Telegram bot "${botConfig.id}" ready`);
+        const launchBot = async (retryCount = 0) => {
+            try {
+                // Ensure no old webhooks are present before polling
+                await bot.telegram.deleteWebhook({ drop_pending_updates: true });
+                await bot.launch({ dropPendingUpdates: true });
+                botInfo(`[BotManager] Telegram bot "${botConfig.id}" ready`);
+            } catch (err: any) {
+                const raw = String(err?.description || err?.message || err || '');
+                const isConflict = /409|terminated by other getUpdates request|Conflict/i.test(raw);
 
-        }).catch((err: any) => {
-            console.error(`[BotManager] Telegram bot "${botConfig.id}" launch failed:`, err);
-            const raw = String(err?.description || err?.message || err || '');
-            const isConflict = /409|terminated by other getUpdates request|Conflict/i.test(raw);
-            const humanMessage = isConflict
-                ? '409 Telegram polling conflict: token is being used by another running bot/process'
-                : raw;
-            updateBotStatusOnError(botConfig.id, humanMessage);
-        });
+                if (isConflict && retryCount < 1) {
+                    logger.warn(`[BotManager] Telegram bot "${botConfig.id}" conflict (409). Waiting 2s before retry...`);
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    return launchBot(retryCount + 1);
+                }
+
+                console.error(`[BotManager] Telegram bot "${botConfig.id}" launch failed:`, err);
+                const humanMessage = isConflict
+                    ? '409 Telegram polling conflict: token is being used by another running bot/process. Try restarting the server after a few seconds.'
+                    : raw;
+                updateBotStatusOnError(botConfig.id, humanMessage);
+                if (isConflict) activeBots.delete(botConfig.id);
+            }
+        };
+
+        void launchBot();
 
         activeBots.set(botConfig.id, {
             type: 'telegram',
             instance: bot,
-            stop: () => { try { bot.stop('SHUTDOWN'); } catch (e) { console.debug('[BotManager] stop:', String(e)); } },
+            stop: () => {
+                try {
+                    bot.stop('SHUTDOWN');
+                } catch (e) {
+                    logger.debug(`[BotManager] Telegram bot stop error (${botConfig.id}):`, e);
+                }
+            },
         });
     } catch (err: any) {
         console.error(`[BotManager] Telegram bot "${botConfig.id}" error:`, err);
@@ -373,7 +408,7 @@ async function handleLineEvent(event: WebhookEvent, agent: Agent, botConfig: Bot
             return; // Auto-reply disabled globally
         }
 
-        console.log(`[LINE:${botConfig.id}] ${chatId}: ${userMessage}`);
+        logger.info(`[LINE:${botConfig.id}] ${chatId}: ${userMessage}`);
         upsertConversation(chatId, userId, "LINE User");
         const responseText = await agent.processMessage(chatId, userMessage, {
             botId: botConfig.id,
@@ -384,7 +419,7 @@ async function handleLineEvent(event: WebhookEvent, agent: Agent, botConfig: Bot
         const text = responseText.length > 5000 ? responseText.substring(0, 4997) + '...' : responseText;
         await lineClient.pushMessage(userId, { type: 'text', text });
     } catch (err) {
-        console.error(`[LINE:${botConfig.id}] Error chat=${chatId}:`, err);
+        logger.error(`[LINE:${botConfig.id}] Error chat=${chatId}:`, err);
         throw err;
     }
 }
@@ -461,50 +496,9 @@ function startLineBot(app: express.Express, botConfig: BotInstance): void {
     }
 }
 
-// Legacy environment migration
-// Auto-create bot_instances from .env vars for backward compatibility
-
-function migrateEnvBots(): void {
-    const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-    const LINE_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN;
-    const LINE_SECRET = process.env.LINE_CHANNEL_SECRET;
-
-    if (BOT_TOKEN) {
-        const existing = getBot('env-telegram');
-        if (!existing) {
-            createBot({
-                id: 'env-telegram',
-                name: 'Telegram (from .env)',
-                platform: 'telegram',
-                credentials: { bot_token: BOT_TOKEN },
-            });
-            updateBot('env-telegram', { status: 'active' });
-            botInfo('[BotManager] Migrated TELEGRAM_BOT_TOKEN from .env -> bot registry');
-        } else if (existing.status === 'stopped') {
-            // If it was previously created but stopped (e.g. from old buggy migration),
-            // re-activate it on server restart since the env var is present
-            updateBot('env-telegram', { status: 'active', last_error: null });
-            botInfo('[BotManager] Re-activated env-telegram bot');
-        }
-    }
-
-    if (LINE_TOKEN && LINE_SECRET) {
-        const existing = getBot('env-line');
-        if (!existing) {
-            createBot({
-                id: 'env-line',
-                name: 'LINE (from .env)',
-                platform: 'line',
-                credentials: { channel_access_token: LINE_TOKEN, channel_secret: LINE_SECRET },
-            });
-            updateBot('env-line', { status: 'active' });
-            botInfo('[BotManager] Migrated LINE credentials from .env -> bot registry');
-        } else if (existing.status === 'stopped') {
-            updateBot('env-line', { status: 'active', last_error: null });
-            botInfo('[BotManager] Re-activated env-line bot');
-        }
-    }
-}
+// Legacy .env migration removed — all bot credentials are now stored in DB (bot_instances table).
+// If process.env.TELEGRAM_BOT_TOKEN or LINE_CHANNEL_ACCESS_TOKEN still exist in .env,
+// they are safely ignored. Bot management is fully handled via dashboard + DB registry.
 
 // Public API
 
@@ -544,10 +538,10 @@ export function startBotInstance(app: express.Express | null, botId: string): bo
             
             // Start both Chat and Comment monitors
             startChatMonitor(io).catch(err => {
-                console.error('[BotManager] Error starting FB Chat Monitor:', err);
+                logger.error('[BotManager] Error starting FB Chat Monitor:', err);
             });
             startCommentMonitor(io).catch(err => {
-                console.error('[BotManager] Error starting FB Comment Monitor:', err);
+                logger.error('[BotManager] Error starting FB Comment Monitor:', err);
             });
 
             // Register in activeBots so it can be stopped
@@ -575,9 +569,31 @@ export function startBotInstance(app: express.Express | null, botId: string): bo
 export function stopBotInstance(botId: string): void {
     const active = activeBots.get(botId);
     if (active) {
-        try { active.stop(); } catch (e) {}
+        try {
+            active.stop();
+        } catch (e) {
+            logger.error(`[BotManager] Failed to stop bot instance "${botId}":`, e);
+        }
         activeBots.delete(botId);
-        console.log(`[BotManager] Stopped bot "${botId}" process`);
+        logger.info(`[BotManager] Stopped bot "${botId}" process`);
+    }
+    updateBot(botId, { status: 'stopped', last_error: null });
+}
+
+/** Async version of stopBotInstance — waits for Telegram polling to fully close */
+export async function stopBotInstanceAsync(botId: string): Promise<void> {
+    const active = activeBots.get(botId);
+    if (active) {
+        try {
+            // Telegraf.stop() returns a Promise; wait for polling to fully close
+            await Promise.resolve(active.stop());
+            // Give Telegram API a moment to release the polling session
+            await new Promise(resolve => setTimeout(resolve, 500));
+        } catch (e) {
+            logger.error(`[BotManager] Failed to stop bot instance "${botId}":`, e);
+        }
+        activeBots.delete(botId);
+        logger.info(`[BotManager] Stopped bot "${botId}" process (async)`);
     }
     updateBot(botId, { status: 'stopped', last_error: null });
 }
@@ -591,14 +607,29 @@ export function startBots(app: express.Express) {
         console.error("[BotManager] Missing LLM provider keys. Telegram/LINE bots cannot start.");
     }
 
-    // Migrate legacy .env bots to registry (one-time)
-    migrateEnvBots();
+    // All bot credentials are stored in DB — no .env migration needed
 
     // Start all registered bots that are marked 'active'
     // (newly migrated bots are set to 'active', manually stopped bots stay 'stopped')
+    // IMPORTANT: Detect duplicate tokens to prevent 409 Conflict errors
     const bots = listBots();
+    const launchedTokens = new Map<string, string>(); // token -> bot.id that launched it
+
     for (const bot of bots) {
         if (bot.status === 'active' || bot.status === 'error') {
+            // Check for duplicate Telegram tokens before launching
+            if (bot.platform === 'telegram') {
+                const token = bot.credentials?.bot_token;
+                if (token) {
+                    const existingBotId = launchedTokens.get(token);
+                    if (existingBotId) {
+                        console.warn(`[BotManager] SKIPPING bot "${bot.id}" — same Telegram token already launched by "${existingBotId}". This would cause 409 Conflict.`);
+                        updateBot(bot.id, { status: 'stopped', last_error: `Duplicate token — already used by "${existingBotId}". Remove duplicate or use a different token.` });
+                        continue;
+                    }
+                    launchedTokens.set(token, bot.id);
+                }
+            }
             startBotInstance(app, bot.id);
         }
     }
@@ -623,7 +654,7 @@ export async function broadcastToAdmins(message: string): Promise<void> {
                     try {
                         await telegraf.telegram.sendMessage(adminId, formattedMessage);
                     } catch (e) {
-                        console.error(`[AdminAlert] Failed to notify Telegram admin ${adminId} via bot ${id}`);
+                        logger.error(`[AdminAlert] Failed to notify Telegram admin ${adminId} via bot ${id}`, e);
                     }
                 }
             }
@@ -640,7 +671,7 @@ export async function broadcastToAdmins(message: string): Promise<void> {
                     try {
                         await lineClient.pushMessage(adminId, { type: 'text', text: formattedMessage });
                     } catch (e) {
-                        console.error(`[AdminAlert] Failed to notify LINE admin ${adminId} via bot ${id}`);
+                        logger.error(`[AdminAlert] Failed to notify LINE admin ${adminId} via bot ${id}`, e);
                     }
                 }
             }
@@ -715,7 +746,15 @@ export function setupBotManagerRoutes(app: express.Express) {
 
     app.get('/api/models/:provider', async (req, res) => {
         const agent = getAiAgent();
-        const models = agent ? await agent.getAvailableModels(req.params.provider) : [];
+        let models: any[] = [];
+        if (agent) {
+            try {
+                models = await agent.getAvailableModels(req.params.provider);
+            } catch (err: any) {
+                console.error(`[BotManager] Error getting models for provider ${req.params.provider}:`, err);
+                return res.status(500).json({ error: `Failed to retrieve models: ${err.message}` });
+            }
+        }
         res.json(models);
     });
 }
@@ -725,11 +764,25 @@ export function stopBots(): void {
     for (const [id, bot] of activeBots) {
         try {
             bot.stop();
-            console.log(`[BotManager] Stopped bot "${id}"`);
+            logger.info(`[BotManager] Stopped bot "${id}"`);
         } catch (err) {
-            console.error(`[BotManager] Error stopping bot "${id}":`, err);
+            logger.error(`[BotManager] Error stopping bot "${id}":`, err);
         }
     }
+    activeBots.clear();
+}
+
+/** Async version — waits for all bots to fully stop (use in graceful shutdown) */
+export async function stopBotsAsync(): Promise<void> {
+    const stopPromises = Array.from(activeBots.entries()).map(async ([id, bot]) => {
+        try {
+            await Promise.resolve(bot.stop());
+            logger.info(`[BotManager] Stopped bot "${id}" (async)`);
+        } catch (err) {
+            logger.error(`[BotManager] Error stopping bot "${id}":`, err);
+        }
+    });
+    await Promise.allSettled(stopPromises);
     activeBots.clear();
 }
 

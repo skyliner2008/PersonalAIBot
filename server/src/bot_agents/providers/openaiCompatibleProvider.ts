@@ -56,6 +56,14 @@ export class OpenAICompatibleProvider implements AIProvider {
       });
 
       const choice = response.choices[0];
+      if (!choice) {
+        return {
+          text: '',
+          toolCalls: undefined,
+          usage: undefined,
+        };
+      }
+
       const toolCalls: ToolCall[] | undefined = choice.message.tool_calls
         ?.filter((tc: any) => tc.function?.name)
         .map((tc: any) => {
@@ -63,7 +71,6 @@ export class OpenAICompatibleProvider implements AIProvider {
           try {
             args = JSON.parse(tc.function.arguments) as Record<string, unknown>;
           } catch {
-            // LLM emitted invalid JSON for tool args — fall back to empty object
             args = { _raw: tc.function.arguments };
           }
           return { name: tc.function.name as string, args };
@@ -89,7 +96,10 @@ export class OpenAICompatibleProvider implements AIProvider {
       size: options?.size || '1024x1024',
       response_format: options?.response_format || 'url',
     });
-    return response.data.map(d => ({
+    
+    // Safety check for response.data
+    const data = (response as any).data || [];
+    return data.map((d: any) => ({
       url: d.url,
       b64_json: d.b64_json,
       revised_prompt: d.revised_prompt
@@ -108,32 +118,29 @@ export class OpenAICompatibleProvider implements AIProvider {
 
   async listModels(): Promise<string[]> {
     try {
-      // เรียก GET /models จาก API จริงของ provider (timeout 8 วินาที)
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 8000);
 
       try {
-        const response = await this.client.models.list({
+        const response = await (this.client.models as any).list({
           signal: controller.signal as any,
-        } as any);
+        });
         clearTimeout(timeout);
-        const modelIds = response.data.map(m => m.id).filter(Boolean).sort();
+        const data = response.data || [];
+        const modelIds = data.map((m: any) => m.id).filter(Boolean).sort();
         if (modelIds.length > 0) return modelIds;
-        throw new Error('Empty model list');
-      } catch (innerErr) {
+        return [];
+      } catch (err: any) {
         clearTimeout(timeout);
-        throw innerErr;
+        const baseUrl = this.client.baseURL || '';
+        const silentProviders = ['minimax', 'anthropic', 'perplexity'];
+        const isSilent = silentProviders.some(p => baseUrl.includes(p));
+        if (!isSilent) {
+          console.warn(`[ListModels:${this.providerId || 'unknown'}] API call failed: ${err.message}`);
+        }
+        return [];
       }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      // ไม่ต้อง warn ถ้าเป็น provider ที่รู้ว่าไม่รองรับ /models (เช่น MiniMax, Anthropic)
-      const baseUrl = this.client.baseURL || '';
-      const silentProviders = ['minimax', 'anthropic', 'perplexity'];
-      const isSilent = silentProviders.some(p => baseUrl.includes(p));
-      if (!isSilent) {
-        console.warn(`[ListModels:${this.providerId || 'unknown'}] API call failed: ${msg}`);
-      }
-      // Return empty — providerRoutes will merge with registry fallback
+    } catch {
       return [];
     }
   }

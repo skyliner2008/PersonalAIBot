@@ -53,7 +53,7 @@ export class GoalDecomposer {
 
     // Extract key themes/phases from objective
     const phases = this.extractPhases(objective);
-    const subTasks: SubTask[] = [];
+    let subTasks: SubTask[] = [];
     let taskIndex = 0;
 
     // Standard decomposition flow: research → plan → execute → verify
@@ -88,7 +88,7 @@ export class GoalDecomposer {
     }
 
     // Build execution order
-    this.buildExecutionOrder(subTasks);
+    subTasks = this.buildExecutionOrder(subTasks);
 
     // Determine strategy
     const strategy = this.determineStrategy(subTasks);
@@ -218,7 +218,7 @@ export class GoalDecomposer {
           'Run tests',
           'Validate implementation',
           'tester',
-          allPhases.includes('implementation') ? [objective] : []
+          allPhases.includes('implementation') ? [] : []
         ));
         tasks.push(this.createSubTask(
           baseIndex + 1,

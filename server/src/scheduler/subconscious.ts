@@ -132,7 +132,7 @@ async function enterSleepCycle(): Promise<void> {
 
     // Phase 2: Prune old messages
     _sleepState.phase = 'pruning';
-    const pruned = pruneWorkingMemory();
+    const pruned = await pruneWorkingMemory();
     _sleepState.prunedCount = pruned;
 
     _sleepState.phase = 'done';
@@ -145,6 +145,7 @@ async function enterSleepCycle(): Promise<void> {
     addLog('system', 'Subconscious Sleep Error', String(err), 'error');
   } finally {
     _sleepState.phase = 'idle';
+    isSleeping = false;
   }
 }
 

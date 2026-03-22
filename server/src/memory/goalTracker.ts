@@ -124,7 +124,7 @@ export function updateGoalProgress(goalId: string, progress: number, status?: Go
 }
 
 export function updateSubGoal(goalId: string, subGoalId: string, updates: Partial<SubGoal>): Goal | null {
-  const goal = getGoalById(goalId);
+  const goal = getGoalById(goalId); // TEST MATCH
   if (!goal) return null;
 
   const subGoals = goal.subGoals.map(sg => {

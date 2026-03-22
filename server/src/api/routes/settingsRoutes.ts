@@ -6,15 +6,19 @@ import { requireReadWriteAuth } from '../../utils/auth.js';
 const settingsRoutes = Router();
 settingsRoutes.use(requireReadWriteAuth('viewer'));
 
-settingsRoutes.get('/settings', (_req, res) => {
-  const rows = dbAll<{ key: string; value: string; updated_at?: string }>('SELECT * FROM settings');
-  res.json(sanitizeSettingsRows(rows));
+settingsRoutes.get('/settings', async (_req, res) => {
+  try {
+    const rows = await dbAll<{ key: string; value: string; updated_at?: string }>('SELECT * FROM settings');
+    res.json(sanitizeSettingsRows(rows));
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e.message });
+  }
 });
 
 const VALID_KEY_PATTERN = /^[a-zA-Z0-9_.-]+$/;
 const isValidKey = (key: string) => VALID_KEY_PATTERN.test(key);
 
-settingsRoutes.post('/settings', (req, res) => {
+settingsRoutes.post('/settings', async (req, res) => {
   try {
     const { key, value } = req.body || {};
 
@@ -25,7 +29,7 @@ settingsRoutes.post('/settings', (req, res) => {
       if (typeof value === 'object') {
         return res.status(400).json({ success: false, error: `Invalid value format for key: ${key}` });
       }
-      setManagedSetting(key, String(value));
+      await setManagedSetting(key, String(value));
     } else {
       if (typeof req.body !== 'object' || req.body === null || Array.isArray(req.body)) {
         return res.status(400).json({ success: false, error: 'Invalid body format' });
@@ -39,7 +43,7 @@ settingsRoutes.post('/settings', (req, res) => {
         if (v !== undefined && v !== null && typeof v === 'object') {
           return res.status(400).json({ success: false, error: `Invalid value format for key: ${k}` });
         }
-        setManagedSetting(k, String(v ?? ''));
+        await setManagedSetting(k, String(v ?? ''));
       }
     }
 

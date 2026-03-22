@@ -306,6 +306,21 @@ export class ToolDiscoveryEngine {
         VALUES (?, ?, ?, ?)
       `).run(toolName, success ? 1 : 0, context || 'general', context);
 
+      // Update in-memory history to reflect the new usage immediately
+      const taskTypeForDb = context || 'general';
+      const newRecord: ToolUsageRecord = {
+        toolName,
+        success,
+        taskType: taskTypeForDb,
+        timestamp: new Date().toISOString(), // Approximate DB's datetime('now')
+        context,
+      };
+
+      if (!this.toolUsageHistory.has(toolName)) {
+        this.toolUsageHistory.set(toolName, []);
+      }
+      this.toolUsageHistory.get(toolName)!.push(newRecord);
+
       // Invalidate cache
       this.toolSuccessCache.delete(toolName);
 

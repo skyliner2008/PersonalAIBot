@@ -473,7 +473,7 @@ export class CollaborationProtocol extends EventEmitter {
       messages: session.messages.length,
       proposals: session.proposals.size,
       approvedProposals,
-      uptime: new Date(session.startedAt).getTime() - Date.now(),
+      uptime: Date.now() - new Date(session.startedAt).getTime(),
     };
   }
 

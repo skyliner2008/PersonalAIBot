@@ -19,14 +19,25 @@ const DEFAULT_DEV_ADMIN_USER = 'admin';
 const DEFAULT_DEV_ADMIN_PASSWORD = 'admin';
 const READ_ONLY_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
-const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex');
-const TOKEN_EXPIRY_HOURS = 24;
+/**
+ * Dynamic getter for JWT secret - prioritizes Database over Environment
+ */
+function getJwtSecret(): string {
+  const dbSecret = getCredential('JWT_SECRET');
+  if (dbSecret) return dbSecret;
+  
+  const envSecret = process.env.JWT_SECRET;
+  if (envSecret) return envSecret;
 
-if (!process.env.JWT_SECRET) {
-  if (!STARTUP_COMPACT) {
-    log.warn('JWT_SECRET not set - using auto-generated key (tokens invalidated on restart)');
+  // Fallback for first-boot or unconfigured systems
+  const fallback = 'pAIbV2-Super-Secret-Token-Key-2026';
+  if (!STARTUP_COMPACT && NODE_ENV === 'production') {
+    log.error('CRITICAL: JWT_SECRET not set in DB or ENV. Using insecure fallback!');
   }
+  return fallback;
 }
+
+const TOKEN_EXPIRY_HOURS = 24;
 
 if (!process.env.ADMIN_PASSWORD) {
   if (IS_DEV) {
@@ -50,8 +61,16 @@ interface User {
 }
 
 function validateCredentials(username: string, password: string): User | null {
-  const adminUser = process.env.ADMIN_USER || getSetting('admin_user') || DEFAULT_DEV_ADMIN_USER;
-  const configuredAdminPass = process.env.ADMIN_PASSWORD || getCredential('admin_password');
+  let adminUser: string;
+  let configuredAdminPass: string | undefined;
+
+  try {
+    adminUser = process.env.ADMIN_USER || getSetting('admin_user') || DEFAULT_DEV_ADMIN_USER;
+    configuredAdminPass = process.env.ADMIN_PASSWORD || getCredential('admin_password') || undefined;
+  } catch (e) {
+    log.error('Failed to retrieve admin credentials from DB, login unavailable.', { error: e });
+    return null;
+  }
 
   log.warn(`[AuthDebug] validateCredentials Attempt -> User: ${username}, SystemAdmin: ${adminUser}, ConfiguredPassExists: ${!!configuredAdminPass}`);
 
@@ -92,21 +111,26 @@ function safeEqual(a: string, b: string): boolean {
   return crypto.timingSafeEqual(aBuf, bBuf);
 }
 
-function createJWT(payload: Record<string, unknown>): string {
-  const header = base64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
-  const now = Math.floor(Date.now() / 1000);
-  const body = base64url(JSON.stringify({
-    ...payload,
-    iat: now,
-    exp: now + TOKEN_EXPIRY_HOURS * 3600,
-  }));
+function createJWT(payload: Record<string, unknown>): string | null {
+  try {
+    const header = base64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
+    const now = Math.floor(Date.now() / 1000);
+    const body = base64url(JSON.stringify({
+      ...payload,
+      iat: now,
+      exp: now + TOKEN_EXPIRY_HOURS * 3600,
+    }));
 
-  const signature = crypto
-    .createHmac('sha256', JWT_SECRET)
-    .update(`${header}.${body}`)
-    .digest('base64url');
+    const signature = crypto
+      .createHmac('sha256', getJwtSecret())
+      .update(`${header}.${body}`)
+      .digest('base64url');
 
-  return `${header}.${body}.${signature}`;
+    return `${header}.${body}.${signature}`;
+  } catch (err) {
+    log.error('JWT generation error', { error: err });
+    return null;
+  }
 }
 
 function verifyJWT(token: string): Record<string, unknown> | null {
@@ -116,7 +140,7 @@ function verifyJWT(token: string): Record<string, unknown> | null {
 
     const [header, body, signature] = parts;
     const expectedSig = crypto
-      .createHmac('sha256', JWT_SECRET)
+      .createHmac('sha256', getJwtSecret())
       .update(`${header}.${body}`)
       .digest('base64url');
 
@@ -152,6 +176,11 @@ export function login(username: string, password: string): { token: string; user
   }
 
   const token = createJWT({ username: user.username, role: user.role });
+  if (!token) {
+    log.error('Login failed - JWT generation returned null');
+    return null;
+  }
+  
   log.info('Login successful', { username: user.username, role: user.role });
   return { token, user, expiresIn: `${TOKEN_EXPIRY_HOURS}h` };
 }
@@ -225,5 +254,11 @@ export function optionalAuth(req: Request, _res: Response, next: NextFunction) {
 export function verifyToken(token: string): { username: string; role: string } | null {
   const payload = verifyJWT(token);
   if (!payload) return null;
-  return { username: payload.username as string, role: payload.role as string };
+
+  if (typeof payload.username !== 'string' || typeof payload.role !== 'string') {
+    log.warn('JWT payload missing or invalid username/role type', { payload });
+    return null;
+  }
+
+  return { username: payload.username, role: payload.role };
 }

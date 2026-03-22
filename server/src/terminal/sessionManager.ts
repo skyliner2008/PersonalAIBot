@@ -77,7 +77,14 @@ export class SessionManager {
       lastActivity: new Date(),
       cols: opts.cols ?? DEFAULT_COLS,
       rows: opts.rows ?? DEFAULT_ROWS,
-      cwd: opts.cwd ?? process.cwd(),
+      cwd: opts.cwd ?? (function() {
+        try {
+          return process.cwd();
+        } catch (e) {
+          log.warn(`Failed to get process.cwd(): ${e}. Falling back to '/'.`);
+          return '/';
+        }
+      })(),
       label: opts.label ?? `Terminal ${this.sessions.size + 1}`,
       platform: opts.platform ?? 'web',
       userId: opts.userId,

@@ -129,6 +129,9 @@ export const createOfficeHandlers = (ctx: BotContext) => {
         
         if (ext === '.xlsx' || ext === '.xls' || ext === '.csv') {
           const workbook = xlsx.readFile(file_path);
+          if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+            return `❌ Error: ไฟล์ Excel/CSV ไม่มี Sheet ให้ประมวลผล`;
+          }
           const sheetName = workbook.SheetNames[0];
           const json = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]);
           return `📊 ข้อมูลตาราง (JSON):\n${JSON.stringify(json, null, 2)}`;
@@ -153,11 +156,17 @@ export const createOfficeHandlers = (ctx: BotContext) => {
         if (format === 'pdf') {
           targetPath = path.join(getUploadDir(), `${cleanName}.pdf`);
           const doc = new PDFDocument();
-          doc.pipe(fs.createWriteStream(targetPath));
-          // Note for Thai Support in PDFkit: It requires a Thai font. For basic fallback we'll just write it.
-          // In production, we should register Sarabun font if Thai text drops, but for now we write raw.
-          doc.fontSize(12).text(content, 50, 50);
-          doc.end();
+          const stream = fs.createWriteStream(targetPath);
+          await new Promise<void>((resolve, reject) => {
+            stream.on('finish', resolve);
+            stream.on('error', (err) => {
+              doc.end(); // Ensure doc is ended even on stream error
+              reject(err);
+            });
+            doc.pipe(stream);
+            doc.fontSize(12).text(content, 50, 50);
+            doc.end();
+          });
         } 
         else if (format === 'docx') {
           targetPath = path.join(getUploadDir(), `${cleanName}.docx`);
@@ -203,6 +212,9 @@ export const createOfficeHandlers = (ctx: BotContext) => {
         if (ext === '.xlsx' || ext === '.csv') {
           await loadDependencies();
           const workbook = xlsx.readFile(file_path);
+          if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+            return `❌ Error: ไฟล์ Excel/CSV ไม่มี Sheet ให้แก้ไข`;
+          }
           const sheetName = workbook.SheetNames[0];
           const existingData = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]);
           

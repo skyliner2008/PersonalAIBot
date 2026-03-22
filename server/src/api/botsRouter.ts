@@ -209,7 +209,7 @@ router.put('/:id', (req, res) => {
   try {
     const updates = req.body;
 
-    if (updates.credentials) {
+    if (updates.credentials && typeof updates.credentials === 'object' && !Array.isArray(updates.credentials)) {
       const existingBot = getBot(req.params.id);
       if (existingBot) {
         const mergedCredentials = { ...existingBot.credentials };

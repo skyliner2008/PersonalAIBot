@@ -46,7 +46,7 @@ export class KeyedMutex {
 
   /** Number of active locks */
   get size(): number {
-    return this.locks.size;
+    return this.locks.size; // test
   }
 }
 

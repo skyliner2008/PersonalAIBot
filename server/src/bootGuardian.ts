@@ -18,7 +18,10 @@ function isUpgradeLockActive(): boolean {
 export function initBootGuardian() {
   const handleFatalCrash = (error: Error) => {
     try {
-      if (process.uptime() * 1000 > UPTIME_THRESHOLD_MS) {
+      const errorMsg = error.message || String(error);
+      const isSyntaxError = /Transform failed|SyntaxError|Unterminated string|Expected.*found/i.test(errorMsg);
+
+      if (process.uptime() * 1000 > UPTIME_THRESHOLD_MS && !isSyntaxError) {
         // Crash happened after safe boot window, let it die normally
         console.error('Fatal error after boot window:', error);
         process.exit(1);
@@ -26,13 +29,14 @@ export function initBootGuardian() {
 
       // If upgrade lock is active, this restart is likely caused by tsx watch
       // detecting a file change mid-upgrade — NOT a real crash. Don't rollback.
-      if (isUpgradeLockActive()) {
+      // UNLESS it's a syntax error (which will keep crashing anyway).
+      if (isUpgradeLockActive() && !isSyntaxError) {
         console.error('\n⚠️ [BootGuardian] Upgrade lock is active — this restart was likely triggered by file watcher during upgrade.');
         console.error('[BootGuardian] Skipping rollback. The upgrade process will handle success/failure.');
         process.exit(1);
       }
 
-      console.error('\n🚨 [BootGuardian] Fatal crash detected during server startup!');
+      console.error(`\n🚨 [BootGuardian] Fatal ${isSyntaxError ? 'Syntax Error' : 'crash'} detected during server startup!`);
       console.error(error);
 
       const historyDir = path.resolve(process.cwd(), '../data/upgrade_history');
@@ -94,6 +98,8 @@ export function initBootGuardian() {
         const db = new sqlite3(dbPath);
         db.prepare(`UPDATE upgrade_proposals SET status = 'rejected', description = description || ? WHERE id = ?`)
           .run(`\n\nAuto-Rollback Triggered: Server crashed during boot with error: ${error.message}`, latestUpgrade.id);
+        // Force WAL checkpoint so the status update persists across rapid restart cycles
+        try { db.pragma('wal_checkpoint(TRUNCATE)'); } catch { /* best effort */ }
         db.close();
         console.error(`[BootGuardian] ✔️ Database status updated to Rejected.`);
       }

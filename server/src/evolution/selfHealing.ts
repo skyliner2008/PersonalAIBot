@@ -40,6 +40,9 @@ export function detectIssues(): Issue[] {
     // 2. Tool repeatedly failing
     const toolFails: Record<string, { total: number; fails: number }> = {};
     for (const run of runs) {
+        if (!run.toolCalls) {
+            continue;
+        }
         for (const tc of run.toolCalls) {
             if (!toolFails[tc.name]) toolFails[tc.name] = { total: 0, fails: 0 };
             toolFails[tc.name].total++;

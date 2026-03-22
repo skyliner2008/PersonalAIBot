@@ -9,6 +9,7 @@
 import { createLogger } from '../utils/logger';
 
 const logger = createLogger('SwarmQueue');
+// Test comment to verify replace_code_block works
 
 export type TaskStatus = 'queued' | 'processing' | 'completed' | 'failed';
 
