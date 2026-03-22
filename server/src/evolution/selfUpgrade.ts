@@ -2464,6 +2464,23 @@ export function setUpgradePaused(paused: boolean): void {
     setSetting('upgrade_paused', paused ? 'true' : 'false');
   });
   log.info(`Self-Upgrade System ${paused ? 'Paused' : 'Resumed'}`);
+
+  const rootDir = _currentRootDir || path.resolve(process.cwd(), 'src');
+  if (paused) {
+    if (_continuousScanTimeout) {
+      clearTimeout(_continuousScanTimeout);
+      _continuousScanTimeout = null;
+      _isManualScanActive = false;
+      import('../database/db.js').then(({ setSetting }) => setSetting('upgrade_continuous_scan', 'false'));
+      log.info('Continuous scan mode stopped explicitly via global Master switch.');
+    }
+  } else {
+    if (!_continuousScanTimeout) {
+      import('../database/db.js').then(({ setSetting }) => setSetting('upgrade_continuous_scan', 'true'));
+      log.info('Continuous scan mode automatically started via global Master switch.');
+      executeContinuousStart(rootDir);
+    }
+  }
 }
 
 /** Get current upgrade system status */

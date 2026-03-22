@@ -334,13 +334,14 @@ export default function SelfUpgrade() {
         <div className="flex items-center gap-3">
           <button
             onClick={togglePause}
+            title="ปุ่มนี้ควบคุมทั้งระบบ Auto-Upgrade และ Auto-Scan พร้อมกัน"
             className={`flex items-center gap-2 px-3 py-1.5 rounded-lg font-bold text-xs transition-all duration-300 shadow-sm border ${
               status?.paused 
                 ? 'bg-rose-500/10 text-rose-400 border-rose-500/20 hover:bg-rose-500/20 shadow-rose-500/10' 
                 : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20 shadow-emerald-500/10'
             }`}
           >
-            {status?.paused ? '▶ เปิด Auto-Upgrade' : '⏸ พัก Auto-Upgrade'}
+            {status?.paused ? '▶ เปิด Auto-Upgrade & Scan' : '⏸ พัก Auto-Upgrade & Scan'}
           </button>
 
           {/* Check Interval Dropdown */}
@@ -372,18 +373,7 @@ export default function SelfUpgrade() {
             </select>
           </div>
 
-          <button
-            onClick={triggerScan}
-            disabled={scanning}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold text-xs transition-all duration-300 shadow-sm border ${
-              (status.isContinuousActive)
-                ? 'bg-fuchsia-500/10 text-fuchsia-400 border-fuchsia-500/20' 
-                : 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-500/25 hover:scale-105 active:scale-95 border-transparent'
-            }`}
-          >
-            {(scanning || status.isContinuousActive) ? <RefreshCcw className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
-            <span>{status.isContinuousActive ? 'หยุดสแกนต่อเนื่อง' : 'เปิดสแกนต่อเนื่อง'}</span>
-          </button>
+
         </div>
       </div>
 
