@@ -82,7 +82,7 @@ export async function isLoggedIn(): Promise<boolean> {
 async function fillFacebookLoginForm(page: Page, email: string, pass: string): Promise<boolean> {
   const emailInput = await page.$('input[name="email"]');
   if (emailInput && !await emailInput.isVisible()) {
-    console.log('[FB] Email input exists but not visible, waiting...');
+    log.info('[FB] Email input exists but not visible, waiting...');
     await page.waitForSelector('input[name="email"]', { state: 'visible', timeout: 10000 });
   }
 
@@ -302,7 +302,7 @@ export async function createPost(
     }
 
     if (!clicked) {
-      addLog('post', 'Failed to find post composer', undefined, 'error');
+      await addLog('post', 'Failed to find post composer', undefined, 'error');
       return false;
     }
 

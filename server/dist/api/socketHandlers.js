@@ -453,6 +453,9 @@ function setupSocketEventHandlers(io, socket) {
     socket.on('commentbot:stop', () => handleCommentbotStop(io));
     socket.on('scheduler:start', () => handleSchedulerStart(io));
     socket.on('scheduler:stop', () => handleSchedulerStop(io));
+    handleVoiceEvents(io, socket);
+}
+function handleVoiceEvents(io, socket) {
     // ========== Gemini Live Voice ============
     socket.on('voice:start', async (payload, ack) => {
         try {

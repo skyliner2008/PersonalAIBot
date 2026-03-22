@@ -3,6 +3,7 @@
 // ============================================================
 // Supports Gemini embedding model chain (primary + fallback) for safer upgrades.
 
+import crypto from 'crypto';
 import { GoogleGenAI } from '@google/genai';
 import { createLogger } from '../utils/logger.js';
 
@@ -63,7 +64,6 @@ interface CacheEntry {
 class LRUCache {
   private cache: Map<string, CacheEntry> = new Map();
   private maxSize: number;
-  private accessOrder: string[] = [];
 
   constructor(maxSize: number = CACHE_MAX_ENTRIES) {
     this.maxSize = maxSize;
@@ -73,29 +73,24 @@ class LRUCache {
     const entry = this.cache.get(key);
     if (!entry) return null;
 
-    const idx = this.accessOrder.indexOf(key);
-    if (idx >= 0) {
-      this.accessOrder.splice(idx, 1);
-    }
-    this.accessOrder.push(key);
+    // Refresh order: delete and re-insert to move to the end (most recent)
+    this.cache.delete(key);
+    this.cache.set(key, entry);
 
     return entry.embedding;
   }
 
   set(key: string, embedding: number[]): void {
     if (this.cache.has(key)) {
-      const idx = this.accessOrder.indexOf(key);
-      if (idx >= 0) {
-        this.accessOrder.splice(idx, 1);
-      }
+      this.cache.delete(key);
     }
 
     this.cache.set(key, { embedding });
-    this.accessOrder.push(key);
 
     if (this.cache.size > this.maxSize) {
-      const lruKey = this.accessOrder.shift();
-      if (lruKey) {
+      // The first key in the Map is the least recently used
+      const lruKey = this.cache.keys().next().value;
+      if (lruKey !== undefined) {
         this.cache.delete(lruKey);
       }
     }
@@ -103,7 +98,6 @@ class LRUCache {
 
   clear(): void {
     this.cache.clear();
-    this.accessOrder = [];
   }
 
   getStats(): { size: number; maxSize: number } {
@@ -144,9 +138,11 @@ export class EmbeddingProvider {
   private activeModel: string;
   private failoverCount = 0;
   private modelErrorCount: Record<string, number> = {};
+  private ai: GoogleGenAI;
 
-  constructor(_apiKey: string, models?: string[]) {
+  constructor(apiKey: string, models?: string[]) {
     this.cache = new LRUCache(CACHE_MAX_ENTRIES);
+    this.ai = new GoogleGenAI({ apiKey });
     const mergedModels = uniqueModels([...(models || []), ...resolveEmbeddingModelChain()]);
     this.modelChain = mergedModels.length > 0 ? mergedModels : [DEFAULT_PRIMARY_EMBEDDING_MODEL];
     this.activeModel = this.modelChain[0];
@@ -158,7 +154,7 @@ export class EmbeddingProvider {
   }
 
   async embed(text: string): Promise<number[]> {
-    if (!text || text.trim().length === 0) {
+    if (!this.isValidText(text)) {
       return [];
     }
 
@@ -173,7 +169,7 @@ export class EmbeddingProvider {
   }
 
   async embedBatch(texts: string[]): Promise<(number[] | null)[]> {
-    const validTexts = texts.filter((text) => text && text.trim().length > 0);
+    const validTexts = texts.filter((text) => this.isValidText(text));
     if (validTexts.length === 0) {
       return texts.map(() => null);
     }
@@ -192,7 +188,7 @@ export class EmbeddingProvider {
       const output: (number[] | null)[] = [];
       let validIdx = 0;
       for (const text of texts) {
-        if (text && text.trim().length > 0) {
+        if (this.isValidText(text)) {
           output.push(embeddings[validIdx] || null);
           validIdx += 1;
         } else {
@@ -208,6 +204,10 @@ export class EmbeddingProvider {
       });
       return texts.map(() => null);
     }
+  }
+
+  private isValidText(text: string | null | undefined): boolean {
+    return !!(text && text.trim().length > 0);
   }
 
   private queueEmbedding(text: string): Promise<number[]> {
@@ -243,10 +243,6 @@ export class EmbeddingProvider {
         this.cache.set(cacheKey, embedding);
         request.resolve(embedding);
       });
-
-      if (this.batchQueue.length > 0) {
-        setImmediate(() => this.processBatch());
-      }
     } catch (err) {
       currentBatch.forEach((request) => {
         request.reject(err as Error);
@@ -254,6 +250,10 @@ export class EmbeddingProvider {
       log.error('Batch processing failed', { error: toErrorMessage(err) });
     } finally {
       this.processing = false;
+    }
+
+    if (this.batchQueue.length > 0 && !this.processing) {
+      setImmediate(() => this.processBatch());
     }
   }
 
@@ -263,7 +263,8 @@ export class EmbeddingProvider {
 
   private async embedContentsWithFallback(texts: string[]): Promise<{ embeddings: number[][]; model: string }> {
     const candidates = this.getModelCandidates();
-    let lastError: unknown = null;
+    let lastError: Error | null = null;
+    const failedModels: string[] = [];
 
     const { getProviderApiKey } = await import('../config/settingsSecurity.js');
     const ai = new GoogleGenAI({ apiKey: getProviderApiKey('gemini') || '' });
@@ -295,17 +296,27 @@ export class EmbeddingProvider {
 
         return { embeddings, model };
       } catch (err) {
-        lastError = err;
+        failedModels.push(model);
+        lastError = err instanceof Error ? err : new Error(String(err));
+        
         this.modelErrorCount[model] = (this.modelErrorCount[model] || 0) + 1;
         log.warn('Embedding model failed, trying next fallback', {
           model,
           failures: this.modelErrorCount[model],
-          error: toErrorMessage(err),
+          error: toErrorMessage(lastError),
         });
       }
     }
 
-    throw lastError instanceof Error ? lastError : new Error('All embedding models failed');
+    const failureMsg = `All embedding models failed: [${failedModels.join(', ')}]. Last error: ${lastError?.message || 'Unknown error'}`;
+    throw new Error(failureMsg);
+  }
+
+  private cacheEmbedding(text: string, embedding: number[] | undefined | null): void {
+    if (this.isValidText(text) && embedding && embedding.length > 0) {
+      const cacheKey = this.hashText(text);
+      this.cache.set(cacheKey, embedding);
+    }
   }
 
   private hashText(text: string): string {
@@ -338,57 +349,55 @@ export class EmbeddingProvider {
 }
 
 // ============================================================
-// Global Instance & Convenience Functions
+// Dependency Injection & Singleton Convenience Functions
 // ============================================================
 
-let globalProvider: EmbeddingProvider | null = null;
+let defaultProvider: EmbeddingProvider | null = null;
 
-export function initEmbeddingProvider(apiKey: string, preferredModels?: string[]): EmbeddingProvider {
-  globalProvider = new EmbeddingProvider(apiKey, preferredModels);
-  return globalProvider;
-}
-
-export function getEmbeddingProvider(): EmbeddingProvider {
-  if (!globalProvider) {
-    throw new Error('EmbeddingProvider not initialized. Call initEmbeddingProvider() first.');
+export function initEmbeddingProvider(apiKey: string | undefined): void {
+  if (apiKey) {
+    defaultProvider = new EmbeddingProvider(apiKey);
+    log.info('Default EmbeddingProvider initialized');
+  } else {
+    log.warn('No apiKey provided for EmbeddingProvider initialization');
   }
-  return globalProvider;
 }
 
-export async function embedText(text: string): Promise<number[]> {
+export function getDefaultEmbeddingProvider(): EmbeddingProvider {
+  if (!defaultProvider) throw new Error('EmbeddingProvider not initialized');
+  return defaultProvider;
+}
+
+/**
+ * Convenience wrapper for embedding a single text using a provided instance (or singleton).
+ */
+export async function embedText(text: string, provider?: EmbeddingProvider): Promise<number[]> {
+  const p = provider || getDefaultEmbeddingProvider();
   try {
-    const provider = getEmbeddingProvider();
-    return await provider.embed(text);
+    return await p.embed(text);
   } catch (err) {
     log.error('Embedding failed', { error: toErrorMessage(err) });
     return [];
   }
 }
 
-export async function embedTexts(texts: string[]): Promise<(number[] | null)[]> {
+/**
+ * Convenience wrapper for embedding multiple texts using a provided instance (or singleton).
+ */
+export async function embedTexts(texts: string[], provider?: EmbeddingProvider): Promise<(number[] | null)[]> {
+  const p = provider || getDefaultEmbeddingProvider();
   try {
-    const provider = getEmbeddingProvider();
-    return await provider.embedBatch(texts);
+    return await p.embedBatch(texts);
   } catch (err) {
     log.error('Batch embedding failed', { error: toErrorMessage(err) });
     return texts.map(() => null);
   }
 }
 
-export function getEmbeddingStats(): EmbeddingProviderStats {
-  try {
-    const provider = getEmbeddingProvider();
-    return provider.getStats();
-  } catch {
-    const modelChain = resolveEmbeddingModelChain();
-    return {
-      cacheSize: 0,
-      maxCacheSize: CACHE_MAX_ENTRIES,
-      queuedRequests: 0,
-      configuredModels: modelChain,
-      activeModel: modelChain[0] || DEFAULT_PRIMARY_EMBEDDING_MODEL,
-      failoverCount: 0,
-      modelErrors: {},
-    };
-  }
+/**
+ * Retrieves stats from an EmbeddingProvider instance (or singleton).
+ */
+export function getEmbeddingStats(provider?: EmbeddingProvider): EmbeddingProviderStats {
+  const p = provider || getDefaultEmbeddingProvider();
+  return p.getStats();
 }

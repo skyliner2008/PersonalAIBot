@@ -174,6 +174,7 @@ This refactoring is **non-breaking** and can be deployed immediately:
 ## Performance Implications
 
 - **Positive:** Swarm persistent lanes can reduce startup overhead for repeated commands
+- **Positive:** Lazy-loading of specialized modules (like `swarmLaneManager`) reduces initial startup time and memory footprint by only loading them when their functionality is required.
 - **Neutral:** No performance regression; same algorithms, just reorganized
 - **Code health:** Smaller modules easier to test, profile, and maintain
 

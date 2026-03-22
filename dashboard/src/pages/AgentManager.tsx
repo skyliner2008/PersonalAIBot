@@ -164,7 +164,27 @@ export function AgentManager() {
     web: '',
   });
   const [savingAdminIds, setSavingAdminIds] = useState(false);
-  const [adminRoutingExpanded, setAdminRoutingExpanded] = useState(true);
+  const [adminRoutingExpanded, setAdminRoutingExpanded] = useState(false);
+
+  // Agent credentials editing state
+  const [editingCreds, setEditingCreds] = useState<Record<string, Record<string, string>>>({});
+  const [savingCredsFor, setSavingCredsFor] = useState<string | null>(null);
+
+  const handleUpdateCredentials = async (botId: string) => {
+    const creds = editingCreds[botId];
+    if (!creds || Object.keys(creds).length === 0) return;
+    setSavingCredsFor(botId);
+    try {
+      await api.updateBot(botId, { credentials: creds });
+      setBots(prev => prev.map(b => b.id === botId ? { ...b, credentials: { ...b.credentials, ...creds } } : b));
+      setEditingCreds(prev => { const next = { ...prev }; delete next[botId]; return next; });
+      alert('Credentials updated! Please restart the bot.');
+    } catch (err: any) {
+      console.error('Failed to update credentials:', err);
+      alert(err.message || 'Failed to update credentials');
+    }
+    setSavingCredsFor(null);
+  };
 
   // Agent routing overview state
   const [agentConfig, setAgentConfig] = useState<GlobalRoutingConfig>({ autoRouting: false, routes: {} });
@@ -182,7 +202,7 @@ export function AgentManager() {
     telegram: null,
     system: null,
   });
-  const [expandedPersona, setExpandedPersona] = useState<PersonaPlatform | null>('system');
+  const [expandedPersona, setExpandedPersona] = useState<PersonaPlatform | null>(null);
   const [savingPersonaPlatform, setSavingPersonaPlatform] = useState<PersonaPlatform | null>(null);
   const [runtimeSettings, setRuntimeSettings] = useState<Record<RootRuntimeKey, string>>({
     jarvis_root_bot_id: '',
@@ -556,8 +576,9 @@ export function AgentManager() {
     try {
       await api.toggleBot(id);
       loadData();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to toggle bot:', err);
+      alert(err.message || 'Failed to toggle bot');
     }
   };
 
@@ -1275,6 +1296,48 @@ export function AgentManager() {
                       })}
                     </div>
                   </div>
+                  {/* Credentials Editing */}
+                  {(() => {
+                    const credFields = platforms.find(p => p.platform === bot.platform)?.credentialFields ?? [];
+                    if (credFields.length === 0) return null;
+                    const isEditing = !!editingCreds[bot.id];
+                    const isSaving = savingCredsFor === bot.id;
+                    return (
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <h4 className="text-xs text-gray-400 font-medium flex items-center gap-1.5">
+                            <Shield className="w-3.5 h-3.5 text-orange-400" />
+                            Bot Credentials
+                          </h4>
+                          {isEditing && (
+                            <button onClick={() => handleUpdateCredentials(bot.id)} disabled={isSaving} className="px-3 py-1 bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white rounded text-[10px] uppercase font-bold transition-colors">
+                              {isSaving ? 'Saving...' : 'Save Credentials'}
+                            </button>
+                          )}
+                        </div>
+                        <div className="space-y-2 rounded-lg border border-gray-800 bg-gray-800/40 p-3">
+                          {credFields.map(f => {
+                            const currentValue = editingCreds[bot.id]?.[f.key] ?? bot.credentials?.[f.key] ?? '';
+                            return (
+                              <div key={f.key} className="flex items-center gap-3">
+                                <span className="text-[10px] text-gray-500 w-32 truncate" title={f.label}>{f.label}</span>
+                                <input
+                                  type={f.secret && currentValue === '********' ? 'password' : 'text'}
+                                  className="flex-1 bg-gray-900 text-green-400 px-3 py-1.5 rounded text-xs border border-gray-700 focus:border-orange-500 outline-none font-mono"
+                                  placeholder={f.secret ? '********' : ''}
+                                  value={currentValue}
+                                  onChange={e => setEditingCreds(prev => ({
+                                    ...prev,
+                                    [bot.id]: { ...(prev[bot.id] || {}), [f.key]: e.target.value }
+                                  }))}
+                                />
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* Info */}
                   <div className="grid grid-cols-3 gap-4 text-xs">

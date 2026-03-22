@@ -49,3 +49,15 @@ list_specialists
 
 add_cli_agent
 audit_cli_integration
+replace_code_block
+search_codebase
+generate_image
+generate_speech
+generate_video
+read_document
+create_document
+edit_document
+read_google_doc
+create_cron_job
+list_cron_jobs
+delete_cron_job

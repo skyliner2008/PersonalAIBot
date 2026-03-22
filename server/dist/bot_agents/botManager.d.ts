@@ -5,6 +5,9 @@ export declare function startBotInstance(app: express.Express | null, botId: str
 export declare function stopBotInstance(botId: string): void;
 /** Start all bots (called at server startup) */
 export declare function startBots(app: express.Express): void;
+/** Broadcast an alert message to all configured Admin Telegram/Line IDs */
+export declare function broadcastToAdmins(message: string): Promise<void>;
+export declare function setupBotManagerRoutes(app: express.Express): void;
 /** Stop all bot agents gracefully */
 export declare function stopBots(): void;
 /** Get list of active bot IDs */

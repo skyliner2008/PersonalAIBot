@@ -255,6 +255,50 @@ export class GeminiProvider implements AIProvider {
     }, { context: 'Gemini' });
   }
 
+  async generateImage(prompt: string, modelName?: string, options?: Record<string, any>): Promise<{ url?: string; b64_json?: string; buffer?: Buffer; revised_prompt?: string }[]> {
+    const model = modelName || 'imagen-3.0-generate-001';
+    const client = this.getClientForModel(model);
+    const response = await client.models.generateImages({
+      model,
+      prompt,
+      config: {
+        numberOfImages: options?.n || 1,
+        outputMimeType: options?.response_format === 'png' ? 'image/png' : 'image/jpeg',
+        aspectRatio: options?.aspectRatio || '1:1',
+        personGeneration: 'ALLOW_ALL' as any
+      }
+    });
+
+    return (response.generatedImages || []).map(img => {
+      return {
+        b64_json: img.image?.imageBytes,
+        buffer: img.image?.imageBytes ? Buffer.from(img.image.imageBytes, 'base64') : undefined
+      };
+    });
+  }
+
+  async generateSpeech(text: string, modelName?: string, voice?: string): Promise<Buffer> {
+    const model = modelName || 'gemini-2.5-flash';
+    const client = this.getClientForModel(model);
+    const response = await client.models.generateContent({
+      model,
+      contents: [{ role: 'user', parts: [{ text }] }],
+      config: {
+        responseModalities: ["AUDIO"],
+        speechConfig: voice ? { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } } : undefined
+      } as any
+    });
+    
+    // Parse AUDIO modality output (usually base64 inline data)
+    for (const part of response.candidates?.[0]?.content?.parts || []) {
+      if (part.inlineData && part.inlineData.mimeType?.startsWith('audio')) {
+        return Buffer.from(part.inlineData.data || '', 'base64');
+      }
+    }
+    
+    throw new Error('No audio generated from ' + model);
+  }
+
   async listModels(): Promise<string[]> {
     try {
       const allModels: string[] = [];

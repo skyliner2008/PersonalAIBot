@@ -1,5 +1,5 @@
 import type { Content } from '@google/genai';
-import type { AIProvider, AIMessage, AICompletionOptions, AITask, AIChatResponse } from './types.js';
+import type { AIProvider, AIProviderType, AIMessage, AICompletionOptions, AITask, AIChatResponse } from './types.js';
 import { getSetting } from '../database/db.js';
 import { getAgentAllowOpenaiAutoFallback } from '../config/runtimeSettings.js';
 import { getFallbackOrder, getProvider as getRegistryProvider } from '../providers/registry.js';
@@ -58,15 +58,27 @@ class ProviderConfigurationError extends Error {
 }
 
 class RegistryAIProviderAdapter implements AIProvider {
-  public readonly id: string;
+  public readonly id: AIProviderType;
+  public readonly type: AIProviderType;
   public readonly name: string;
   private readonly providerDef: ReturnType<typeof getAgentCompatibleProvider>;
 
   constructor(private readonly providerId: string) {
     const provider = getAgentCompatibleProvider(providerId);
-    this.id = providerId;
+    const supportedTypes: string[] = ['openai', 'azure', 'anthropic', 'google', 'gemini', 'minimax', 'openrouter'];
+    const resolvedType = (supportedTypes.includes(providerId)
+      ? providerId
+      : 'openai') as AIProviderType;
+
+    this.id = resolvedType;
+    this.type = resolvedType;
     this.name = provider?.name || providerId;
     this.providerDef = provider;
+  }
+
+  async openaiSpecificMethod(): Promise<void> {
+    if (this.type !== 'openai') throw new Error('Method only available for OpenAI');
+    console.log('OpenAI specific logic');
   }
 
   private getProviderDef() {
@@ -189,8 +201,9 @@ function getProviderAdapter(providerId: string): AIProvider {
   }
 
   const adapter = new RegistryAIProviderAdapter(providerId);
-  providerCache.set(providerId, adapter);
-  return adapter;
+  const provider = adapter as unknown as AIProvider;
+  providerCache.set(providerId, provider);
+  return provider;
 }
 
 let cachedEnabledProviders: ReturnType<typeof getAgentCompatibleProviders> | null = null;
@@ -335,18 +348,19 @@ export async function aiChat(
       }
 
       const result = await provider.chat(messages, chatOptions);
+      const chatResult = result as AIChatResponse;
       trackUsage({
         provider: provider.id,
         model: chatOptions.model || (providerId === preferredProviderId ? 'default' : 'fallback'),
         task,
         platform: 'api',
-        promptTokens: result.usage?.promptTokens || 0,
-        completionTokens: result.usage?.completionTokens || 0,
-        totalTokens: result.usage?.totalTokens || 0,
+        promptTokens: chatResult.usage?.promptTokens || 0,
+        completionTokens: chatResult.usage?.completionTokens || 0,
+        totalTokens: chatResult.usage?.totalTokens || 0,
         durationMs: Date.now() - startMs,
         success: true,
       });
-      return result;
+      return chatResult;
     } catch (err: any) {
       const errorMessage = escapeHtml(String(err.message || 'Unknown error'));
       trackUsage({

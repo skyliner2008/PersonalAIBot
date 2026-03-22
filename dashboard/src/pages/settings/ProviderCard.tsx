@@ -35,17 +35,26 @@ export function ProviderCard({
 }: ProviderCardProps) {
   return (
     <div className={`bg-gray-800/40 rounded-lg p-3 space-y-2 border ${
-      provider.configured ? 'border-green-500/20' : 'border-gray-800'
-    } ${!provider.enabled ? 'opacity-50' : ''}`}>
+      provider.configured ? 'border-green-500/20' : 'border-yellow-500/20 bg-yellow-500/5'
+    } ${!provider.enabled ? 'opacity-70 grayscale-[0.5]' : ''}`}>
 
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <p className="text-xs font-medium text-gray-200">{provider.name}</p>
           <span className="text-[9px] font-mono text-gray-600 bg-gray-900 px-1.5 py-0.5 rounded">{provider.id}</span>
-          {provider.configured && (
-            <span className="text-[9px] text-green-400 bg-green-500/10 px-1.5 py-0.5 rounded border border-green-500/20">
+          {provider.configured ? (
+            <span className="text-[9px] text-green-400 bg-green-500/10 px-1.5 py-0.5 rounded border border-green-500/20 uppercase tracking-wide">
               configured
+            </span>
+          ) : (
+            <span className="text-[9px] text-yellow-500 bg-yellow-500/10 px-1.5 py-0.5 rounded border border-yellow-500/20 uppercase tracking-wide">
+              unconfigured
+            </span>
+          )}
+          {!provider.enabled && (
+            <span className="text-[9px] text-gray-400 bg-gray-700/50 px-1.5 py-0.5 rounded border border-gray-600 uppercase tracking-wide">
+              disabled
             </span>
           )}
           {provider.type && (

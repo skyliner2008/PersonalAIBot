@@ -13,7 +13,7 @@ const API_TITLE = 'PersonalAIBotV2 API';
 
 export function getOpenAPISpec(): object {
   return {
-    openapi: '3.0.3',
+    openapi: '3.0.3', // Test replacement
     info: {
       title: API_TITLE,
       version: API_VERSION,

@@ -432,15 +432,27 @@ export class Agent {
 
   private getFallbackChainFromMd(): Array<{ provider: string; model: string }> {
     try {
-      const filePath = path.join(process.cwd(), 'server', 'personas', 'system', 'ROUTING.md');
-      if (fs.existsSync(filePath)) {
-        const content = fs.readFileSync(filePath, 'utf8');
-        const matches = content.matchAll(/^\d+\.\s*([^:]+):\s*(.+)$/gm);
-        const chain = Array.from(matches).map(m => ({ provider: m[1].trim().toLowerCase(), model: m[2].trim() }));
-        if (chain.length > 0) return chain;
+      // Try multiple possible locations for ROUTING.md (cwd may be project root or server/)
+      const candidates = [
+        path.join(process.cwd(), 'server', 'personas', 'system', 'ROUTING.md'),
+        path.join(process.cwd(), 'personas', 'system', 'ROUTING.md'),
+        path.resolve(__dirname, '..', '..', 'personas', 'system', 'ROUTING.md'),
+      ];
+      for (const filePath of candidates) {
+        if (fs.existsSync(filePath)) {
+          const content = fs.readFileSync(filePath, 'utf8');
+          const matches = content.matchAll(/^\d+\.\s*([^:]+):\s*(.+)$/gm);
+          const chain = Array.from(matches).map(m => ({ provider: m[1].trim().toLowerCase(), model: m[2].trim() }));
+          if (chain.length > 0) return chain;
+        }
       }
     } catch {}
-    return [{ provider: 'gemini', model: 'gemini-1.5-flash' }, { provider: 'openai', model: 'gpt-4o-mini' }];
+    // Improved default fallback — prefer modern models
+    return [
+      { provider: 'gemini', model: 'gemini-2.5-flash' },
+      { provider: 'gemini', model: 'gemini-2.0-flash' },
+      { provider: 'minimax', model: 'MiniMax-M2.7' },
+    ];
   }
 
   private buildTimeoutResponse(stats: IAgentStats): string {

@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-03-20",
+  "lastUpdated": "2026-03-22",
   "description": "Unified Provider Registry — เพิ่ม provider ใหม่ได้ที่ไฟล์นี้ ไม่ต้องแก้โค้ด",
   "providers": {
     "gemini": {
@@ -843,6 +843,50 @@
       "apiKeyEnvVar": "KILO_CLI_API_KEY",
       "enabled": true,
       "notes": "OAuth via kilo CLI — Kilo CLI — C:\\Users\\MSI\\AppData\\Roaming\\npm\\kilo"
+    },
+    "gemini-tts": {
+      "id": "gemini-tts",
+      "name": "Gemini TTS",
+      "category": "tts",
+      "type": "gemini",
+      "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
+      "defaultModel": "gemini-tts-1",
+      "capabilities": {
+        "textToSpeech": true
+      },
+      "requiresAuth": true,
+      "apiKeyEnvVar": "GEMINI_API_KEY",
+      "enabled": false,
+      "configured": false
+    },
+    "gemini-image": {
+      "id": "gemini-image",
+      "name": "Gemini Imagen (Image Gen)",
+      "category": "image",
+      "type": "gemini",
+      "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
+      "defaultModel": "imagen-4.0-generate-001",
+      "capabilities": {
+        "imageGeneration": true
+      },
+      "requiresAuth": true,
+      "apiKeyEnvVar": "GEMINI_API_KEY",
+      "enabled": false,
+      "configured": false
+    },
+    "gemini-search": {
+      "id": "gemini-search",
+      "name": "Google Grounding (Search)",
+      "category": "search",
+      "type": "gemini",
+      "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
+      "capabilities": {
+        "search": true
+      },
+      "requiresAuth": true,
+      "apiKeyEnvVar": "GEMINI_API_KEY",
+      "enabled": false,
+      "configured": false
     }
   },
   "fallbackOrder": {

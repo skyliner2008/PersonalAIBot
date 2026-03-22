@@ -6,35 +6,76 @@
         "provider": "minimax",
         "modelName": "MiniMax-M2.7"
       },
-      "fallbacks": []
+      "fallbacks": [
+        {
+          "provider": "gemini",
+          "modelName": "gemini-2.5-flash"
+        },
+        {
+          "provider": "gemini",
+          "modelName": "gemini-2.0-flash"
+        }
+      ]
     },
     "complex": {
       "active": {
         "provider": "minimax",
         "modelName": "MiniMax-M2.7"
       },
-      "fallbacks": []
+      "fallbacks": [
+        {
+          "provider": "gemini",
+          "modelName": "gemini-2.5-pro"
+        },
+        {
+          "provider": "gemini",
+          "modelName": "gemini-2.5-flash"
+        }
+      ]
     },
     "vision": {
       "active": {
         "provider": "minimax",
         "modelName": "MiniMax-M2.7"
       },
-      "fallbacks": []
+      "fallbacks": [
+        {
+          "provider": "gemini",
+          "modelName": "gemini-2.5-flash"
+        },
+        {
+          "provider": "gemini",
+          "modelName": "gemini-2.0-flash"
+        }
+      ]
     },
     "web": {
       "active": {
         "provider": "gemini",
         "modelName": "gemini-2.0-flash"
       },
-      "fallbacks": []
+      "fallbacks": [
+        {
+          "provider": "gemini",
+          "modelName": "gemini-2.5-flash"
+        }
+      ]
     },
     "thinking": {
       "active": {
         "provider": "gemini",
-        "modelName": "gemini-3-flash-preview"
+        "modelName": "gemini-2.5-flash"
       },
-      "fallbacks": []
+      "fallbacks": [
+        {
+          "provider": "gemini",
+          "modelName": "gemini-2.0-flash"
+        },
+        {
+          "provider": "minimax",
+          "modelName": "MiniMax-M2.7"
+        }
+      ]
     },
     "code": {
       "active": {
@@ -48,14 +89,24 @@
         "provider": "gemini",
         "modelName": "gemini-2.5-flash"
       },
-      "fallbacks": []
+      "fallbacks": [
+        {
+          "provider": "gemini",
+          "modelName": "gemini-2.0-flash"
+        }
+      ]
     },
     "system": {
       "active": {
         "provider": "gemini",
         "modelName": "gemini-2.5-flash"
       },
-      "fallbacks": []
+      "fallbacks": [
+        {
+          "provider": "gemini",
+          "modelName": "gemini-2.0-flash"
+        }
+      ]
     }
   },
   "botOverrides": {
@@ -85,10 +136,6 @@
             {
               "provider": "gemini",
               "modelName": "gemini-2.5-flash"
-            },
-            {
-              "provider": "openai",
-              "modelName": "gpt-4o-mini"
             }
           ]
         },
@@ -122,8 +169,8 @@
           },
           "fallbacks": [
             {
-              "provider": "openai",
-              "modelName": "gpt-4o"
+              "provider": "gemini",
+              "modelName": "gemini-2.0-flash"
             }
           ]
         },
@@ -134,12 +181,8 @@
           },
           "fallbacks": [
             {
-              "provider": "openai",
-              "modelName": "gpt-5.4-pro"
-            },
-            {
-              "provider": "openai",
-              "modelName": "gpt-4o"
+              "provider": "gemini",
+              "modelName": "gemini-2.0-flash"
             }
           ]
         },
@@ -152,10 +195,6 @@
             {
               "provider": "gemini",
               "modelName": "gemini-2.0-flash"
-            },
-            {
-              "provider": "openai",
-              "modelName": "gpt-4o-mini"
             }
           ]
         }

@@ -13,6 +13,7 @@ import { KeyManager } from './keyManager.js';
 import { GeminiProvider } from '../bot_agents/providers/geminiProvider.js';
 import { OpenAICompatibleProvider } from '../bot_agents/providers/openaiCompatibleProvider.js';
 import { AnthropicProvider } from '../bot_agents/providers/anthropicProvider.js';
+import { RestApiProvider } from '../bot_agents/providers/restApiProvider.js';
 
 const log = createLogger('ProviderFactory');
 
@@ -53,6 +54,8 @@ export class ProviderFactory {
           return new GeminiProvider(key, {
             providerId: provider.id,
             includeEmbeddingsInList: provider.category === 'embedding',
+            includeTTSInList: provider.category === 'tts',
+            includeAqaInList: provider.category === 'search'
           });
 
         case 'openai-compatible':
@@ -62,8 +65,7 @@ export class ProviderFactory {
           return new AnthropicProvider(key, provider.baseUrl);
 
         case 'rest-api':
-          log.warn('Rest API not implemented', { providerId });
-          return null;
+          return new RestApiProvider(key, provider);
 
         case 'platform':
           return null;

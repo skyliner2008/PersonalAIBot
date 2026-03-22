@@ -208,6 +208,20 @@ router.post('/', (req, res) => {
 router.put('/:id', (req, res) => {
   try {
     const updates = req.body;
+
+    if (updates.credentials) {
+      const existingBot = getBot(req.params.id);
+      if (existingBot) {
+        const mergedCredentials = { ...existingBot.credentials };
+        for (const [key, val] of Object.entries(updates.credentials)) {
+          if (val && val !== '********') {
+            mergedCredentials[key] = val as string;
+          }
+        }
+        updates.credentials = mergedCredentials;
+      }
+    }
+
     const bot = updateBot(req.params.id, updates);
     if (!bot) return res.status(404).json({ error: 'Bot not found' });
 
@@ -242,20 +256,20 @@ router.delete('/:id', (req, res) => {
  */
 router.post('/:id/toggle', toggleLimiter, (req, res) => {
   try {
-    const bot = getBot(req.params.id);
+    const bot = getBot(req.params.id as string);
     if (!bot) return res.status(404).json({ error: 'Bot not found' });
 
     if (bot.status === 'active') {
       // Stop the running bot
-      const updated = stopBotInstance(bot.id);
-      res.json(updated);
+      stopBotInstance(bot.id);
+      res.json({ success: true, action: 'stopped' });
     } else {
       // Start the bot (uses Express app reference from request)
-      const updated = startBotInstance(req.app, bot.id);
-      if (!updated) {
+      const started = startBotInstance(req.app as any, bot.id);
+      if (!started) {
         return res.status(500).json({ error: 'Failed to start bot - check server logs' });
       }
-      res.json(updated);
+      res.json({ success: true, action: 'started' });
     }
   } catch (err: unknown) {
     handleError(res, err);

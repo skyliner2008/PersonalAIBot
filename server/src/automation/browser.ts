@@ -15,7 +15,7 @@ const COOKIES_FILE = path.join(config.cookiesDir, 'fb-cookies.json');
  * Launch Playwright browser with stealth settings.
  */
 export async function launchBrowser(): Promise<BrowserContext> {
-  if (context) return context;
+  if (context && browser?.isConnected()) return context;
 
   fs.mkdirSync(config.cookiesDir, { recursive: true });
 
@@ -66,10 +66,14 @@ export async function launchBrowser(): Promise<BrowserContext> {
  * Save current cookies to file for session persistence.
  */
 export async function saveCookies(): Promise<void> {
-  if (!context) return;
-  const cookies = await context.cookies();
-  fs.writeFileSync(COOKIES_FILE, JSON.stringify(cookies, null, 2));
-  addLog('browser', 'Cookies saved', `${cookies.length} cookies`, 'info');
+  if (!context || !browser?.isConnected()) return;
+  try {
+    const cookies = await context.cookies();
+    fs.writeFileSync(COOKIES_FILE, JSON.stringify(cookies, null, 2));
+    addLog('browser', 'Cookies saved', `${cookies.length} cookies`, 'info');
+  } catch (e) {
+    console.debug('[Browser] saveCookies:', String(e));
+  }
 }
 
 /**
@@ -82,8 +86,8 @@ export async function getMainPage(): Promise<Page> {
   if (mainPage && mainPage.isClosed()) {
     try {
       await mainPage.close();
-    } catch {
-      // Page already closed, ignore
+    } catch (e) {
+      console.warn('Error closing mainPage:', e);
     }
     mainPage = null;
   }
@@ -105,21 +109,41 @@ export async function newPage(): Promise<Page> {
  * Close everything.
  */
 export async function closeBrowser(): Promise<void> {
-  // Set state first so bots detect browser is closing
-  const hadContext = !!context;
-  mainPage = null;
-
   if (context) {
-    try { await saveCookies(); } catch (e) { console.debug('[Browser] saveCookies:', String(e)); }
-    try { await context.close(); } catch (e) { console.debug('[Browser] close context:', String(e)); }
+    try {
+      await saveCookies();
+    } catch (e) {
+      console.debug('[Browser] saveCookies:', String(e));
+    }
+
+    if (!browser) {
+      console.debug('[Browser] Context exists but browser is null');
+    }
+
+    // Note: BrowserContext doesn't have isConnected(), so we check the parent browser
+    if (browser && browser.isConnected()) {
+      try {
+        await context.close();
+      } catch (e) {
+        console.debug('[Browser] close context:', String(e));
+      }
+    } else {
+      console.debug('[Browser] Context closing skipped: Browser already disconnected or null');
+    }
     context = null;
   }
+
   if (browser) {
-    try { await browser.close(); } catch (e) { console.debug('[Browser] close browser:', String(e)); }
+    if (browser.isConnected()) {
+      try {
+        await browser.close();
+      } catch (e) {
+        console.debug('[Browser] close browser:', String(e));
+      }
+    } else {
+      console.debug('[Browser] Browser closing skipped: Already disconnected');
+    }
     browser = null;
-  }
-  if (hadContext) {
-    addLog('browser', 'Browser closed', undefined, 'info');
   }
 }
 
@@ -128,23 +152,28 @@ export async function closeBrowser(): Promise<void> {
  */
 export function humanDelay(min: number = 1000, max: number = 3000): Promise<void> {
   const ms = Math.floor(Math.random() * (max - min) + min);
-  return new Promise(r => setTimeout(r, ms));
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 /**
  * Human-like typing (type with random delays between keys).
  */
 export async function humanType(page: Page, selector: string, text: string): Promise<void> {
-  await page.click(selector);
+  try {
+    await page.click(selector);
+  } catch (e) {
+    console.error('Error clicking selector:', e);
+    throw e; // Re-throw the error to be handled upstream
+  }
   for (const char of text) {
     await page.keyboard.type(char, {
-      delay: Math.random() * (config.maxTypingSpeed - config.minTypingSpeed) + config.minTypingSpeed
+      delay: Math.random() * (config.maxTypingSpeed - config.minTypingSpeed) + config.minTypingSpeed,
     });
   }
 }
 
 export function isRunning(): boolean {
-  return !!context && !!browser;
+  return !!context && !!browser && browser.isConnected();
 }
 
 /**

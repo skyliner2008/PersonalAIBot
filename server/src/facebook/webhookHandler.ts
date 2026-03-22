@@ -174,7 +174,7 @@ async function processAndReplyMessage(senderId: string, text: string, messageId:
     // 4. Get persona (fallback to sensible defaults if none configured)
     const personaRow = getDefaultPersona();
     const persona = {
-      system_prompt:      personaRow?.system_prompt      ?? 'คุณคือแอดมินเพจ ตอบสุภาพ เป็นกันเอง',
+      systemPrompt:       personaRow?.system_prompt      ?? 'คุณคือแอดมินเพจ ตอบสุภาพ เป็นกันเอง',
       speaking_style:     personaRow?.speaking_style     ?? 'casual-thai',
       personality_traits: personaRow?.personality_traits ?? '["friendly","helpful"]',
       temperature:        personaRow?.temperature        ?? 0.7,
@@ -188,8 +188,8 @@ async function processAndReplyMessage(senderId: string, text: string, messageId:
     // 6. Build AI prompt & get reply
     const aiMessages = buildChatMessages(persona, filteredHistory, text);
     const aiResult = await aiChat('chat', aiMessages, {
-      temperature: persona.temperature || 0.7,
-      maxTokens: persona.max_tokens || 500,
+      temperature: persona.temperature,
+      maxTokens: persona.max_tokens,
     });
 
     // 7. Strip thinking tags

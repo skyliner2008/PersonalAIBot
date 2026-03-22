@@ -1,6 +1,9 @@
 import { getSetting } from '../../database/db.js';
 import { getProviderApiKey } from '../../config/settingsSecurity.js';
+import { createLogger } from '../../utils/logger.js';
+const log = createLogger('GeminiProvider');
 export class GeminiProvider {
+    static API_VERSIONS = ['v1beta', 'v1'];
     id = 'gemini';
     name = 'Google Gemini';
     getKey() {
@@ -33,14 +36,17 @@ export class GeminiProvider {
             body.systemInstruction = { parts: [{ text: systemInstruction }] };
         }
         // Try v1beta first, then v1 if model not found (some newer models only work on v1)
-        const apiVersions = ['v1beta', 'v1'];
+        const apiVersions = GeminiProvider.API_VERSIONS;
         let res;
         let lastError = '';
         for (const apiVer of apiVersions) {
-            const url = `https://generativelanguage.googleapis.com/${apiVer}/models/${model}:generateContent?key=${key}`;
+            const url = `https://generativelanguage.googleapis.com/${apiVer}/models/${model}:generateContent`;
             res = await fetch(url, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${key}`
+                },
                 body: JSON.stringify(body),
             });
             if (res.ok)
@@ -49,7 +55,7 @@ export class GeminiProvider {
             lastError = err.error?.message || res.statusText;
             // Only retry on 404 NOT_FOUND (model not available on this version)
             if (res.status === 404 && apiVer !== apiVersions[apiVersions.length - 1]) {
-                console.log(`[Gemini Legacy] Model "${model}" not found on ${apiVer}, trying next API version...`);
+                log.info(`Model "${model}" not found on ${apiVer}, trying next API version...`);
                 continue;
             }
             throw new Error(`Gemini error ${res.status}: ${lastError}`);
@@ -71,11 +77,13 @@ export class GeminiProvider {
             const key = this.getKey();
             if (!key)
                 return false;
-            const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${key}`);
+            const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models`, {
+                headers: { 'Authorization': `Bearer ${key}` }
+            });
             return res.ok;
         }
         catch (e) {
-            console.debug('[Gemini] API validation failed:', String(e));
+            log.debug('API validation failed:', String(e));
             return false;
         }
     }
@@ -83,11 +91,26 @@ export class GeminiProvider {
         const key = this.getKey();
         if (!key)
             return [];
-        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${key}`);
-        if (!res.ok)
-            return [];
-        const data = await res.json();
-        return data.models?.map((m) => m.name.replace('models/', '')) || [];
+        const allModels = new Set();
+        for (const apiVer of GeminiProvider.API_VERSIONS) {
+            try {
+                const res = await fetch(`https://generativelanguage.googleapis.com/${apiVer}/models`, {
+                    headers: { 'Authorization': `Bearer ${key}` }
+                });
+                if (!res.ok) {
+                    log.debug(`Failed to fetch models from Gemini ${apiVer}: ${res.statusText}`);
+                    continue;
+                }
+                const data = await res.json();
+                const models = data.models?.map((m) => m.name.replace('models/', '')) || [];
+                models.forEach((m) => allModels.add(m));
+            }
+            catch (e) {
+                log.debug(`Error fetching models from Gemini ${apiVer}:`, String(e));
+                // Continue to next version
+            }
+        }
+        return Array.from(allModels);
     }
 }
 //# sourceMappingURL=gemini.js.map

@@ -130,7 +130,7 @@ const SWARM_VERBOSE_LOGS = process.env.SWARM_VERBOSE_LOGS === '1';
 
 function queueInfo(...args: unknown[]): void {
   if (SWARM_VERBOSE_LOGS) {
-    console.log(...args);
+    logger.info(args.map(String).join(' '));
   }
 }
 
@@ -210,7 +210,7 @@ export class TaskQueue {
 
     for (const cb of [...taskCallbacks, ...globalCbs]) {
       try { await cb(task); } catch (err) {
-        console.error(`[TaskQueue] Callback error for task ${task.id}:`, err);
+                logger.error(`[TaskQueue] Callback error for task ${task.id}:`, err);
       }
     }
     this.callbacks.delete(task.id);

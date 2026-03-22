@@ -185,8 +185,10 @@ export function invalidatePerformanceCache(): void {
 // Keyword scoring system — ให้คะแนนทุกประเภทแล้วเลือกที่ได้สูงสุด
 // ============================================================
 
+import { Keyword } from '../types.js';
+
 interface KeywordRule {
-  keywords: string[];
+  keywords: Keyword[];
   score: number;
 }
 

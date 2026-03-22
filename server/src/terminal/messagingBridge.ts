@@ -64,7 +64,7 @@ export function exitBossMode(platform: 'telegram' | 'line', userId: string): boo
 
 // ── Admin User Whitelist ──
 // Fetch Admin IDs dynamically from DB Settings or fallback to ENV
-function getAdminIds(platform: 'telegram' | 'line'): Set<string> {
+export function getAdminIds(platform: 'telegram' | 'line'): Set<string> {
   const envKey = platform === 'telegram' ? 'ADMIN_TELEGRAM_IDS' : 'ADMIN_LINE_IDS';
   const dbKey = platform === 'telegram' ? 'admin_telegram_ids' : 'admin_line_ids';
   

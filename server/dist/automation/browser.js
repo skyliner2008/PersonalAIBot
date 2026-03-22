@@ -12,7 +12,7 @@ const COOKIES_FILE = path.join(config.cookiesDir, 'fb-cookies.json');
  * Launch Playwright browser with stealth settings.
  */
 export async function launchBrowser() {
-    if (context)
+    if (context && browser?.isConnected())
         return context;
     fs.mkdirSync(config.cookiesDir, { recursive: true });
     const headless = getBrowserHeadless();
@@ -57,11 +57,16 @@ export async function launchBrowser() {
  * Save current cookies to file for session persistence.
  */
 export async function saveCookies() {
-    if (!context)
+    if (!context || !browser?.isConnected())
         return;
-    const cookies = await context.cookies();
-    fs.writeFileSync(COOKIES_FILE, JSON.stringify(cookies, null, 2));
-    addLog('browser', 'Cookies saved', `${cookies.length} cookies`, 'info');
+    try {
+        const cookies = await context.cookies();
+        fs.writeFileSync(COOKIES_FILE, JSON.stringify(cookies, null, 2));
+        addLog('browser', 'Cookies saved', `${cookies.length} cookies`, 'info');
+    }
+    catch (e) {
+        console.debug('[Browser] saveCookies:', String(e));
+    }
 }
 /**
  * Get or create the main Facebook page.
@@ -74,8 +79,8 @@ export async function getMainPage() {
         try {
             await mainPage.close();
         }
-        catch {
-            // Page already closed, ignore
+        catch (e) {
+            console.warn('Error closing mainPage:', e);
         }
         mainPage = null;
     }
@@ -94,9 +99,6 @@ export async function newPage() {
  * Close everything.
  */
 export async function closeBrowser() {
-    // Set state first so bots detect browser is closing
-    const hadContext = !!context;
-    mainPage = null;
     if (context) {
         try {
             await saveCookies();
@@ -104,25 +106,36 @@ export async function closeBrowser() {
         catch (e) {
             console.debug('[Browser] saveCookies:', String(e));
         }
-        try {
-            await context.close();
+        if (!browser) {
+            console.debug('[Browser] Context exists but browser is null');
         }
-        catch (e) {
-            console.debug('[Browser] close context:', String(e));
+        // Note: BrowserContext doesn't have isConnected(), so we check the parent browser
+        if (browser && browser.isConnected()) {
+            try {
+                await context.close();
+            }
+            catch (e) {
+                console.debug('[Browser] close context:', String(e));
+            }
+        }
+        else {
+            console.debug('[Browser] Context closing skipped: Browser already disconnected or null');
         }
         context = null;
     }
     if (browser) {
-        try {
-            await browser.close();
+        if (browser.isConnected()) {
+            try {
+                await browser.close();
+            }
+            catch (e) {
+                console.debug('[Browser] close browser:', String(e));
+            }
         }
-        catch (e) {
-            console.debug('[Browser] close browser:', String(e));
+        else {
+            console.debug('[Browser] Browser closing skipped: Already disconnected');
         }
         browser = null;
-    }
-    if (hadContext) {
-        addLog('browser', 'Browser closed', undefined, 'info');
     }
 }
 /**
@@ -130,21 +143,27 @@ export async function closeBrowser() {
  */
 export function humanDelay(min = 1000, max = 3000) {
     const ms = Math.floor(Math.random() * (max - min) + min);
-    return new Promise(r => setTimeout(r, ms));
+    return new Promise((r) => setTimeout(r, ms));
 }
 /**
  * Human-like typing (type with random delays between keys).
  */
 export async function humanType(page, selector, text) {
-    await page.click(selector);
+    try {
+        await page.click(selector);
+    }
+    catch (e) {
+        console.error('Error clicking selector:', e);
+        throw e; // Re-throw the error to be handled upstream
+    }
     for (const char of text) {
         await page.keyboard.type(char, {
-            delay: Math.random() * (config.maxTypingSpeed - config.minTypingSpeed) + config.minTypingSpeed
+            delay: Math.random() * (config.maxTypingSpeed - config.minTypingSpeed) + config.minTypingSpeed,
         });
     }
 }
 export function isRunning() {
-    return !!context && !!browser;
+    return !!context && !!browser && browser.isConnected();
 }
 /**
  * Navigate with exponential-backoff retry.

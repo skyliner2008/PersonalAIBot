@@ -33,7 +33,8 @@ function getCipherKey(): Buffer {
       'Set ENCRYPTION_KEY in your .env file before using encryption in production.'
     );
   }
-  return crypto.createHash('sha256').update(String(rawKey), 'utf8').digest();
+  const key = rawKey || crypto.randomBytes(32).toString('hex');
+  return crypto.createHash('sha256').update(String(key), 'utf8').digest();
 }
 
 /**

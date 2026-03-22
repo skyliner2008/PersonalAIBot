@@ -4,8 +4,9 @@ import { aiChat } from '../ai/aiRouter.js';
 import { buildChatMessagesLegacy as buildChatMessages } from '../ai/prompts/chatPersona.js';
 import { config } from '../config.js';
 import { stripThinkTags } from '../utils.js';
-import { getChatReplyDelayMs } from '../config/runtimeSettings.js';
-import { createLogger } from '../utils/logger.js'; // Added import
+import { getChatReplyDelayMs, getAutoReplyEnabled } from '../config/runtimeSettings.js';
+import { createLogger } from '../utils/logger.js';
+import { broadcastToAdmins } from '../bot_agents/botManager.js';
 const logger = createLogger('ChatBot'); // Added logger instance
 let chatPage = null;
 let isMonitoring = false;
@@ -22,8 +23,8 @@ function isPageAlive() {
     try {
         return !!chatPage && !chatPage.isClosed() && isRunning();
     }
-    catch (e) {
-        logger.debug('page check: ' + String(e));
+    catch (error) {
+        logger.debug('page check: ' + String(error));
         return false;
     } // Modified
 }
@@ -76,8 +77,8 @@ export async function startChatMonitor(io) {
                 await pollUnreadConversations(io);
                 consecutiveErrors = 0;
             }
-            catch (e) {
-                const msg = e?.message || String(e);
+            catch (error) {
+                const msg = error?.message || String(error);
                 if (isClosedError(msg)) {
                     forceStop(io);
                     return;
@@ -89,13 +90,15 @@ export async function startChatMonitor(io) {
                 }
                 if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
                     addLog('chatbot', 'Auto-stopped (repeated errors)', msg, 'error');
+                    logger.error(`Fatal crash in Messenger monitor: ${msg}. Broadcasting to admins and shutting down.`);
+                    broadcastToAdmins(`Messenger Auto-Reply crashed and was shut down.\nReason: ${msg}`);
                     forceStop(io);
                 }
             }
         }, 7000); // Check every 7 seconds
     }
-    catch (e) {
-        addLog('chatbot', 'Failed to start chat monitor', String(e), 'error');
+    catch (error) {
+        addLog('chatbot', 'Failed to start chat monitor', String(error), 'error');
         isMonitoring = false;
         io.emit('chatbot:status', { active: false });
     }
@@ -111,8 +114,8 @@ export function stopChatMonitor(io) {
             if (!chatPage.isClosed())
                 chatPage.close().catch(() => { });
         }
-        catch (e) {
-            logger.debug('page close: ' + String(e));
+        catch (error) {
+            logger.debug('page close: ' + String(error));
         } // Modified
     }
     chatPage = null;
@@ -168,24 +171,26 @@ async function getUnreadConversations(page) {
                 if (nameEl)
                     name = (await nameEl.textContent())?.trim() || 'Unknown';
             }
-            catch (e) {
-                logger.debug('name extraction: ' + String(e));
+            catch (error) {
+                logger.debug('name extraction: ' + String(error));
             }
             if (hasUnread) {
                 unreadConvs.push({ userId, url: `https://www.facebook.com${href}`, name });
             }
         }
-        catch (e) {
-            logger.debug('conversation item: ' + String(e));
+        catch (error) {
+            logger.debug('conversation item: ' + String(error));
             continue;
         }
     }
     return unreadConvs;
 }
 async function pollUnreadConversations(io) {
-    if (!isPageAlive())
-        return;
+    if (!getAutoReplyEnabled())
+        return; // Skip checking unread messages if auto-reply is globally disabled
     const page = chatPage;
+    if (!page || !isPageAlive())
+        return;
     await ensureOnMessengerInbox(page);
     const unreadConvs = await getUnreadConversations(page);
     if (unreadConvs.length === 0)
@@ -196,13 +201,11 @@ async function pollUnreadConversations(io) {
             return;
         try {
             await processConversation(page, conv.userId, conv.url, conv.name, io);
-            if (!isPageAlive())
-                return;
             await navigateWithRetry(page, MESSENGER_URL);
             await humanDelay(2000, 3000);
         }
-        catch (e) {
-            const msg = e?.message || String(e);
+        catch (error) {
+            const msg = error?.message || String(error);
             if (isClosedError(msg))
                 return;
             logger.error(`Error processing conv ${conv.userId}: ${msg}`);
@@ -219,13 +222,11 @@ async function processConversation(page, userId, convUrl, userName, io) {
     // Navigate directly to this conversation by URL
     await navigateWithRetry(page, convUrl);
     await humanDelay(2000, 3000);
-    if (!isPageAlive())
-        return;
     // Verify URL matches expected conversation
     const currentUrl = page.url();
     const currentUserId = extractUserId(currentUrl);
     if (currentUserId !== userId) {
-        logger.warn(`URL mismatch! Expected ${userId}, got ${currentUserId}`); // Modified
+        logger.warn(`URL mismatch! Expected ${userId}, got ${currentUserId}`);
         return;
     }
     // Save conversation in DB
@@ -262,8 +263,6 @@ async function processConversation(page, userId, convUrl, userName, io) {
         return;
     }
     // ---- Send reply ----
-    if (!isPageAlive())
-        return;
     // Verify we're still on the right conversation
     const checkUrl = page.url();
     if (!checkUrl.includes(userId)) {
@@ -300,32 +299,35 @@ async function processConversation(page, userId, convUrl, userName, io) {
 // ============================================================
 async function getLastIncomingMessage(page) {
     try {
-        // In Messenger, messages are in rows.
-        // OUR messages are on the RIGHT side, OTHER person's on the LEFT.
-        // We need to find
-        const messageBubbles = await page.$$('[role="row"] [data-testid="message-bubble"]');
-        let lastIncomingMessage = null;
-        for (const bubble of messageBubbles) {
-            const isOurMessage = await bubble.evaluate(el => {
-                // Check for specific styling or attributes that indicate our messages
-                // This might need adjustment based on current Messenger HTML
+        const messageBubbles = await page.$$('[role="row"] [data-testid="message-bubble"][data-visualcompletion="ignore-dynamic"]');
+        // Iterate backwards to find the most recent incoming message
+        for (let i = messageBubbles.length - 1; i >= 0; i--) {
+            const bubble = messageBubbles[i];
+            const isOurMessage = await bubble.evaluate((el) => {
                 const style = window.getComputedStyle(el);
-                return style.alignSelf === 'flex-end' || style.backgroundColor === 'rgb(0, 132, 255)'; // Example: blue background for our messages
+                return style.alignSelf === 'flex-end' || style.backgroundColor === 'rgb(0, 132, 255)';
             });
-            if (!isOurMessage) {
-                // This is an incoming message
-                const textElement = await bubble.$('span[dir="auto"]');
-                const messageText = (await textElement?.textContent())?.trim();
-                const messageId = await bubble.getAttribute('id'); // Messenger message IDs are usually on the bubble element
-                if (messageText && messageId) {
-                    lastIncomingMessage = { id: messageId, text: messageText };
-                }
+            if (isOurMessage)
+                continue;
+            const textElement = await bubble.$('span[dir="auto"]');
+            if (!textElement)
+                continue;
+            const messageText = (await textElement.textContent())?.trim();
+            if (!messageText) {
+                logger.warn('Empty message text, skipping.');
+                continue;
             }
+            const messageId = await bubble.getAttribute('id');
+            if (!messageId) {
+                logger.warn('Message ID is null, skipping message.');
+                continue;
+            }
+            return { id: messageId, text: messageText };
         }
-        return lastIncomingMessage;
+        return null;
     }
-    catch (e) {
-        logger.error('Error getting last incoming message: ' + String(e)); // Modified
+    catch (error) {
+        logger.error('Error getting last incoming message: ' + String(error));
         return null;
     }
 }
@@ -349,8 +351,8 @@ async function typeAndSendReply(page, reply) {
         logger.info('Reply sent successfully.'); // Modified
         return true;
     }
-    catch (e) {
-        logger.error('Error typing and sending reply: ' + String(e)); // Modified
+    catch (error) {
+        logger.error('Error typing and sending reply: ' + String(error)); // Modified
         return false;
     }
 }
@@ -364,7 +366,7 @@ async function generateReply(userId, userName, lastMessage) {
         const defaultPersona = await getDefaultPersona();
         // Prepare messages for AI
         const fallbackPersona = {
-            system_prompt: defaultPersona?.systemInstruction || '',
+            systemPrompt: defaultPersona?.systemInstruction || '',
             personality_traits: '[]'
         };
         const chatMessages = buildChatMessages(fallbackPersona, messages, lastMessage);
@@ -375,8 +377,8 @@ async function generateReply(userId, userName, lastMessage) {
         // Strip any <think> tags from the AI response
         return stripThinkTags(aiResponse.text);
     }
-    catch (e) {
-        logger.error('Error generating AI reply: ' + String(e)); // Modified
+    catch (error) {
+        logger.error('Error generating AI reply: ' + String(error)); // Modified
         return null;
     }
 }

@@ -27,16 +27,21 @@ import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('CliMemoryManager');
 
+const cliMemoryProfileCache = new Map<string, CliMemoryProfile>();
+
 /**
  * Get memory profile for a CLI backend, applying overrides if available
  */
 export function getCliMemoryProfile(backendId: `${string}-cli`): CliMemoryProfile {
+  if (cliMemoryProfileCache.has(backendId)) {
+    return cliMemoryProfileCache.get(backendId)!;
+  }
   const overrides = CLI_MEMORY_PROFILE_OVERRIDES[backendId];
-  if (!overrides) return DEFAULT_CLI_MEMORY_PROFILE;
-  return {
-    ...DEFAULT_CLI_MEMORY_PROFILE,
-    ...overrides,
-  };
+  const profile = overrides
+    ? { ...DEFAULT_CLI_MEMORY_PROFILE, ...overrides }
+    : DEFAULT_CLI_MEMORY_PROFILE;
+  cliMemoryProfileCache.set(backendId, profile);
+  return profile;
 }
 
 /**
@@ -50,11 +55,7 @@ export function isContextualCliBackend(backendId: `${string}-cli`): boolean {
  * Helper to sanitize a value for use in conversation key construction
  */
 function sanitizeConversationKeyPart(value: string): string {
-  return (value || '')
-    .toLowerCase()
-    .trim()
-    .replace(/[^\w\-]/g, '_')
-    .slice(0, 30);
+  return (value || '').toLowerCase().trim().replace(/[^\w\-]/g, '_').slice(0, 30);
 }
 
 /**
@@ -64,14 +65,29 @@ export function buildCliConversationId(
   backendId: `${string}-cli`,
   userInput: string,
   platform: string = 'api',
-  userId?: string
+  userId?: string,
+  legacy: boolean = false
 ): string {
   const cleanBackend = sanitizeConversationKeyPart(backendId);
   const cleanPlatform = sanitizeConversationKeyPart(platform);
   const cleanUserId = sanitizeConversationKeyPart(userId || 'anonymous');
   const cleanCommand = sanitizeConversationKeyPart(userInput.split(/\s+/)[0]);
 
-  return `cli:${cleanBackend}:${cleanCommand}:${cleanPlatform}:${cleanUserId}`;
+  return legacy
+    ? `${cleanBackend}::${cleanCommand}::${cleanPlatform}::${cleanUserId}`
+    : `cli:${cleanBackend}:${cleanCommand}:${cleanPlatform}:${cleanUserId}`;
+}
+
+/**
+ * Wrapper for building standard CLI conversation ID
+ */
+export function buildCliConversationIdWrapper(
+  backendId: `${string}-cli`,
+  userInput: string,
+  platform: string = 'api',
+  userId?: string
+): string {
+  return buildCliConversationId(backendId, userInput, platform, userId, false);
 }
 
 /**
@@ -83,12 +99,7 @@ export function buildLegacyCliConversationId(
   platform: string = 'api',
   userId?: string
 ): string {
-  const cleanBackend = sanitizeConversationKeyPart(backendId);
-  const cleanPlatform = sanitizeConversationKeyPart(platform);
-  const cleanUserId = sanitizeConversationKeyPart(userId || 'anonymous');
-  const cleanCommand = sanitizeConversationKeyPart(userInput.split(/\s+/)[0]);
-
-  return `${cleanBackend}::${cleanCommand}::${cleanPlatform}::${cleanUserId}`;
+  return buildCliConversationId(backendId, userInput, platform, userId, true);
 }
 
 /**
@@ -309,7 +320,6 @@ export async function prepareCliPromptMemory(
 export function shouldSkipContextPersistence(output: string): boolean {
   // Skip if output is mostly empty or error-like
   if (!output || output.length < 10) return true;
-  if (output.includes('[Error]') || output.includes('failed')) return false; // DO log errors
   if (output.toLowerCase().includes('not found')) return true;
   return false;
 }

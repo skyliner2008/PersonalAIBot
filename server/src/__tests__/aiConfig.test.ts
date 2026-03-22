@@ -40,7 +40,7 @@ describe('classifyTask', () => {
         const longMsg = 'a'.repeat(600);
         const result = classifyTask(longMsg, false);
         // Long messages get +3 bonus to COMPLEX score
-        expect(result.topScore).toBeGreaterThanOrEqual(3);
+        expect(result.topScore).toBeCloseTo(3, 0);
     });
 
     // Confidence scoring tests

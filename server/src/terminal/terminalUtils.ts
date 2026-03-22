@@ -12,12 +12,9 @@ import { stripAnsi } from './cliCommandExecutor.js';
  * Parse a token number from a string
  */
 function parseTokenNumber(value?: string): number | undefined {
-  if (!value) return undefined;
-  const normalized = value.replace(/[^\d]/g, '');
-  if (!normalized) return undefined;
-  const parsed = Number.parseInt(normalized, 10);
-  if (!Number.isFinite(parsed)) return undefined;
-  return parsed;
+  const normalized = value?.replace(/[^\d]/g, '');
+  const parsed = Number.parseInt(normalized ?? '', 10);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 /**
@@ -82,6 +79,10 @@ export function extractJsonObjectsFromText(text: string, maxObjects = 400): stri
   return objects;
 }
 
+const promptTokensRegex = /(?:prompt|input)[_\s-]*tokens?\D+([\d,]+)/i;
+const completionTokensRegex = /(?:completion|output)[_\s-]*tokens?\D+([\d,]+)/i;
+const totalTokensRegex = /total[_\s-]*tokens?\D+([\d,]+)/i;
+
 /**
  * Try to extract token stats from a JSON line
  */
@@ -94,9 +95,9 @@ function tryExtractTokenStatsFromJsonLine(line: string): {
   try {
     const obj = JSON.parse(line) as Record<string, unknown>;
     const serialized = JSON.stringify(obj);
-    const promptTokens = parseTokenNumber(serialized.match(/(?:prompt|input)[_\s-]*tokens?\D+([\d,]+)/i)?.[1]);
-    const completionTokens = parseTokenNumber(serialized.match(/(?:completion|output)[_\s-]*tokens?\D+([\d,]+)/i)?.[1]);
-    const totalTokens = parseTokenNumber(serialized.match(/total[_\s-]*tokens?\D+([\d,]+)/i)?.[1]);
+    const promptTokens = parseTokenNumber(serialized.match(promptTokensRegex)?.[1]);
+    const completionTokens = parseTokenNumber(serialized.match(completionTokensRegex)?.[1]);
+    const totalTokens = parseTokenNumber(serialized.match(totalTokensRegex)?.[1]);
     if (!promptTokens && !completionTokens && !totalTokens) return null;
     return { promptTokens, completionTokens, totalTokens };
   } catch {
@@ -121,6 +122,17 @@ function estimateTokenUsage(promptInput: string, output: string): CommandTokenUs
 }
 
 /**
+ * Extract token stats using regex from plain text
+ */
+function extractTokenStats(text: string): { promptTokens?: number; completionTokens?: number; totalTokens?: number } {
+  return {
+    promptTokens: parseTokenNumber(text.match(/(?:prompt|input)[_\s-]*tokens?\s*[:=]?\s*([\d,]+)/i)?.[1]),
+    completionTokens: parseTokenNumber(text.match(/(?:completion|output)[_\s-]*tokens?\s*[:=]?\s*([\d,]+)/i)?.[1]),
+    totalTokens: parseTokenNumber(text.match(/total[_\s-]*tokens?\s*[:=]?\s*([\d,]+)/i)?.[1]),
+  };
+}
+
+/**
  * Extract CLI token usage from raw output
  */
 export function extractCliTokenUsage(
@@ -137,31 +149,25 @@ export function extractCliTokenUsage(
   let completionTokens: number | undefined;
   let totalTokens: number | undefined;
 
+  const updateTokens = (stats: { promptTokens?: number; completionTokens?: number; totalTokens?: number }) => {
+    if (stats.promptTokens !== undefined) promptTokens = stats.promptTokens;
+    if (stats.completionTokens !== undefined) completionTokens = stats.completionTokens;
+    if (stats.totalTokens !== undefined) totalTokens = stats.totalTokens;
+  };
+
   for (const objectText of jsonObjects) {
-    const jsonStat = tryExtractTokenStatsFromJsonLine(objectText);
-    if (!jsonStat) continue;
-    if (jsonStat.promptTokens !== undefined) promptTokens = jsonStat.promptTokens;
-    if (jsonStat.completionTokens !== undefined) completionTokens = jsonStat.completionTokens;
-    if (jsonStat.totalTokens !== undefined) totalTokens = jsonStat.totalTokens;
+    updateTokens(tryExtractTokenStatsFromJsonLine(objectText) || {});
   }
 
   for (const line of lines) {
-    const jsonStat = tryExtractTokenStatsFromJsonLine(line);
-    if (!jsonStat) continue;
-    if (jsonStat.promptTokens !== undefined) promptTokens = jsonStat.promptTokens;
-    if (jsonStat.completionTokens !== undefined) completionTokens = jsonStat.completionTokens;
-    if (jsonStat.totalTokens !== undefined) totalTokens = jsonStat.totalTokens;
+    updateTokens(tryExtractTokenStatsFromJsonLine(line) || {});
   }
 
-  if (promptTokens === undefined) {
-    promptTokens = parseTokenNumber(text.match(/(?:prompt|input)[_\s-]*tokens?\s*[:=]?\s*([\d,]+)/i)?.[1]);
-  }
-  if (completionTokens === undefined) {
-    completionTokens = parseTokenNumber(text.match(/(?:completion|output)[_\s-]*tokens?\s*[:=]?\s*([\d,]+)/i)?.[1]);
-  }
-  if (totalTokens === undefined) {
-    totalTokens = parseTokenNumber(text.match(/total[_\s-]*tokens?\s*[:=]?\s*([\d,]+)/i)?.[1]);
-  }
+  const extractedStats = extractTokenStats(text);
+  if (promptTokens === undefined) promptTokens = extractedStats.promptTokens;
+  if (completionTokens === undefined) completionTokens = extractedStats.completionTokens;
+  if (totalTokens === undefined) totalTokens = extractedStats.totalTokens;
+
   if (totalTokens === undefined) {
     totalTokens = parseTokenNumber(text.match(/tokens?\s*used\s*[:=]?\s*([\d,]+)/i)?.[1]);
   }
@@ -329,169 +335,168 @@ function dedupeRepeatedResponseBlock(text: string): string {
  */
 export function normalizeCliOutput(backendId: `${string}-cli`, output: string): string {
   const text = output.trim();
-  if (backendId === 'gemini-cli') {
-    const cleaned = text
-      .split(/\r?\n/)
-      .filter((line) => {
-        const trimmed = line.trim();
-        if (!trimmed) return true;
-        if (trimmed.startsWith('Loaded cached credentials')) return false;
-        if (/^Attempt \d+ failed:/i.test(trimmed)) return false;
-        if (/^Error executing tool .*$/i.test(trimmed)) return false;
-        if (/^Tool ".*" not found\./i.test(trimmed)) return false;
-        return true;
-      })
-      .join('\n')
-      .trim();
-    return cleaned || '(no response)';
-  }
 
-  if (backendId === 'claude-cli') {
-    const cleaned = text
-      .split(/\r?\n/)
-      .filter((line) => {
-        const trimmed = line.trim();
-        if (!trimmed) return true;
-        if (trimmed.startsWith('Loaded cached credentials.')) return false;
-        if (/^Reading prompt from stdin/i.test(trimmed)) return false;
-        if (/^Using fallback model/i.test(trimmed)) return false;
-        return true;
-      })
-      .join('\n')
-      .trim();
-    return cleaned || '(no response)';
-  }
-
-  if (backendId === 'codex-cli') {
-    const jsonMessages: string[] = [];
-    let sawJsonEvents = false;
-    const jsonObjects = extractJsonObjectsFromText(text);
-    for (const objectText of jsonObjects) {
-      try {
-        const event = JSON.parse(objectText) as Record<string, unknown>;
-        if (event && typeof event.type === 'string') {
-          sawJsonEvents = true;
-        }
-        const msg = extractCodexAssistantMessage(event);
-        if (msg && !jsonMessages.includes(msg)) {
-          jsonMessages.push(msg);
-        }
-      } catch {
-        // ignore malformed segments
-      }
-    }
-
-    if (jsonMessages.length > 0) {
-      return dedupeRepeatedResponseBlock(jsonMessages.join('\n\n').trim());
-    }
-
-    const rawLines = text.split(/\r?\n/);
-    const assistantMarkerIndex = (() => {
-      for (let i = rawLines.length - 1; i >= 0; i--) {
-        const trimmed = rawLines[i]?.trim().toLowerCase();
-        if (trimmed === 'codex' || trimmed === 'assistant') {
-          return i;
-        }
-      }
-      return -1;
-    })();
-
-    if (assistantMarkerIndex >= 0) {
-      let lastNonEmpty = '';
-      const assistantBody = rawLines
-        .slice(assistantMarkerIndex + 1)
+  switch (backendId) {
+    case 'gemini-cli': {
+      const cleaned = text
+        .split(/\r?\n/)
         .filter((line) => {
           const trimmed = line.trim();
-          if (!trimmed) {
-            return false;
-          }
-          if (trimmed === 'tokens used') {
-            lastNonEmpty = trimmed;
-            return false;
-          }
-          if (/^[\d,]+$/.test(trimmed) && lastNonEmpty === 'tokens used') {
-            return false;
-          }
-          lastNonEmpty = trimmed;
+          if (!trimmed) return true;
+          if (trimmed.startsWith('Loaded cached credentials')) return false;
+          if (/^Attempt \d+ failed:/i.test(trimmed)) return false;
+          if (/^Error executing tool .*$/i.test(trimmed)) return false;
+          if (/^Tool ".*" not found\./i.test(trimmed)) return false;
           return true;
         })
         .join('\n')
         .trim();
-
-      if (assistantBody) {
-        return dedupeRepeatedResponseBlock(assistantBody);
-      }
+      return cleaned || '(no response)';
     }
-
-    const cleaned = text
-      .split(/\r?\n/)
-      .filter((line, index, lines) => {
-        const trimmed = line.trim();
-        if (!trimmed) return false;
-        if (trimmed.startsWith('{') && trimmed.includes('"type"')) return false;
-        if (trimmed.includes('{"type":"')) return false;
-        if (/"type"\s*:\s*"(thread|turn|item|response|message)\./i.test(trimmed)) return false;
-        if (/^\d{4}-\d{2}-\d{2}t.*codex_core::shell_snapshot/i.test(trimmed)) return false;
-        if (trimmed.startsWith('OpenAI Codex v')) return false;
-        if (trimmed === '--------') return false;
-        if (/^(workdir|model|provider|approval|sandbox|reasoning effort|reasoning summaries|session id):/i.test(trimmed)) return false;
-        if (trimmed === 'user' || trimmed === 'codex') return false;
-        if (trimmed.startsWith('mcp startup:')) return false;
-        if (trimmed === 'tokens used') return false;
-        if (trimmed.startsWith('Loaded cached credentials')) return false;
-        if (/^[\d,]+$/.test(trimmed)) {
-          let previousMeaningful = '';
-          for (let i = index - 1; i >= 0; i--) {
-            const candidate = lines[i]?.trim();
-            if (!candidate) continue;
-            previousMeaningful = candidate;
-            break;
+    case 'claude-cli': {
+      const cleaned = text
+        .split(/\r?\n/)
+        .filter((line) => {
+          const trimmed = line.trim();
+          if (!trimmed) return true;
+          if (trimmed.startsWith('Loaded cached credentials.')) return false;
+          if (/^Reading prompt from stdin/i.test(trimmed)) return false;
+          if (/^Using fallback model/i.test(trimmed)) return false;
+          return true;
+        })
+        .join('\n')
+        .trim();
+      return cleaned || '(no response)';
+    }
+    case 'codex-cli': {
+      const jsonMessages: string[] = [];
+      let sawJsonEvents = false;
+      const jsonObjects = extractJsonObjectsFromText(text);
+      for (const objectText of jsonObjects) {
+        try {
+          const event = JSON.parse(objectText) as Record<string, unknown>;
+          if (event && typeof event.type === 'string') {
+            sawJsonEvents = true;
           }
-          if (previousMeaningful === 'tokens used') {
-            return false;
+          const msg = extractCodexAssistantMessage(event);
+          if (msg && !jsonMessages.includes(msg)) {
+            jsonMessages.push(msg);
+          }
+        } catch {
+          // ignore malformed segments
+        }
+      }
+
+      if (jsonMessages.length > 0) {
+        return dedupeRepeatedResponseBlock(jsonMessages.join('\n\n').trim());
+      }
+
+      const rawLines = text.split(/\r?\n/);
+      const assistantMarkerIndex = (() => {
+        for (let i = rawLines.length - 1; i >= 0; i--) {
+          const trimmed = rawLines[i]?.trim().toLowerCase();
+          if (trimmed === 'codex' || trimmed === 'assistant') {
+            return i;
           }
         }
-        return true;
-      })
-      .join('\n')
-      .trim();
-    if (cleaned) return dedupeRepeatedResponseBlock(cleaned);
-    if (/CLI timeout exceeded/i.test(text) && sawJsonEvents) {
-      return 'CLI timeout exceeded before final assistant response.';
+        return -1;
+      })();
+
+      if (assistantMarkerIndex >= 0) {
+        let lastNonEmpty = '';
+        const assistantBody = rawLines
+          .slice(assistantMarkerIndex + 1)
+          .filter((line) => {
+            const trimmed = line.trim();
+            if (!trimmed) {
+              return false;
+            }
+            if (trimmed === 'tokens used') {
+              lastNonEmpty = trimmed;
+              return false;
+            }
+            if (/^[\d,]+$/.test(trimmed) && lastNonEmpty === 'tokens used') {
+              return false;
+            }
+            lastNonEmpty = trimmed;
+            return true;
+          })
+          .join('\n')
+          .trim();
+
+        if (assistantBody) {
+          return dedupeRepeatedResponseBlock(assistantBody);
+        }
+      }
+
+      const cleaned = text
+        .split(/\r?\n/)
+        .filter((line, index, lines) => {
+          const trimmed = line.trim();
+          if (!trimmed) return false;
+          if (trimmed.startsWith('{') && trimmed.includes('"type"')) return false;
+          if (trimmed.includes('{"type":"')) return false;
+          if (/"type"\s*:\s*"(thread|turn|item|response|message)\./i.test(trimmed)) return false;
+          if (/^\d{4}-\d{2}-\d{2}t.*codex_core::shell_snapshot/i.test(trimmed)) return false;
+          if (trimmed.startsWith('OpenAI Codex v')) return false;
+          if (trimmed === '--------') return false;
+          if (/^(workdir|model|provider|approval|sandbox|reasoning effort|reasoning summaries|session id):/i.test(trimmed)) return false;
+          if (trimmed === 'user' || trimmed === 'codex') return false;
+          if (trimmed.startsWith('mcp startup:')) return false;
+          if (trimmed === 'tokens used') return false;
+          if (trimmed.startsWith('Loaded cached credentials')) return false;
+          if (/^[\d,]+$/.test(trimmed)) {
+            let previousMeaningful = '';
+            for (let i = index - 1; i >= 0; i--) {
+              const candidate = lines[i]?.trim();
+              if (!candidate) continue;
+              previousMeaningful = candidate;
+              break;
+            }
+            if (previousMeaningful === 'tokens used') {
+              return false;
+            }
+          }
+          return true;
+        })
+        .join('\n')
+        .trim();
+      if (cleaned) return dedupeRepeatedResponseBlock(cleaned);
+      if (/CLI timeout exceeded/i.test(text) && sawJsonEvents) {
+        return 'CLI timeout exceeded before final assistant response.';
+      }
+      if (sawJsonEvents) {
+        return '(no final assistant response from codex-cli)';
+      }
+      return '(no response)';
     }
-    if (sawJsonEvents) {
-      return '(no final assistant response from codex-cli)';
+    case 'kilo-cli': {
+      const cleaned = text
+        .split(/\r?\n/)
+        .filter((line) => {
+          const trimmed = line.trim();
+          if (!trimmed) return true;
+          // Strip kilo's status prefix like "> code · kilo-auto/free"
+          if (/^>\s*(code|agent|architect)\s*·\s*.+/i.test(trimmed)) return false;
+          // Strip token/cost lines
+          if (/^(tokens|cost|duration|model):/i.test(trimmed)) return false;
+          return true;
+        })
+        .join('\n')
+        .trim();
+      return cleaned || '(no response)';
     }
-    return '(no response)';
+    case 'openai-cli':
+      if (!text) {
+        return 'No output from openai-cli. This installation may only provide SDK migration utilities.';
+      }
+
+      if (/Unknown subcommand|Usage:\s*openai\s*<subcommand>/i.test(text)) {
+        return `${text}\nHint: openai-cli expects subcommands (not free-text prompts).`;
+      }
+
+      return text;
+    default:
+      return text;
   }
-
-  // ─── Kilo CLI: strip the "> code · model" prefix line from output
-  if (backendId === 'kilo-cli') {
-    const cleaned = text
-      .split(/\r?\n/)
-      .filter((line) => {
-        const trimmed = line.trim();
-        if (!trimmed) return true;
-        // Strip kilo's status prefix like "> code · kilo-auto/free"
-        if (/^>\s*(code|agent|architect)\s*·\s*.+/i.test(trimmed)) return false;
-        // Strip token/cost lines
-        if (/^(tokens|cost|duration|model):/i.test(trimmed)) return false;
-        return true;
-      })
-      .join('\n')
-      .trim();
-    return cleaned || '(no response)';
-  }
-
-  if (backendId !== 'openai-cli') return text;
-
-  if (!text) {
-    return 'No output from openai-cli. This installation may only provide SDK migration utilities.';
-  }
-
-  if (/Unknown subcommand|Usage:\s*openai\s*<subcommand>/i.test(text)) {
-    return `${text}\nHint: openai-cli expects subcommands (not free-text prompts).`;
-  }
-
-  return text;
 }

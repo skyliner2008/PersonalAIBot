@@ -6,7 +6,7 @@ import { getProviderApiKey } from '../config/settingsSecurity.js';
 import { trackUsage } from '../utils/usageTracker.js';
 const providerCache = new Map();
 function dedupeStrings(values) {
-    return Array.from(new Set(values.flatMap(value => (value ? value.toString().trim() : [])).filter(Boolean)));
+    return [...new Set(values.map((value) => String(value || '').trim()).filter(Boolean))];
 }
 function escapeHtml(text) {
     return text
@@ -30,37 +30,59 @@ function toRuntimeContents(messages) {
     }));
     return { systemInstruction, contents };
 }
+class ProviderNotFoundError extends Error {
+    constructor(message) {
+        super(message);
+        this.name = 'ProviderNotFoundError';
+    }
+}
+class ProviderConfigurationError extends Error {
+    constructor(message) {
+        super(message);
+        this.name = 'ProviderConfigurationError';
+    }
+}
 class RegistryAIProviderAdapter {
     providerId;
     id;
+    type;
     name;
     providerDef;
-    runtimeProvider;
     constructor(providerId) {
         this.providerId = providerId;
         const provider = getAgentCompatibleProvider(providerId);
-        this.id = providerId;
+        const supportedTypes = ['openai', 'azure', 'anthropic', 'google', 'gemini', 'minimax', 'openrouter'];
+        const resolvedType = (supportedTypes.includes(providerId)
+            ? providerId
+            : 'openai');
+        this.id = resolvedType;
+        this.type = resolvedType;
         this.name = provider?.name || providerId;
         this.providerDef = provider;
-        this.runtimeProvider = createAgentRuntimeProvider(this.providerId);
+    }
+    async openaiSpecificMethod() {
+        if (this.type !== 'openai')
+            throw new Error('Method only available for OpenAI');
+        console.log('OpenAI specific logic');
     }
     getProviderDef() {
         if (!this.providerDef) {
-            throw new Error(`Provider "${this.providerId}" is not supported for AI chat routing`);
+            throw new ProviderNotFoundError(`Provider "${this.providerId}" is not supported for AI chat routing`);
         }
         return this.providerDef;
     }
     getRuntimeProvider() {
-        if (!this.runtimeProvider) {
-            throw new Error(`Provider "${this.providerId}" is not configured or unavailable`);
+        const runtimeProvider = createAgentRuntimeProvider(this.providerId);
+        if (!runtimeProvider) {
+            throw new ProviderConfigurationError(`Provider "${this.providerId}" is not configured or unavailable`);
         }
-        return this.runtimeProvider;
+        return runtimeProvider;
     }
     getDefaultModel() {
         const provider = this.getProviderDef();
         return getSetting(`ai_${this.providerId}_model`)
             || provider.defaultModel
-            || provider.models?.find(Boolean)
+            || (provider.models?.length ? provider.models[0] : '') // Use the first model if available
             || '';
     }
     async chat(messages, options) {
@@ -68,7 +90,7 @@ class RegistryAIProviderAdapter {
         const { systemInstruction, contents } = toRuntimeContents(messages);
         const modelName = options?.model || this.getDefaultModel();
         if (!modelName) {
-            throw new Error(`No model configured for provider "${this.providerId}"`);
+            throw new Error(`No model configured for provider "${this.providerId}". Please configure a default model in the settings.`);
         }
         const response = await runtimeProvider.generateResponse(modelName, options?.systemPrompt || systemInstruction, contents);
         return {
@@ -89,7 +111,8 @@ class RegistryAIProviderAdapter {
             await runtimeProvider.generateResponse(modelName, 'You are a connectivity test assistant. Reply with OK.', [{ role: 'user', parts: [{ text: 'OK' }] }]);
             return true;
         }
-        catch {
+        catch (error) {
+            console.error(`[AIRouter] Connection test failed for provider ${this.providerId}:`, error);
             return false;
         }
     }
@@ -106,7 +129,7 @@ class RegistryAIProviderAdapter {
             return dedupeStrings([...liveModels, ...fallbackModels]);
         }
         catch (err) {
-            console.error(`[AIRouter] Failed to list models for provider ${this.providerId}: ${String(err.message || 'Unknown error')}`);
+            console.error(`[AIRouter] Failed to list models for provider ${this.providerId}: ${err}`);
             return fallbackModels;
         }
     }
@@ -114,12 +137,25 @@ class RegistryAIProviderAdapter {
 function isCompatibleProviderId(value) {
     return !!value && !!getAgentCompatibleProvider(value);
 }
+const availabilityCache = new Map();
+const AVAILABILITY_CACHE_TTL = 10000; // 10 seconds
+function getAvailability(providerId) {
+    const now = Date.now();
+    const cached = availabilityCache.get(providerId);
+    if (cached && now - cached.timestamp < AVAILABILITY_CACHE_TTL) {
+        return cached;
+    }
+    const enabled = getRegistryProvider(providerId)?.enabled !== false;
+    const hasCredentials = !!getProviderApiKey(providerId);
+    const result = { enabled, hasCredentials, timestamp: now };
+    availabilityCache.set(providerId, result);
+    return result;
+}
 function isProviderEnabled(providerId) {
-    const providerDef = getRegistryProvider(providerId);
-    return providerDef ? providerDef.enabled !== false : false;
+    return getAvailability(providerId).enabled;
 }
 function hasProviderCredentials(providerId) {
-    return !!getProviderApiKey(providerId);
+    return getAvailability(providerId).hasCredentials;
 }
 function getProviderAdapter(providerId) {
     const cached = providerCache.get(providerId);
@@ -127,14 +163,36 @@ function getProviderAdapter(providerId) {
         return cached;
     }
     const adapter = new RegistryAIProviderAdapter(providerId);
-    providerCache.set(providerId, adapter);
-    return adapter;
+    const provider = adapter;
+    providerCache.set(providerId, provider);
+    return provider;
 }
-const allCompatibleProviders = getAgentCompatibleProviders({ enabledOnly: false });
+let cachedEnabledProviders = null;
+let cachedAllProviders = null;
+let cachedEnabledProviderIds = null;
+function getCachedCompatibleProviders(enabledOnly = false) {
+    if (enabledOnly) {
+        if (!cachedEnabledProviders) {
+            cachedEnabledProviders = getAgentCompatibleProviders({ enabledOnly: true });
+        }
+        return cachedEnabledProviders;
+    }
+    if (!cachedAllProviders) {
+        cachedAllProviders = getAgentCompatibleProviders({ enabledOnly: false });
+    }
+    return cachedAllProviders;
+}
 function getCompatibleEnabledProviderIds() {
-    return getAgentCompatibleProviders({ enabledOnly: true }).map((provider) => provider.id);
+    if (!cachedEnabledProviderIds) {
+        cachedEnabledProviderIds = getCachedCompatibleProviders(true).map((provider) => provider.id);
+    }
+    return cachedEnabledProviderIds;
 }
-const cachedCompatibleEnabledProviderIds = getCompatibleEnabledProviderIds();
+export function clearCompatibleEnabledProviderIdsCache() {
+    cachedEnabledProviders = null;
+    cachedAllProviders = null;
+    cachedEnabledProviderIds = null;
+}
 function sanitizeTaskName(task) {
     return String(task).replace(/[^a-zA-Z0-9_]/g, '_');
 }
@@ -152,35 +210,48 @@ function getConfiguredProviderId(task) {
     }
     return providerKey;
 }
+const providerOrderCache = new Map();
+const ORDER_CACHE_TTL = 10000; // 10 seconds
 function getProviderOrder(preferredProviderId) {
+    const cacheKey = String(preferredProviderId);
+    const now = Date.now();
+    const cached = providerOrderCache.get(cacheKey);
+    if (cached && now - cached.timestamp < ORDER_CACHE_TTL) {
+        return cached.order;
+    }
     const allowOpenaiAutoFallback = getAgentAllowOpenaiAutoFallback();
     const registryFallback = getFallbackOrder('llm').filter(isCompatibleProviderId);
     const enabledProviders = getCompatibleEnabledProviderIds();
-    return dedupeStrings([
+    const isProviderAllowed = (providerId) => {
+        if (!isProviderEnabled(providerId))
+            return false;
+        if (providerId !== 'openai')
+            return true;
+        if (preferredProviderId === 'openai')
+            return true;
+        return allowOpenaiAutoFallback;
+    };
+    const order = dedupeStrings([
         preferredProviderId,
         ...registryFallback,
         ...enabledProviders,
-    ])
-        .filter(providerId => isProviderEnabled(providerId) && (providerId !== 'openai' || preferredProviderId === 'openai' || allowOpenaiAutoFallback));
+    ]).filter(isProviderAllowed);
+    providerOrderCache.set(cacheKey, { order, timestamp: now });
+    return order;
 }
 function findDefaultProviderId(enabledOnly = true) {
     return getCompatibleEnabledProviderIds()[0] || getAgentCompatibleProviders({ enabledOnly })[0]?.id;
 }
-function getDefaultProviderId() {
-    return findDefaultProviderId();
-}
 export function getProviderForTask(task) {
     const providerId = getProviderOrder(getConfiguredProviderId(task))[0]
-        || getDefaultProviderId();
+        || findDefaultProviderId();
     if (!providerId) {
         throw new Error('No compatible AI providers are registered');
     }
     return getProvider(providerId);
 }
 export function getProvider(id) {
-    const providerId = isCompatibleProviderId(id)
-        ? id
-        : findDefaultProviderId();
+    const providerId = isCompatibleProviderId(id) ? id : findDefaultProviderId();
     if (!providerId) {
         throw new Error('No compatible AI providers are registered');
     }
@@ -190,6 +261,9 @@ export async function aiChat(task, messages, options) {
     const preferredProviderId = getConfiguredProviderId(task);
     const modelSetting = getSetting(`ai_task_${task}_model`);
     const providerOrder = getProviderOrder(preferredProviderId);
+    if (!providerOrder || providerOrder.length === 0) {
+        return { text: 'The AI provider is temporarily unavailable right now. Please try again shortly.', usage: undefined };
+    }
     for (const providerId of providerOrder) {
         if (!hasProviderCredentials(providerId)) {
             if (providerId === preferredProviderId) {
@@ -208,12 +282,34 @@ export async function aiChat(task, messages, options) {
                 console.warn(`[AIRouter] Failover: trying ${providerId} for task "${task}"`);
             }
             const result = await provider.chat(messages, chatOptions);
-            trackChatUsage(provider, chatOptions, task, startMs, true, result);
-            return result;
+            const chatResult = result;
+            trackUsage({
+                provider: provider.id,
+                model: chatOptions.model || (providerId === preferredProviderId ? 'default' : 'fallback'),
+                task,
+                platform: 'api',
+                promptTokens: chatResult.usage?.promptTokens || 0,
+                completionTokens: chatResult.usage?.completionTokens || 0,
+                totalTokens: chatResult.usage?.totalTokens || 0,
+                durationMs: Date.now() - startMs,
+                success: true,
+            });
+            return chatResult;
         }
         catch (err) {
-            const errorMessage = String(err.message || 'Unknown error').replace(/</g, '&lt;').replace(/>/g, '&gt;'); // Basic HTML escaping
-            trackChatUsage(provider, chatOptions, task, startMs, false, undefined, errorMessage);
+            const errorMessage = escapeHtml(String(err.message || 'Unknown error'));
+            trackUsage({
+                provider: provider.id,
+                model: chatOptions.model || (providerId === preferredProviderId ? 'default' : 'fallback'),
+                task,
+                platform: 'api',
+                promptTokens: 0,
+                completionTokens: 0,
+                totalTokens: 0,
+                durationMs: Date.now() - startMs,
+                success: false,
+                errorMessage: errorMessage,
+            });
             console.error(`[AIRouter] Provider ${providerId} failed for task "${task}": ${errorMessage}`);
         }
     }
@@ -237,7 +333,7 @@ const providerTestResultsCache = new Map();
 const CACHE_EXPIRY_MS = 60 * 60 * 1000; // 1 hour
 export async function testAllProviders() {
     const results = {};
-    for (const providerDef of allCompatibleProviders) {
+    for (const providerDef of getAgentCompatibleProviders()) {
         const cachedResult = providerTestResultsCache.get(providerDef.id);
         if (cachedResult && Date.now() - cachedResult.timestamp < CACHE_EXPIRY_MS) {
             results[providerDef.id] = cachedResult.result;
@@ -248,9 +344,9 @@ export async function testAllProviders() {
             providerTestResultsCache.set(providerDef.id, { result: false, timestamp: Date.now() });
             continue;
         }
-        const provider = getProviderAdapter(providerDef.id);
         let result = false;
         try {
+            const provider = getProviderAdapter(providerDef.id);
             result = await provider.testConnection();
         }
         catch {
@@ -261,18 +357,24 @@ export async function testAllProviders() {
     }
     return results;
 }
-export const providers = new Proxy({}, {
+export const providers = new Proxy(Object.create(null), {
     get(_target, prop) {
-        if (typeof prop !== 'string' || !isCompatibleProviderId(prop)) {
+        if (typeof prop !== 'string' || prop in Object.prototype) {
+            return undefined;
+        }
+        if (!getAgentCompatibleProvider(prop)) {
             return undefined;
         }
         return getProvider(prop);
     },
     ownKeys() {
-        return getCompatibleEnabledProviderIds();
+        return getAgentCompatibleProviders().filter(p => isProviderEnabled(p.id)).map(p => p.id);
     },
-    getOwnPropertyDescriptor() {
-        return { enumerable: true, configurable: true };
+    getOwnPropertyDescriptor(_target, prop) {
+        if (typeof prop === 'string' && !(prop in Object.prototype) && getAgentCompatibleProvider(prop)) {
+            return { enumerable: true, configurable: true };
+        }
+        return undefined;
     },
 });
 //# sourceMappingURL=aiRouter.js.map

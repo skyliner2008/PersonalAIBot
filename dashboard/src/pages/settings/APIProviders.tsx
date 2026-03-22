@@ -31,7 +31,7 @@ interface Props {
 export function APIProviders({ registryProviders, onProvidersUpdate }: Props) {
   const { addToast } = useToast();
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({
-    llm: true, embedding: false, search: false, tts: false, image: false, platform: false,
+    llm: false, embedding: false, search: false, tts: false, image: false, platform: false,
   });
   const [showKeyFor, setShowKeyFor] = useState<Record<string, boolean>>({});
   const [providerKeys, setProviderKeys] = useState<Record<string, string>>({});
@@ -71,7 +71,7 @@ export function APIProviders({ registryProviders, onProvidersUpdate }: Props) {
     return result;
   }, [registryProviders]);
 
-  const categories = Object.keys(CATEGORY_CONFIG);
+  const categories = Object.keys(CATEGORY_CONFIG).filter(cat => cat !== 'platform');
 
   const toggleCategory = useCallback((cat: string) => {
     setExpandedCategories(prev => ({ ...prev, [cat]: !prev[cat] }));
@@ -482,7 +482,9 @@ export function APIProviders({ registryProviders, onProvidersUpdate }: Props) {
                   <IconComp className={`w-4 h-4 ${config.color}`} />
                   <div className="text-left">
                     <span className="text-xs font-semibold text-gray-200">{config.label}</span>
-                    <span className="text-[10px] text-gray-500 ml-2">{config.labelTh}</span>
+                    {config.label !== config.labelTh && (
+                      <span className="text-[10px] text-gray-500 ml-2">{config.labelTh}</span>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-3">

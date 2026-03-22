@@ -18,13 +18,14 @@ import { SystemHealth } from './pages/SystemHealth';
 import { TaskQueueMonitor } from './pages/TaskQueueMonitor';
 import { GoalTracker } from './pages/GoalTracker';
 import SelfUpgrade from './pages/SelfUpgrade';
+import { CronManager } from './pages/CronManager';
 import {
   LayoutDashboard, MessageCircle, FileEdit, User, Database,
   Settings as SettingsIcon, Wifi, WifiOff, Bot, Brain, Activity, Wrench, Users, GitBranch, PhoneCall,
-  ListTodo, Target, Dna
+  ListTodo, Target, Dna, Clock
 } from 'lucide-react';
 
-type Page = 'dashboard' | 'jarvis-call' | 'multi-agent' | 'chat' | 'posts' | 'persona' | 'qa' | 'settings' | 'agent-monitor' | 'memory' | 'agents' | 'tools' | 'system-health' | 'task-queue' | 'goal-tracker' | 'self-upgrade';
+type Page = 'dashboard' | 'jarvis-call' | 'multi-agent' | 'chat' | 'posts' | 'persona' | 'qa' | 'settings' | 'agent-monitor' | 'memory' | 'agents' | 'tools' | 'system-health' | 'task-queue' | 'goal-tracker' | 'self-upgrade' | 'cron';
 
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -96,6 +97,7 @@ export default function App() {
     if (fromQuery === 'task-queue') return 'task-queue';
     if (fromQuery === 'goal-tracker') return 'goal-tracker';
     if (fromQuery === 'self-upgrade') return 'self-upgrade';
+    if (fromQuery === 'cron') return 'cron';
     return 'dashboard';
   });
   const [status, setStatus] = useState({
@@ -144,6 +146,7 @@ export default function App() {
     { id: 'jarvis-call', label: 'Jarvis Call', icon: PhoneCall },
     { id: 'multi-agent', label: 'Meeting Room', icon: GitBranch },
     { id: 'tools', label: 'Tool Manager', icon: Wrench },
+    { id: 'cron', label: 'Cron Jobs', icon: Clock },
     { id: 'agent-monitor', label: 'Agent Monitor', icon: Activity },
     { id: 'system-health', label: 'System Health', icon: Activity },
     { id: 'task-queue', label: 'Task Queue', icon: ListTodo },
@@ -227,6 +230,7 @@ export default function App() {
         {page === 'agents' && <AgentManager />}
         {page === 'multi-agent' && <MultiAgent on={on} />}
         {page === 'tools' && <ToolManager />}
+        {page === 'cron' && <CronManager />}
         {page === 'agent-monitor' && <AgentMonitor on={on} />}
         {page === 'system-health' && <SystemHealth />}
         {page === 'task-queue' && <TaskQueueMonitor />}

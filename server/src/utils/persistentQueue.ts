@@ -14,6 +14,7 @@
  */
 
 import { getDb, dbRun, dbAll, dbGet } from '../database/db.js';
+import { getMaxToolRetries } from '../config/runtimeSettings.js';
 import { createLogger } from './logger.js';
 
 const log = createLogger('PersistentQueue');
@@ -94,7 +95,7 @@ export class PersistentQueue<T = any> {
   ) {
     this.queueName = queueName;
     this.concurrency = options.concurrency || 2;
-    this.maxRetries = options.maxRetries || 3;
+    this.maxRetries = options.maxRetries ?? getMaxToolRetries();
     this.pollMs = options.pollMs || 1000;
   }
 

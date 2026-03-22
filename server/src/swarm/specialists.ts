@@ -52,7 +52,7 @@ export const SPECIALISTS: Specialist[] = [
     name: 'coder',
     description: 'Specializes in writing complex code, architecting software, and executing system commands.',
     capabilities: ['code_review', 'code_generation', 'general'],
-    preferredModel: 'gemini-2.5-flash',
+    preferredModel: 'gemini-2.5-pro',
     platform: null,
     isAvailable: () => true,
     tags: ['code', 'development', 'debugging'],

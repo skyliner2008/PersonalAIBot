@@ -70,7 +70,7 @@ async function checkAndTriggerProactiveTask(aiAgent: Agent) {
         isIdle = true;
         hoursSinceLastMessage = 999;
     } else {
-        const lastMsgTime = new Date(lastInteraction.timestamp).getTime();
+        const lastMsgTime = new Date(lastInteraction.timestamp ?? 0).getTime();
         const now = Date.now();
         const diffMs = now - lastMsgTime;
         hoursSinceLastMessage = diffMs / (1000 * 60 * 60);
@@ -111,7 +111,7 @@ async function checkAndTriggerProactiveTask(aiAgent: Agent) {
         botName: 'Auto Core',
         platform: 'system' as any,
         replyWithText: async (text: string) => {
-            console.log(`\n[IdleLoop: Thought]\n${text}`);
+            log.info(`[IdleLoop: Thought]\n${text}`);
         },
         replyWithFile: async (filePath: string, caption?: string) => {
             console.log(`\n[IdleLoop: File Generated]\n${filePath} - ${caption}`);

@@ -2,6 +2,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { TaskType, modelRouting as defaultMultiConfig } from './aiConfig.js';
 import { getAgentCompatibleProvider, getAgentProviderDefaultModel } from '../../providers/agentRuntime.js';
+import { createLogger } from '../../utils/logger.js';
+const logger = createLogger('ConfigManager');
 const CONFIG_PATH = path.join(process.cwd(), 'ai_routing_config.json');
 // Cost-optimized model routing:
 // flash-lite: ถูกสุด เร็วสุด — ทักทาย, system commands, งานง่าย
@@ -61,7 +63,7 @@ export class ConfigManager {
             }
         }
         catch (err) {
-            console.error('[ConfigManager] Failed to load config, using defaults:', err);
+            logger.error('Failed to load config, using defaults:', err);
         }
         // Save defaults if config doesn't exist or is invalid
         const def = {
@@ -155,7 +157,7 @@ export class ConfigManager {
             const nextRoutes = { ...this.currentConfig.routes, [taskType]: newMultiConfig };
             this.updateConfig({ routes: nextRoutes });
         }
-        console.log(`[ConfigManager] Promoted ${successfulModel.provider}/${successfulModel.modelName} to active for ${taskType}${botId ? ` (Bot: ${botId})` : ''}`);
+        logger.info(`Promoted ${successfulModel.provider}/${successfulModel.modelName} to active for ${taskType}${botId ? ` (Bot: ${botId})` : ''}`);
     }
     removeBotConfig(botId) {
         if (!this.currentConfig.botOverrides?.[botId])
@@ -206,7 +208,7 @@ export class ConfigManager {
             fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
         }
         catch (err) {
-            console.error('[ConfigManager] Failed to save config:', err);
+            logger.error('Failed to save config:', err);
         }
     }
 }

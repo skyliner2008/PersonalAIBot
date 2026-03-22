@@ -49,7 +49,19 @@ interface PluginSnapshot {
 }
 
 
+function createBaseAgentSnapshot(definition: AgentDefinition) {
+    return {
+        id: definition.id,
+        name: definition.name,
+        kind: definition.kind,
+        description: definition.description,
+        channels: [...definition.channels],
+        summonTargets: [...definition.summonTargets],
+    };
+}
+
 function buildMessagingBotSnapshot(definition: AgentDefinition, bots: BotInstance[], activeBotIds: Set<string>) {
+    const base = createBaseAgentSnapshot(definition);
     const platform = definition.platform === 'line' ? 'line' : 'telegram';
     const platformBots = listBotsForPlatform(bots, platform);
     const runningBotIds = platformBots
@@ -60,18 +72,12 @@ function buildMessagingBotSnapshot(definition: AgentDefinition, bots: BotInstanc
     let status = 'offline';
     if (runningBotIds.length > 0) {
         status = 'active';
-    }
-    else if (platformBots.length === 0 || platformBots.some((bot: BotInstance) => bot.status === 'error')) {
+    } else if (platformBots.length > 0 && platformBots.every((bot: BotInstance) => bot.status === 'error')) {
         status = 'degraded';
     }
     
     return {
-        id: definition.id,
-        name: definition.name,
-        kind: definition.kind,
-        description: definition.description,
-        channels: [...definition.channels],
-        summonTargets: [...definition.summonTargets],
+        ...base,
         status,
         details: {
             configuredBotCount: platformBots.length,
@@ -87,28 +93,20 @@ function buildMessagingBotSnapshot(definition: AgentDefinition, bots: BotInstanc
 }
 
 function buildFacebookAgentSnapshot(definition: AgentDefinition, pluginById: Map<string, PluginSnapshot>) {
+    const base = createBaseAgentSnapshot(definition);
     const plugin = pluginById.get(FACEBOOK_AUTOMATION_PLUGIN_ID);
     return {
-        id: definition.id,
-        name: definition.name,
-        kind: definition.kind,
-        description: definition.description,
-        channels: [...definition.channels],
-        summonTargets: [...definition.summonTargets],
+        ...base,
         status: plugin ? pluginStatusToRuntime(plugin.status) : 'offline',
         details: plugin?.details ?? { available: false },
     };
 }
 
 function buildJarvisAgentSnapshot(definition: AgentDefinition) {
+    const base = createBaseAgentSnapshot(definition);
     const hasGeminiApiKey = Boolean(getProviderApiKey('gemini') || process.env.GEMINI_API_KEY);
     return {
-        id: definition.id,
-        name: definition.name,
-        kind: definition.kind,
-        description: definition.description,
-        channels: [...definition.channels],
-        summonTargets: [...definition.summonTargets],
+        ...base,
         status: hasGeminiApiKey ? 'active' : 'degraded',
         details: {
             hasGeminiApiKey,
@@ -118,6 +116,7 @@ function buildJarvisAgentSnapshot(definition: AgentDefinition) {
 }
 
 function buildCliBridgeAgentSnapshot(definition: AgentDefinition) {
+    const base = createBaseAgentSnapshot(definition);
     const backendId = definition.id as BackendType;
     const cliConfig = getCLIConfig(backendId);
     const cliAvailable = Boolean(cliConfig);
@@ -133,7 +132,7 @@ function buildCliBridgeAgentSnapshot(definition: AgentDefinition) {
         const oauthPath = getGeminiOAuthPath();
         const hasOAuthCredentials = fs.existsSync(oauthPath);
         details.hasOAuthCredentials = hasOAuthCredentials;
-        details.oauthCredentialsPath = hasOAuthCredentials ? '~/.gemini/oauth_creds.json' : null;
+        details.oauthCredentialsPath = hasOAuthCredentials ? 'OAuth credentials exist' : null;
     }
     
     let platformStatus = cliAvailable ? 'active' : 'degraded';
@@ -144,41 +143,36 @@ function buildCliBridgeAgentSnapshot(definition: AgentDefinition) {
     }
     
     return {
-        id: definition.id,
-        name: definition.name,
-        kind: definition.kind,
-        description: definition.description,
-        channels: [...definition.channels],
-        summonTargets: [...definition.summonTargets],
+        ...base,
         status: platformStatus,
         details,
     };
 }
 
 function buildGenericAgentSnapshot(definition: AgentDefinition) {
+    const base = createBaseAgentSnapshot(definition);
     return {
-        id: definition.id,
-        name: definition.name,
-        kind: definition.kind,
-        description: definition.description,
-        channels: [...definition.channels],
-        summonTargets: [...definition.summonTargets],
+        ...base,
         status: 'active',
         details: { canSummonTo: definition.summonTargets },
     };
 }
 
 function buildAgentSnapshots() {
-    const bots = listBots();
-    const activeBotIds = new Set(getActiveBotIds());
-    const pluginById = new Map<string, PluginSnapshot>(getPluginRuntimeSnapshots().map((plugin: PluginSnapshot) => [plugin.id, plugin]));
+    // Cache results of listBots, getActiveBotIds, and getPluginRuntimeSnapshots
+    // to avoid multiple lookups during the mapping process.
+    const cachedBots = listBots();
+    const cachedActiveBotIds = new Set(getActiveBotIds());
+    const cachedPluginById = new Map<string, PluginSnapshot>(
+        getPluginRuntimeSnapshots().map((plugin: PluginSnapshot) => [plugin.id, plugin])
+    );
     
     return listCoreAgents().map((definition: AgentDefinition) => {
         if (definition.id === 'line-bot' || definition.id === 'telegram-bot') {
-            return buildMessagingBotSnapshot(definition, bots, activeBotIds);
+            return buildMessagingBotSnapshot(definition, cachedBots, cachedActiveBotIds);
         }
         if (definition.id === 'fb-extension') {
-            return buildFacebookAgentSnapshot(definition, pluginById);
+            return buildFacebookAgentSnapshot(definition, cachedPluginById);
         }
         if (definition.id === 'jarvis-root-admin') {
             return buildJarvisAgentSnapshot(definition);

@@ -28,7 +28,7 @@ async function executeFileOperation(
   operation: (resolvedPath: string) => string | Promise<string>
 ): Promise<string> {
   const resolvedPath = path.resolve(filePath);
-  const check = validateFilePath(filePath, mode, resolvedPath);
+  const check = validateFilePath(filePath, mode);
   if (!check.safe) return check.reason!;
   try {
     return await operation(resolvedPath);
@@ -120,7 +120,9 @@ export async function readFileContent({ file_path }: { file_path: string }): Pro
   try {
     const resolvedPath = path.resolve(file_path);
     const content = fs.readFileSync(resolvedPath, 'utf8');
-    return `เนื้อหาในไฟล์ ${resolvedPath}:\n---\n${content}\n---`;
+    const lines = content.split('\n');
+    const numberedContent = lines.map((line, index) => `${index + 1}: ${line}`).join('\n');
+    return `เนื้อหาในไฟล์ ${resolvedPath} (พร้อมเลขบรรทัด):\n---\n${numberedContent}\n---`;
   } catch (error: any) {
     return `ไม่สามารถอ่านไฟล์ได้: ${error.message}`;
   }
@@ -252,5 +254,82 @@ export async function replaceCodeBlock({ file_path, exact_old_string, new_string
     return `Successfully replaced the exactly matched code block in ${resolvedPath}.`;
   } catch (error: any) {
     return `Error failed to replace code block: ${error.message}`;
+  }
+
+}
+
+// ==========================================
+// 6. Search Codebase (grep-like)
+// ==========================================
+export const searchCodebaseDeclaration: FunctionDeclaration = {
+  name: "search_codebase",
+  description: "ค้นหาข้อความ ตัวแปร หรือชื่อฟังก์ชัน (grep-like) ทั่วทั้งโปรเจกต์ เพื่อดูลำดับการเรียกใช้และ Dependencies",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      query: {
+        type: Type.STRING,
+        description: "คำประโยคที่ต้องการค้นหา เช่น 'validateBody'",
+      },
+      directory: {
+        type: Type.STRING,
+        description: "พาธหรือโฟลเดอร์สำหรับค้นหา (ค่าเริ่มต้นคือ ./server/src)",
+      }
+    },
+    required: ["query"],
+  },
+};
+
+export async function searchCodebase({ query, directory }: { query: string, directory?: string }): Promise<string> {
+  try {
+    const startDir = path.resolve(directory && directory.trim() !== '' ? directory : path.join(process.cwd(), 'src'));
+    const results: string[] = [];
+    const MAX_RESULTS = 50;
+
+    function walkDir(currentDir: string) {
+      if (results.length >= MAX_RESULTS) return;
+      const files = fs.readdirSync(currentDir);
+      for (const file of files) {
+        if (results.length >= MAX_RESULTS) return;
+        const fullPath = path.join(currentDir, file);
+        if (file === 'node_modules' || file === 'dist' || file === '.git' || file === '.gemini' || file === 'data' || file.startsWith('.')) continue;
+        
+        try {
+          const stat = fs.statSync(fullPath);
+          if (stat.isDirectory()) {
+            walkDir(fullPath);
+          } else if (stat.isFile() && (file.endsWith('.ts') || file.endsWith('.tsx') || file.endsWith('.js') || file.endsWith('.json') || file.endsWith('.css') || file.endsWith('.md'))) {
+            const content = fs.readFileSync(fullPath, 'utf8');
+            const lines = content.split('\n');
+            let fileHasMatch = false;
+            lines.forEach((line, index) => {
+              if (line.includes(query)) {
+                if (!fileHasMatch) {
+                  results.push(`\n[${path.relative(process.cwd(), fullPath)}]`);
+                  fileHasMatch = true;
+                }
+                results.push(`  ${index + 1}: ${line.trim()}`);
+              }
+            });
+          }
+        } catch (e) {
+          // ignore
+        }
+      }
+    }
+
+    walkDir(startDir);
+
+    if (results.length === 0) {
+      return `ไม่พบผลลัพธ์การค้นหาคำว่า "${query}" ใน ${startDir}`;
+    }
+
+    const output = results.join('\n');
+    if (results.length >= MAX_RESULTS) {
+      return output + '\n... (มีผลลัพธ์อีกมาก แต่แสดงเพียง 50 รายการแรก)';
+    }
+    return output;
+  } catch (error: any) {
+    return `Error searching codebase: ${error.message}`;
   }
 }

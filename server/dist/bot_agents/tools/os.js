@@ -6,7 +6,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { approvalSystem } from '../../utils/approvalSystem.js';
 import { createLogger } from '../../utils/logger.js';
-const logger = createLogger('os-tool');
+const logger = createLogger('os-tool'); // test change
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
 // Input validation helpers for command injection prevention
@@ -40,6 +40,10 @@ const DANGEROUS_PATTERNS = [
     /\bregistry\b.*delete/i, // registry delete
 ];
 function isSafeCommand(command) {
+    // ป้องกัน Null Byte Injection
+    if (command.includes('\0')) {
+        return { safe: false, reason: 'คำสั่งมีอักขระที่ไม่อนุญาต (Null Byte)', type: 'security' };
+    }
     // ตรวจ patterns อันตราย
     for (const pattern of DANGEROUS_PATTERNS) {
         if (pattern.test(command)) {
@@ -63,6 +67,28 @@ function isSafeCommand(command) {
         };
     }
     return { safe: true };
+}
+/**
+ * Helper to handle command execution and error reporting consistently
+ */
+async function safeExec(action, context) {
+    try {
+        const { stdout, stderr } = await action();
+        const result = stdout.trim();
+        if (stderr) {
+            logger.warn(`${context.errorPrefix} Stderr: ${stderr}`);
+            const base = context.successMsg ? `${context.successMsg}\n\n` : '';
+            return `${base}Output:\n${result || '(ไม่มี output)'}\n\nWarnings:\n${stderr}`;
+        }
+        if (context.format)
+            return context.format(result);
+        return context.successMsg || `✅ Output:\n${result || '(ไม่มี output)'}`;
+    }
+    catch (error) {
+        logger.error(`${context.errorPrefix}:`, error);
+        const stderrInfo = error.stderr ? `\n${error.stderr}` : '';
+        return `❌ ${context.errorPrefix}: ${error.message}${stderrInfo}`;
+    }
 }
 // ==========================================
 // 1. Run Command (CMD/PowerShell)
@@ -90,7 +116,7 @@ export async function runCommand({ command }, options) {
             return `🚫 OS Compatibility Error: ${check.reason}`;
         }
         if (chatId.startsWith('admin_')) {
-            console.log(`[Security] Admin override granted for blocked command: "${command}"`);
+            logger.info(`[Security] Admin override granted for blocked command: "${command}"`);
         }
         else {
             console.warn(`[Security] Suspicious command intercepted: "${command}" — ${check.reason}`);
@@ -103,7 +129,8 @@ export async function runCommand({ command }, options) {
         }
     }
     try {
-        const { stdout, stderr } = await execAsync(command, { timeout: 30000 });
+        // Use execFileAsync with cmd.exe to reduce shell injection surface
+        const { stdout, stderr } = await execFileAsync('cmd.exe', ['/c', command], { timeout: 30000 });
         if (stderr) {
             console.warn(`⚠️ Command Stderr: ${stderr}`);
             return `Output:\n${stdout}\n\nWarnings:\n${stderr}`;
@@ -124,7 +151,7 @@ export const openApplicationDeclaration = {
     parameters: {
         type: Type.OBJECT,
         properties: {
-            app_name_or_path: {
+            appNameOrPath: {
                 type: Type.STRING,
                 description: "ชื่อโปรแกรม (เช่น notepad) หรือ พาธเต็ม",
             },
@@ -195,9 +222,8 @@ export const runPythonDeclaration = {
     },
 };
 export async function runPython({ code }) {
-    const tmpDir = path.join(os.tmpdir(), 'ai_python');
-    if (!fs.existsSync(tmpDir))
-        fs.mkdirSync(tmpDir, { recursive: true });
+    const tmpDir = path.join(os.tmpdir(), 'ai_python_sandbox');
+    fs.mkdirSync(tmpDir, { recursive: true });
     const tmpFile = path.join(tmpDir, `script_${Date.now()}.py`);
     try {
         fs.writeFileSync(tmpFile, code, 'utf8');

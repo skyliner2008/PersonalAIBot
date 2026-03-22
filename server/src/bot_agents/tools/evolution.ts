@@ -437,8 +437,8 @@ export async function deleteDynamicTool({ name }: { name: string }): Promise<str
         }
 
         const result = await unregisterDynamicTool(name);
-        if (!result.success) {
-            return `❌ ไม่สามารถลบเครื่องมือได้: ${result.error}`;
+        if (!result.valid) {
+            return `❌ ไม่สามารถลบเครื่องมือได้: ${result.errors.join(', ')}`;
         }
 
         return `✅ ลบเครื่องมือ '${name}' สำเร็จแล้ว`;

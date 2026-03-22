@@ -114,10 +114,18 @@ Scan → Filter → Validate → Impact Analysis → Learning Feedback → Plann
 
 ### 🛡️ Boot Guardian & Immortal Core
 
-- **Boot Guardian** (`bootGuardian.ts`) — ดัก Node.js crash ภายใน 15 วินาทีหลัง startup, auto-rollback ถ้าพบ upgrade breadcrumb
+- **Boot Guardian** (`bootGuardian.ts`) — ดัก Node.js crash ภายใน 15 วินาทีหลัง startup, auto-rollback ถ้าพบ upgradeক্ষেপ breadcrumb
 - **Immortal Core Sandbox** — 10 ไฟล์ core system ถูก hardcode ป้องกัน AI แก้ไข (`index.ts`, `config.ts`, `db.ts`, `selfUpgrade.ts` ฯลฯ)
 - **Circuit Breaker** — แต่ละ AI provider มี circuit breaker แยก ป้องกัน cascading failure
 - **Provider Fallback** — Gemini → OpenAI → Custom CLI อัตโนมัติ
+
+### ⏰ Autonomous Cron Jobs & Self-Scheduling
+
+ระบบสามารถลุกขึ้นมาทำงานเองโดยไม่ต้องมีคนสั่งผ่านแชท โดยใช้ AI เป็นผู้จัดการตารางเวลาตัวเอง:
+
+- **Headless Execution**: ตั้ง Cron Expression (เช่น `0 8 * * *`) แล้วแนบ AI Prompt. เมื่อถึงเวลา ระบบจะรัน Agentic Loop แบบเบื้องหลัง (Background) แล้วส่งผลลัพธ์ผ่าน Webhook กลับไปยัง LINE/Telegram โดยตรง
+- **Agent Self-Scheduling Tools**: AI สามารถสร้างตารางงานให้ตัวเองได้จากคำสั่งเสียง/แชท (เช่น "สรุปข่าวทุก 8 โมงให้หน่อย" → AI จะรัน `create_cron_job()`)
+- **Admin Dashboard**: หน้าต่างจัดการตารางเวลาแบบ Visual (ดู/แก้ไข/หยุดชั่วคราว) ข้อมูลทั้งหมดบันทึกลง SQLite `cron_jobs`
 
 ---
 
@@ -194,6 +202,7 @@ React 19 + Vite + TailwindCSS dashboard มีหน้าดังนี้:
 | `qa_pairs` | Q&A override rules (exact/contains/regex) |
 | `personas` | AI personality profiles (JSON traits) |
 | `scheduled_posts` | Facebook posts ที่รอส่ง |
+| `cron_jobs` | ตารางเวลางาน Agent อัตโนมัติ (AI Self-Scheduling) |
 | `comment_watches` | Facebook posts ที่รอ auto-reply comment |
 | `replied_comments` | Dedup — comment ที่ตอบไปแล้ว |
 | `activity_logs` | Audit trail ทุก action |
@@ -263,6 +272,12 @@ GET  /api/swarm/batch/:id      → Batch status
 POST /api/swarm/approve        → Approve pending task
 ```
 
+### Automation & API Providers
+```
+GET/POST/PUT/DELETE /api/cron-jobs     → Manage AI scheduled tasks
+GET/POST/PUT/DELETE /api/providers     → Dynamic AI Provider management
+```
+
 ### System & Admin
 ```
 GET  /api/status               → Bot/browser/chat monitor status
@@ -293,7 +308,9 @@ terminal:list     → List active sessions
 | **OS & File** | `run_command`, `run_python`, `read_file_content`, `replace_code_block`, `search_codebase` |
 | **Browser** | `mouse_click`, `keyboard_type`, `screenshot_desktop`, `fetch_url` |
 | **Web** | `google_search`, `extract_table` |
-| **Media** | `generate_image` |
+| **Media** | `generate_image`, `generate_speech`, `generate_video` (Provider Agnostic) |
+| **Office** | `read_document`, `create_document`, `edit_document`, `read_google_doc` (PDF, Word, Excel, CSV) |
+| **Cron Jobs** | `create_cron_job`, `list_cron_jobs`, `delete_cron_job` (AI Self-Scheduling) |
 | **Dynamic** | Hot-reloadable JSON-defined tools จาก `server/dynamic_tools/` |
 
 ---
@@ -335,6 +352,8 @@ terminal:list     → List active sessions
 | **Rate Limiting** | 10 AI chats/min, 5 generations/min per user |
 | **Input Validation** | Zod schema validation บน POST/PUT ทุกตัว |
 | **ReDoS Protection** | ทดสอบ regex patterns ก่อน save (50ms timeout) |
+| **Admin Resilience** | รหัสผ่านผู้ดูแลระบบถูกเข้ารหัส AES-256 ลง SQLite โดยตรง (ไม่ถูกล็อคจาก env อีกต่อไป) |
+| **Crash Alerts** | หาก Puppeteer พังหรือเกิด Fatal Error ระบบจะส่งแจ้งเตือนด่วนผ่าน Telegram/LINE ให้ Admin ทันที |
 | **CORS** | Whitelist: localhost:3000, 5173, 5174 |
 | **Security Headers** | CSP, HSTS, X-Frame-Options, X-Content-Type-Options |
 | **Sanitization** | XSS/injection prevention ทุก input |

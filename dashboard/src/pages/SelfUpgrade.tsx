@@ -25,6 +25,7 @@ interface ProposalStats {
   approved: number;
   rejected: number;
   implemented: number;
+  skipped: number;
   byType: Record<string, number>;
   byPriority: Record<string, number>;
   tokensIn?: number;
@@ -71,7 +72,8 @@ const STATUS_THEMES: Record<string, string> = {
   approved: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
   rejected: 'bg-rose-500/10 text-rose-400 border-rose-500/20',
   implemented: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
-  implementing: 'bg-fuchsia-500/10 text-fuchsia-400 border-fuchsia-500/20 animate-pulse',
+  implementing: 'bg-fuchsia-500/10 text-fuchsia-400 border-fuchsia-500/20',
+  skipped: 'bg-gray-500/10 text-gray-400 border-gray-500/20',
 };
 
 export default function SelfUpgrade() {
@@ -156,6 +158,35 @@ export default function SelfUpgrade() {
     } catch (err) {
       console.error('Failed to implement all:', err);
       alert('เกิดข้อผิดพลาดในการสั่งการแบบชุด');
+    }
+  };
+
+  const retryAllRejected = async () => {
+    const rejectedCount = proposals.filter(p => p.status === 'rejected').length;
+    if (rejectedCount === 0) return;
+    if (!confirm(`ยืนยันการนำรายการที่ถูกปฏิเสธ (Rejected) ทั้งหมด ${rejectedCount} รายการ กลับไปรอพิจารณาใหม่ (Pending)?`)) return;
+    
+    try {
+      await api.retryAllRejectedProposals();
+      await fetchData();
+      alert('นำรายการที่ถูกปฏิเสธกลับสู่สถานะ Pending เรียบร้อยแล้ว');
+    } catch (err) {
+      console.error('Failed to retry all rejected:', err);
+      alert('เกิดข้อผิดพลาด');
+    }
+  };
+
+  const deleteAllRejected = async () => {
+    const rejectedCount = proposals.filter(p => p.status === 'rejected').length;
+    if (rejectedCount === 0) return;
+    if (!confirm(`ยืนยันการลบรายการที่ถูกปฏิเสธ (Rejected) ทิ้งทั้งหมด ${rejectedCount} รายการ อย่างถาวร?`)) return;
+    
+    try {
+      await api.deleteAllRejectedProposals();
+      await fetchData();
+    } catch (err) {
+      console.error('Failed to delete all rejected:', err);
+      alert('เกิดข้อผิดพลาดในการลบ');
     }
   };
 
@@ -381,6 +412,24 @@ export default function SelfUpgrade() {
                   ดำเนินการทันที (ทั้งหมด)
                 </button>
               )}
+              {proposals.some(p => p.status === 'rejected') && (
+                <>
+                  <button
+                    onClick={retryAllRejected}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-400 border border-yellow-500/20 text-xs font-bold rounded-lg transition-all duration-300 hover:scale-105 active:scale-95"
+                  >
+                    <RefreshCcw className="w-3.5 h-3.5" />
+                    Retry All Rejected
+                  </button>
+                  <button
+                    onClick={deleteAllRejected}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 text-xs font-bold rounded-lg transition-all duration-300 hover:scale-105 active:scale-95"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Clear Rejected
+                  </button>
+                </>
+              )}
               <select
                 value={filterStatus}
                 onChange={(e) => setFilterStatus(e.target.value)}
@@ -526,7 +575,7 @@ export default function SelfUpgrade() {
                   <StatBox label="รอดำเนินการ" value={stats.pending} color="text-indigo-400" />
                   <StatBox label="อนุมัติแล้ว" value={stats.approved} color="text-emerald-400" />
                   <StatBox label="ปฏิเสธ" value={stats.rejected} color="text-rose-400" />
-                  <StatBox label="สำเร็จแล้ว" value={stats.implemented} color="text-purple-400" />
+                  <StatBox label="สำเร็จ/ข้าม" value={stats.implemented + (stats.skipped || 0)} color="text-purple-400" />
                 </div>
 
                 <div className="pt-3 border-t border-white/5">

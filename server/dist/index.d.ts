@@ -1,1 +1,1 @@
-export {};
+import './bootGuardian.js';

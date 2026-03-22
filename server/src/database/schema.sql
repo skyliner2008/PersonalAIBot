@@ -93,6 +93,21 @@ CREATE TABLE IF NOT EXISTS scheduled_posts (
 );
 CREATE INDEX IF NOT EXISTS idx_posts_status ON scheduled_posts(status, scheduled_at);
 
+-- Autonomous Cron Jobs (Agentic Automation)
+CREATE TABLE IF NOT EXISTS cron_jobs (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  cron_expression TEXT NOT NULL,
+  prompt TEXT NOT NULL,
+  bot_id TEXT NOT NULL,
+  chat_id TEXT NOT NULL,
+  platform TEXT NOT NULL,
+  is_active BOOLEAN DEFAULT 1,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_cron_active ON cron_jobs(is_active);
+
 -- Comment watch list
 CREATE TABLE IF NOT EXISTS comment_watches (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

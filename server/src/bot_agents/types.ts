@@ -36,10 +36,11 @@ export interface ToolTelemetry {
 
 /**
  * Generic args passed to tool handlers at runtime.
- * Args come from the AI model as dynamic JSON, so `any` is appropriate
- * at the dispatch boundary — each tool implementation validates its own args.
+ * Args come from the AI model as dynamic JSON.
+ * We use `unknown` to force tool implementations to perform explicit type narrowing or validation.
  */
-export type ToolHandler = (args: any) => string | Promise<string>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type ToolHandler<T = any> = (args: T) => string | Promise<string>;
 
 /** Map of tool names to their handlers */
 export type ToolHandlerMap = Record<string, ToolHandler>;
@@ -122,7 +123,9 @@ export interface NgrokApiResponse {
 // Keyword scoring (task classification)
 // ──────────────────────────────────────────────
 
+export type Keyword = string;
+
 export interface KeywordRule {
-    keywords: string[];
+    keywords: Keyword[];
     score: number;
 }

@@ -151,7 +151,7 @@ export const globalErrorHandler = (
   if (err instanceof AppError) {
     statusCode = err.statusCode;
     message = err.message;
-    errors = err.errors;
+    errors = err instanceof ValidationError ? err.errors : undefined;
 
     logger.warn({
       message: err.message,

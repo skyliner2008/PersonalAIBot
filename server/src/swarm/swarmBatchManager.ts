@@ -73,8 +73,8 @@ export class SwarmBatchManager {
     for (let i = 0; i < completedOutputs.length; i++) {
       for (let j = i + 1; j < completedOutputs.length; j++) {
         if (completedOutputs[i].result === completedOutputs[j].result) {
-          console.log(
-            `[SwarmBatchManager] WARNING: Duplicate output detected between ${completedOutputs[i].specialist} and ${completedOutputs[j].specialist}`,
+          logger.warn(
+            `Duplicate output detected between ${completedOutputs[i].specialist} and ${completedOutputs[j].specialist}`,
           );
           sections.push(`[WARNING] Duplicate output: ${completedOutputs[i].specialist} and ${completedOutputs[j].specialist} produced identical results`);
         }

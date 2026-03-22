@@ -26,11 +26,11 @@ router.use(requireAuth('viewer'));
  */
 router.get('/', (_req, res) => {
   try {
-    let tools = getAllTools();
+    let tools = getAllTools(); // test
 
     const { category, platform, q } = _req.query;
 
-    if (category && typeof category === 'string') {
+    if (category && typeof category === 'string' && getToolCategories().map(cat => cat.category).includes(category as ToolCategory)) {
       tools = getToolsByCategory(category as ToolCategory);
     }
 
@@ -40,10 +40,13 @@ router.get('/', (_req, res) => {
       tools = tools.filter(t => platformNames.has(t.name));
     }
 
-    if (q && typeof q === 'string') {
-      const searchResults = searchTools(q);
-      const searchNames = new Set(searchResults.map(t => t.name));
-      tools = tools.filter(t => searchNames.has(t.name));
+    if (q) {
+      const queryString = typeof q === 'string' ? q : Array.isArray(q) ? q.join(' ') : undefined;
+      if (queryString) {
+        const searchResults = searchTools(queryString);
+        const searchNames = new Set(searchResults.map(t => t.name));
+        tools = tools.filter(t => searchNames.has(t.name));
+      }
     }
 
     // Strip declaration from response (it's large and not needed by frontend)
@@ -86,7 +89,7 @@ router.get('/:name', (req, res) => {
   try {
     const meta = getToolMeta(req.params.name);
     if (!meta) return res.status(404).json({ error: 'Tool not found' });
-    const { declaration: _, ...rest } = meta;
+    const { declaration: _, ...rest } = meta ?? {};
     res.json(rest);
   } catch (err: any) {
     res.status(500).json({ error: err.message });

@@ -1,3 +1,4 @@
+import fs from 'fs';
 import { Router } from 'express';
 import { v4 as uuid } from 'uuid';
 import authRoutes from './routes/authRoutes.js';
@@ -29,6 +30,10 @@ import { setManagedSetting } from '../config/settingsSecurity.js';
 import { configManager } from '../bot_agents/config/configManager.js';
 import { TaskType, getBestModelForTask } from '../bot_agents/config/aiConfig.js';
 import { agentEvents } from '../utils/socketBroadcast.js';
+// ============ Helper Functions ============
+function getFileExtension(filename) {
+    return '.' + (filename.split('.').pop()?.toLowerCase() || 'bin');
+}
 // ============ Zod Schemas for Input Validation ============
 const fbLoginSchema = z.object({
     email: z.string().min(1, 'email is required'),
@@ -58,6 +63,11 @@ const qaCreateSchema = z.object({
     match_type: z.enum(['exact', 'contains', 'regex']).optional().default('contains'),
     category: z.string().max(100).optional().nullable(),
     priority: z.coerce.number().int().min(0).max(100).optional().default(0),
+});
+const commentWatchSchema = z.object({
+    fb_post_url: z.string().min(1, 'fb_post_url is required'),
+    reply_style: z.string().optional().default('friendly'),
+    max_replies: z.coerce.number().optional().default(50),
 });
 export const router = Router();
 // ============ Authentication ============
@@ -269,6 +279,8 @@ router.post('/qa', validateBody(qaCreateSchema), (req, res) => {
     if (!validation.valid)
         return res.status(400).json({ error: validation.error });
     dbRun('INSERT INTO qa_pairs (question_pattern, answer, match_type, category, priority) VALUES (?, ?, ?, ?, ?)', [question_pattern.trim(), answer.trim(), match_type, category || null, priority]);
+    // Removed redundant query
+    // const lastRow = dbGet('SELECT last_insert_rowid() as id');
     const lastRow = dbGet('SELECT last_insert_rowid() as id');
     res.json({ success: true, id: lastRow?.id });
 });
@@ -278,7 +290,7 @@ router.put('/qa/:id', (req, res) => {
     if (!current)
         return res.status(404).json({ error: 'Not found' });
     // Validate pattern if being changed
-    const newPattern = fields.question_pattern ?? current.question_pattern;
+    const newPattern = (fields.question_pattern ?? current.question_pattern).trim();
     const newMatchType = fields.match_type ?? current.match_type;
     const validation = validateQAPattern(newPattern, newMatchType);
     if (!validation.valid)
@@ -342,7 +354,7 @@ router.get('/comments/watches', (req, res) => {
     const rows = dbAll('SELECT * FROM comment_watches ORDER BY created_at DESC');
     res.json(rows);
 });
-router.post('/comments/watches', (req, res) => {
+router.post('/comments/watches', validateBody(commentWatchSchema), (req, res) => {
     const { fb_post_url, reply_style, max_replies } = req.body;
     // Validate required URL using proper URL parsing
     if (!fb_post_url || typeof fb_post_url !== 'string') {
@@ -440,8 +452,8 @@ router.delete('/dynamic-tools/:name', async (req, res) => {
             return res.status(404).json({ success: false, error: 'Tool not found' });
         }
         const result = await unregisterDynamicTool(name);
-        if (!result.success) {
-            return res.status(500).json({ success: false, error: result.error });
+        if (!result.valid) {
+            return res.status(500).json({ success: false, error: result.errors?.join(', ') || 'Failed' });
         }
         res.json({ success: true, message: `Tool '${name}' deleted` });
     }
@@ -548,9 +560,8 @@ router.post('/files/upload', upload.single('file'), asyncHandler(async (req, res
         return res.status(400).json({ error: 'No file provided' });
     }
     // Rename to preserve extension (multer strips it)
-    const ext = '.' + (file.originalname.split('.').pop()?.toLowerCase() || 'bin');
+    const ext = getFileExtension(file.originalname);
     const newPath = file.path + ext;
-    const fs = await import('fs');
     fs.renameSync(file.path, newPath);
     const processed = await processFile(newPath);
     const geminiPart = fileToGeminiPart(processed);

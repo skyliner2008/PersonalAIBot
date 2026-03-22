@@ -13,8 +13,20 @@ import { getSessionManager, executeCommand } from '../terminal/terminalGateway.j
 import { getAvailableBackends, getHelpText, refreshAvailableBackends } from '../terminal/commandRouter.js';
 import { requireAuth } from '../utils/auth.js';
 
+interface AuthenticatedRequest extends Request {
+  user?: { username?: string };
+}
+
 const router = Router();
 router.use(requireAuth('admin'));
+
+/**
+ * Helper to handle errors and avoid duplicated logic
+ */
+const handleError = (res: Response, err: any) => {
+  if (res.headersSent) return;
+  res.status(500).json({ error: err.message || String(err) });
+};
 
 /** List active terminal sessions */
 router.get('/sessions', (_req: Request, res: Response) => {
@@ -27,48 +39,56 @@ router.get('/sessions', (_req: Request, res: Response) => {
     const sessions = mgr.listSessions();
     res.json({ sessions, count: sessions.length });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    handleError(res, err);
   }
 });
 
 /** List available backends (with optional refresh) */
-router.get('/backends', (req: Request, res: Response) => {
+router.get('/backends', async (req: Request, res: Response) => {
   try {
-    const refresh = String(req.query.refresh || '').toLowerCase();
-    const shouldRefresh = refresh === '1' || refresh === 'true' || refresh === 'yes';
-    const backends = shouldRefresh ? refreshAvailableBackends() : getAvailableBackends();
+    const shouldRefresh = req.query.refresh === 'true' || req.query.refresh === '1' || String(req.query.refresh).toLowerCase() === 'yes';
+    const backends = shouldRefresh ? await refreshAvailableBackends() : getAvailableBackends();
     res.json({ backends, refreshed: shouldRefresh });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    handleError(res, err);
   }
 });
 
 /** Get help text */
 router.get('/help', (_req: Request, res: Response) => {
-  const help = getHelpText().replace(/\x1b\[[^m]*m/g, '');
-  res.json({ help });
+  try {
+    const help = getHelpText().replace(/\x1b\[[^m]*m/g, '');
+    res.json({ help });
+  } catch (err: any) {
+    handleError(res, err);
+  }
 });
 
 /** Execute a one-shot command and return output */
-router.post('/execute', async (req: Request, res: Response) => {
+router.post('/execute', async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { command, platform } = req.body as { command?: string; platform?: string };
-    const user = (req as any).user as { username?: string } | undefined;
+    const user = req.user;
 
     if (!command || typeof command !== 'string' || command.trim().length === 0) {
       return res.status(400).json({ error: 'A valid command string is required' });
     }
 
     // Sanitize input to mitigate command injection risks: remove null bytes and trim whitespace
-    const sanitizedCommand = command.replace(/\0/g, '').trim();
-    const sanitizedPlatform = (typeof platform === 'string' ? platform.trim() : 'api') || 'api';
+    // and escape shell metacharacters to prevent unintended shell execution.
+    const sanitizedCommand = command
+      .replace(/\0/g, '')
+      .replace(/([\\\\\\'"\\!&\\*\\(\\)\\|;<>\\?\\[\\]{}])/g, '\\\\$1')
+      .trim();
+
+    // Validate and sanitize platform: must be alphanumeric, underscore, or hyphen; otherwise, default to 'api'
+    const sanitizedPlatform = (typeof platform === 'string' && /^[a-zA-Z0-9_-]+$/.test(platform)) ? platform.trim() : 'api';
 
     const result = await executeCommand(sanitizedCommand, sanitizedPlatform, user?.username);
     if (res.headersSent) return;
     res.json({ output: result, command: sanitizedCommand });
   } catch (err: any) {
-    if (res.headersSent) return;
-    res.status(500).json({ error: err.message });
+    handleError(res, err);
   }
 });
 

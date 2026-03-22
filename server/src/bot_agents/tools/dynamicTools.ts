@@ -327,11 +327,10 @@ export async function unregisterDynamicTool(
       log.info('Deleted dynamic tool file', { name, path: filePath });
     }
 
-    return { success: true };
+    return { valid: true, errors: [], warnings: [], deleted: true };
   } catch (err: any) {
-    const error = err.message;
-    log.error('Error unregistering dynamic tool', { name, error });
-    return { success: false, error };
+    log.error('Error unregistering dynamic tool', { name, error: err.message });
+    return { valid: false, errors: [err.message], warnings: [] };
   }
 }
 

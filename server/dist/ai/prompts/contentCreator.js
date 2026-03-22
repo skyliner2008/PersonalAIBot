@@ -1,4 +1,10 @@
+export const MAX_TOPIC_LENGTH = 500;
+export const MAX_CONTENT_LENGTH = 5000;
+export const MAX_COMMENT_LENGTH = 1000;
 export function buildContentPrompt(topic, style = 'engaging', language = 'th', extraInstructions) {
+    if (!topic || topic.trim().length === 0) {
+        throw new Error('Topic is required');
+    }
     const langMap = {
         th: 'ภาษาไทย',
         en: 'English',
@@ -25,6 +31,12 @@ ${extraInstructions ? `\nคำแนะนำเพิ่มเติม: ${ext
     ];
 }
 export function buildCommentReplyPrompt(postContent, commentText, commenterName, replyStyle = 'friendly') {
+    if (!postContent || postContent.trim().length === 0) {
+        throw new Error('Post content is required');
+    }
+    if (!commentText || commentText.trim().length === 0) {
+        throw new Error('Comment text is required');
+    }
     return [
         {
             role: 'system',

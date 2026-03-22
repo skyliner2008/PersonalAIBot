@@ -5,6 +5,7 @@
 import { Type } from '@google/genai';
 import type { FunctionDeclaration } from '@google/genai';
 import { getSwarmCoordinator } from './swarmCoordinator.js';
+import type { TaskType } from './taskQueue.js';
 import type { BotContext } from '../bot_agents/types.js';
 import { startNewWorkspace } from './workspace.js';
 import { Agent } from '../bot_agents/agent.js';
@@ -138,8 +139,39 @@ export const startRoundtableDeclaration: FunctionDeclaration = {
 /**
  * Runtime handlers for swarm tools.
  */
-async function handleDelegateTask(coordinator: any, ctx: BotContext, args: any) {
-  const taskType = String(args.task_type ?? '').toLowerCase() as any;
+type SwarmCoordinator = ReturnType<typeof getSwarmCoordinator>;
+
+interface DelegateTaskArgs {
+  task_type: string;
+  message: string;
+  specialist?: string;
+  priority?: string;
+}
+
+interface RequestPeerReviewArgs {
+  content_to_review: string;
+  specific_concerns?: string;
+}
+
+interface CheckSwarmStatusArgs {
+  detail_level?: string;
+}
+
+interface StartProjectWorkspaceArgs {
+  goal: string;
+  max_turns?: number;
+}
+
+interface StartRoundtableArgs {
+  objective: string;
+  max_rounds?: number;
+}
+
+/**
+ * Runtime handlers for swarm tools.
+ */
+async function handleDelegateTask(coordinator: SwarmCoordinator, ctx: BotContext, args: DelegateTaskArgs) {
+  const taskType = String(args.task_type ?? '').toLowerCase();
   const message = String(args.message ?? '');
   const specialist = args.specialist ? String(args.specialist).toLowerCase() : undefined;
   const priorityStr = args.priority ? String(args.priority).toLowerCase() : '3';
@@ -155,7 +187,7 @@ async function handleDelegateTask(coordinator: any, ctx: BotContext, args: any) 
   try {
     const taskId = await coordinator.delegateTask(
       ctx,
-      taskType,
+      taskType as TaskType,
       { message },
       { toSpecialist: specialist, priority },
     );
@@ -174,7 +206,7 @@ async function handleDelegateTask(coordinator: any, ctx: BotContext, args: any) 
   }
 }
 
-async function handleRequestPeerReview(coordinator: any, ctx: BotContext, args: any) {
+async function handleRequestPeerReview(coordinator: SwarmCoordinator, ctx: BotContext, args: RequestPeerReviewArgs) {
   const contentToReview = String(args.content_to_review ?? '');
   const specificConcerns = args.specific_concerns
     ? String(args.specific_concerns)
@@ -215,7 +247,7 @@ async function handleRequestPeerReview(coordinator: any, ctx: BotContext, args: 
   }
 }
 
-async function handleCheckSwarmStatus(coordinator: any, args: any) {
+async function handleCheckSwarmStatus(coordinator: SwarmCoordinator, args: CheckSwarmStatusArgs) {
   const detailLevel = args.detail_level ? String(args.detail_level).toLowerCase() : 'summary';
 
   try {
@@ -264,7 +296,7 @@ async function handleCheckSwarmStatus(coordinator: any, args: any) {
   }
 }
 
-async function handleListSpecialists(coordinator: any) {
+async function handleListSpecialists(coordinator: SwarmCoordinator) {
   try {
     const specialists = coordinator.getAvailableSpecialists();
 
@@ -282,7 +314,7 @@ async function handleListSpecialists(coordinator: any) {
   }
 }
 
-async function handleStartProjectWorkspace(args: any) {
+async function handleStartProjectWorkspace(args: StartProjectWorkspaceArgs) {
   const goal = String(args.goal ?? '');
   const maxTurns = typeof args.max_turns === 'number' ? args.max_turns : 50;
 
@@ -304,7 +336,7 @@ async function handleStartProjectWorkspace(args: any) {
   }
 }
 
-async function handleStartRoundtable(args: any) {
+async function handleStartRoundtable(args: StartRoundtableArgs) {
   const objective = String(args.objective ?? '');
   const maxRounds = typeof args.max_rounds === 'number'
     ? Math.min(3, Math.max(1, args.max_rounds))
@@ -316,7 +348,7 @@ async function handleStartRoundtable(args: any) {
     let agentInstance: Agent | undefined;
     try {
       agentInstance = new Agent();
-    } catch (err: any) { console.warn('Agent instantiation failed for synthesis (optional)', err); }
+    } catch (err: unknown) { console.warn('Agent instantiation failed for synthesis (optional)', err); }
 
     const session = await startMeeting(objective, {
       maxRounds,
@@ -325,7 +357,7 @@ async function handleStartRoundtable(args: any) {
 
     const result = formatMeetingResult(session);
     const participantCount = session.rounds[0]?.responses
-      .filter((r: any) => r.status === 'success').length ?? 0;
+      .filter((r: { status: string }) => r.status === 'success').length ?? 0;
 
     return [
       `[Roundtable Complete]`,
@@ -345,12 +377,12 @@ export function getSwarmToolHandlers(ctx: BotContext) {
   const coordinator = getSwarmCoordinator();
 
   return {
-    delegate_task: (args: any) => handleDelegateTask(coordinator, ctx, args),
-    request_peer_review: (args: any) => handleRequestPeerReview(coordinator, ctx, args),
-    check_swarm_status: (args: any) => handleCheckSwarmStatus(coordinator, args),
+    delegate_task: (args: any) => handleDelegateTask(coordinator, ctx, args as DelegateTaskArgs),
+    request_peer_review: (args: any) => handleRequestPeerReview(coordinator, ctx, args as RequestPeerReviewArgs),
+    check_swarm_status: (args: any) => handleCheckSwarmStatus(coordinator, args as CheckSwarmStatusArgs),
     list_specialists: () => handleListSpecialists(coordinator),
-    start_project_workspace: (args: any) => handleStartProjectWorkspace(args),
-    start_roundtable: (args: any) => handleStartRoundtable(args),
+    start_project_workspace: (args: any) => handleStartProjectWorkspace(args as StartProjectWorkspaceArgs),
+    start_roundtable: (args: any) => handleStartRoundtable(args as StartRoundtableArgs),
   };
 }
 

@@ -4,10 +4,16 @@
  */
 
 import { createLogger } from '../utils/logger.js';
-import { getProvider, getRegistry } from './registry.js';
+import { getProvider, getRegistry, ProviderDefinition } from './registry.js';
 import { dbAll, dbGet, dbRun, setCredential, getCredential } from '../database/db.js';
 
 const log = createLogger('KeyManager');
+
+/**
+ * Helper to consistently format errors for logging
+ */
+const serializeError = (error: any): string =>
+  error instanceof Error ? error.message : String(error);
 
 export class KeyManager {
   private static envKeyCache: Map<string, string> = new Map();
@@ -17,6 +23,9 @@ export class KeyManager {
    */
   static async importEnvKeys(): Promise<void> {
     try {
+      // Ensure unique constraint exists to prevent race conditions during concurrent imports
+      dbRun('CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_provider_type ON api_keys (provider_id, key_type)');
+
       const registry = getRegistry();
       let imported = 0;
 
@@ -25,20 +34,29 @@ export class KeyManager {
         const envValue = process.env[provider.apiKeyEnvVar];
         if (!envValue) continue;
 
-        // Check if already in DB
-        const existing = this.getKeyFromDb(provider.id);
-        if (existing) continue;
+        // 1. Fast path: skip if key already exists and is valid
+        if (this.getKeyFromDb(provider.id)) continue;
 
-        // Store encrypted in DB
-        this.setKeyInDb(provider.id, envValue, 'env');
-        imported++;
+        // 2. Atomic lock: Use INSERT OR IGNORE to handle race conditions.
+        // Only one instance will successfully insert the placeholder row.
+        const result = dbRun(
+          `INSERT OR IGNORE INTO api_keys (provider_id, key_type, encrypted_value, source, updated_at)
+           VALUES (?, ?, ?, ?, datetime('now'))`,
+          [provider.id, 'api_key', `ref:provider_key_${provider.id}`, 'env']
+        ) as any;
+
+        // 3. If we inserted the row, proceed to set the actual credential
+        if (result && result.changes > 0) {
+          await this.setKeyInDb(provider.id, envValue, 'env');
+          imported++;
+        }
       }
 
       if (imported > 0) {
         log.info('✓ Imported env keys to DB', { count: imported });
       }
     } catch (error) {
-      log.error('Failed to import env keys', { error: String(error) });
+      log.error('Failed to import env keys', { error: serializeError(error) });
     }
   }
 
@@ -57,7 +75,7 @@ export class KeyManager {
       // No .env fallback - force Database ONLY as single source of truth
       return null;
     } catch (error) {
-      log.error('Failed to get key', { providerId, error: String(error) });
+      log.error('Failed to get key', { providerId, error: serializeError(error) });
       return null;
     }
   }
@@ -75,11 +93,11 @@ export class KeyManager {
       const provider = getProvider(providerId);
       if (!provider) return false;
 
-      this.setKeyInDb(providerId, value, source);
+      await this.setKeyInDb(providerId, value, source);
       log.info('✓ Key saved (encrypted)', { providerId, source });
       return true;
     } catch (error) {
-      log.error('Failed to set key', { providerId, error: String(error) });
+      log.error('Failed to set key', { providerId, error: serializeError(error) });
       return false;
     }
   }
@@ -95,7 +113,7 @@ export class KeyManager {
       log.info('✓ Key deleted', { providerId });
       return true;
     } catch (error) {
-      log.error('Failed to delete key', { providerId, error: String(error) });
+      log.error('Failed to delete key', { providerId, error: serializeError(error) });
       return false;
     }
   }
@@ -105,13 +123,13 @@ export class KeyManager {
    */
   static async listConfigured(): Promise<string[]> {
     try {
-      // Ensure the provider has an entry in api_keys and the actual key exists in settings
+      // Query optimized to filter directly for providers with corresponding entries in settings table
       const rows = dbAll<{ provider_id: string }>(
-        "SELECT DISTINCT provider_id FROM api_keys WHERE encrypted_value IS NOT NULL AND EXISTS (SELECT 1 FROM settings WHERE key = 'provider_key_' || provider_id)"
+        "SELECT DISTINCT provider_id FROM api_keys WHERE EXISTS (SELECT 1 FROM settings WHERE key = 'provider_key_' || provider_id)"
       );
       return rows.map(r => r.provider_id);
     } catch (error) {
-      log.error('Failed to list', { error: String(error) });
+      log.error('Failed to list', { error: serializeError(error) });
       return [];
     }
   }
@@ -121,40 +139,40 @@ export class KeyManager {
   // ============================================================
 
   private static getKeyFromDb(providerId: string): string | null {
+    const credKey = `provider_key_${providerId}`;
     try {
-      // Use AES-encrypted credential store from db.ts
-      const credKey = `provider_key_${providerId}`;
-      const decrypted = getCredential(credKey);
-      if (decrypted) return decrypted;
-
-      // Fallback: check api_keys table directly (for env-imported keys)
-      const row = dbGet<{ encrypted_value: string }>(
-        'SELECT encrypted_value FROM api_keys WHERE provider_id = ? AND key_type = ?',
-        [providerId, 'api_key']
-      );
-      
-      const val = row?.encrypted_value || null;
-      // Prevent returning the internal reference string if it couldn't be decrypted
-      if (val && val.startsWith('ref:')) {
-        return null;
-      }
-      return val;
-    } catch {
+      return getCredential(credKey) || null;
+    } catch (error) {
+      // Log decryption or database errors specifically
+      log.error('Error retrieving key from DB', { 
+        providerId, 
+        error: serializeError(error)
+      });
       return null;
     }
   }
 
-  private static setKeyInDb(providerId: string, value: string, source: string): void {
-    // 1. Store encrypted via AES-256-GCM credential store
+  private static async setKeyInDb(providerId: string, value: string, source: string): Promise<void> {
     const credKey = `provider_key_${providerId}`;
-    setCredential(credKey, value);
 
-    // 2. Also store reference in api_keys table (encrypted value stored separately)
-    dbRun(
-      `INSERT OR REPLACE INTO api_keys (provider_id, key_type, encrypted_value, source, updated_at)
-       VALUES (?, ?, ?, ?, datetime('now'))`,
-      [providerId, 'api_key', `ref:${credKey}`, source]
-    );
+    try {
+      await dbRun('BEGIN TRANSACTION');
+
+      // 1. Store encrypted via AES-256-GCM credential store
+      await setCredential(credKey, value);
+
+      // 2. Also store reference in api_keys table (encrypted value stored separately)
+      await dbRun(
+        `INSERT OR REPLACE INTO api_keys (provider_id, key_type, encrypted_value, source, updated_at)
+         VALUES (?, ?, ?, ?, datetime('now'))`,
+        [providerId, 'api_key', `ref:${credKey}`, source]
+      );
+
+      await dbRun('COMMIT');
+    } catch (error) {
+      await dbRun('ROLLBACK');
+      throw error;
+    }
   }
 }
 

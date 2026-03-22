@@ -19,4 +19,22 @@ export interface AIProvider {
   ): Promise<AIResponse>;
 
   listModels(): Promise<string[]>;
+
+  generateImage?(
+    prompt: string,
+    modelName?: string,
+    options?: Record<string, any>
+  ): Promise<{ url?: string; b64_json?: string; buffer?: Buffer; revised_prompt?: string }[]>;
+
+  generateSpeech?(
+    text: string,
+    modelName?: string,
+    voice?: string
+  ): Promise<Buffer>;
+
+  generateVideo?(
+    prompt: string,
+    modelName?: string,
+    options?: Record<string, any>
+  ): Promise<{ url?: string; buffer?: Buffer }[]>;
 }

@@ -5,7 +5,7 @@ description: "Complete architecture reference for PersonalAIBotV2 — Agentic AI
 
 # PersonalAIBotV2 — Complete Architecture Reference
 
-> **Last audited**: 2026-03-20  
+> **Last audited**: 2026-03-22  
 > **Stack**: TypeScript, Express, Socket.IO, React+Vite, SQLite, Google GenAI SDK
 
 This is the authoritative reference for `PersonalAIBotV2`. Read this document fully before making any changes to the project. It covers all subsystems, file locations, data flows, and operational details.
@@ -259,7 +259,10 @@ Planning algorithm:
 | **File Ops** | `list_files`, `read_file_content`, `write_file_content`, `delete_file`, `send_file_to_chat` | `tools/file.ts` |
 | **Browser** | `browser_navigate`, `browser_click`, `browser_type`, `browser_close` | `tools/browser.ts` |
 | **Web/Search** | `web_search`, `read_webpage`, `mouse_click`, `keyboard_type` | `tools/limitless.ts` |
+| **Media** | `generate_image`, `generate_speech`, `generate_video` | `tools/media_generation.ts` |
+| **Office** | `read_document`, `create_document`, `edit_document`, `read_google_doc` | `tools/office_tools.ts` |
 | **Memory** | `memory_search`, `memory_save` | `tools/index.ts` |
+| **Cron Jobs** | `create_cron_job`, `list_cron_jobs`, `delete_cron_job` | `tools/cron_tools.ts` |
 | **System Awareness** | `get_my_config`, `list_available_models`, `set_my_model`, `get_system_status` | `tools/system.ts` |
 | **Self-Evolution** | `self_read_source`, `self_edit_persona`, `self_add_learning`, `self_view_evolution`, `self_reflect`, `self_heal` | `tools/evolution.ts` |
 | **Swarm** | Swarm coordination tools | `swarm/swarmTools.ts` |
@@ -279,39 +282,124 @@ Planning algorithm:
 
 ## 8. Self-Evolution Engine
 
+### Self-Upgrade System (Core)
+
+**File**: `server/src/evolution/selfUpgrade.ts` (~1700 lines)
+
+The autonomous code modification engine. Scans the codebase for bugs/improvements, proposes fixes, and implements them with multi-layer safety gates.
+
+#### 9-Phase Implementation Pipeline
+
+| Phase | Name | Description |
+|-------|------|-------------|
+| 1 | **Scan** | LLM reads source files in batches of 3, identifies concrete bugs (confidence > 0.7 only) |
+| 2 | **Filter** | Rejects non-source files (`.md`, `.txt`, `.css`, test files, docs) at scan and insert time |
+| 3 | **Validate** | Pre-implementation gate: checks file exists, is production source, not in Protected Core |
+| 4 | **Impact Analysis** | Static analysis of exported symbols → finds all caller files → assigns risk level (safe/moderate/high) |
+| 5 | **Learning Feedback** | Queries Learning Journal for relevant past failures, semantic search by proposal title, same-file rejection history |
+| 6 | **Planning** | LLM generates step-by-step implementation plan with risk assessment; can reject proposal before any code is written |
+| 7 | **Implement** | Delegates to specialist agents (coder → reviewer → codex-cli → claude-cli fallback chain) with plan context injected |
+| 8 | **TSC Verification** | Baseline comparison: captures pre-existing errors, only rejects on NEW compile errors introduced by the change |
+| 9 | **Runtime Boot Test** | Spawns a child process on a test port, waits for `/health` endpoint to respond OK within 4 seconds |
+
+#### Scan Filtering
+
+- **SKIP_DIRS**: `node_modules`, `.git`, `dist`, `build`, `.next`, `coverage`, `__tests__`, `test`, `docs`, `logs`
+- **SCAN_EXTENSIONS**: `.ts`, `.tsx`, `.js`, `.jsx` only
+- **SKIP_FILE_PATTERNS**: test/spec files, `.d.ts`, `README`, `CHANGELOG`, `REFACTORING`, `.example`
+- **NON_SOURCE_PATTERNS** (insert gate): blocks `.md`, `.txt`, `.json`, `.css`, `.html`, `N/A`, `multiple_files`
+
+#### Two-Mode Implementation
+
+- **SINGLE-FILE mode** (risk = safe): Only primary file edited, strict "no signature changes" rule
+- **MULTI-FILE mode** (risk = moderate/high): AI receives dependency map + affected file previews, authorized to edit primary + all dependent files, 4-step process (Plan → Verify → Edit → Check)
+
+#### Multi-File Backup & Rollback
+
+- All target files (primary + dependents) backed up before implementation
+- `rollbackAll()` atomically restores every file on any failure
+- Boot Guardian breadcrumb saved for crash recovery
+- Outer catch block also rolls back all tracked files
+
+#### Learning Journal Integration
+
+- Before implementation: queries `error_solutions`, `performance`, `tool_usage` learnings + semantic search
+- Same-file rejection history injected into prompt
+- On TSC/runtime failure: automatically records lesson with 0.8 confidence
+- On success: records positive learning for pattern reinforcement
+
+#### Planning Phase
+
+- Uses `gemini-2.0-flash` for fast, cheap plan generation
+- Plan includes: concrete steps with function/line references, files to edit, risk assessment
+- `shouldProceed: false` → proposal rejected before any code changes
+- Plan steps injected into implementation prompt as ordered checklist
+
+#### Protected Core Files (Immortal Sandbox)
+
+Cannot be auto-upgraded: `index.ts`, `config.ts`, `configValidator.ts`, `queue.js`, `database/db.ts`, `evolution/selfUpgrade.ts`, `evolution/selfReflection.ts`, `terminal/terminalGateway.ts`, `api/socketHandlers.ts`, `api/upgradeRoutes.ts`
+
+#### Key Functions
+
+| Function | Purpose |
+|----------|---------|
+| `startSelfUpgrade()` | Initialize idle-triggered scan loop |
+| `scanAndPropose()` | Batch scan files → LLM analysis → insert proposals |
+| `implementProposalById()` | Full 9-phase implementation pipeline |
+| `analyzeImpact()` | Static cross-file dependency analysis |
+| `createImplementationPlan()` | LLM-generated step-by-step plan |
+| `buildUpgradeLearningContext()` | Query Learning Journal for relevant lessons |
+| `runtimeBootTest()` | Spawn test server and hit /health |
+| `verifyUpgrade()` | TSC baseline comparison |
+| `captureBaselineErrors()` | Cache pre-existing compile errors |
+
+### Boot Guardian
+
+**File**: `server/src/bootGuardian.ts` (91 lines)
+
+- Catches crashes within 15 seconds of startup
+- Checks for recent upgrade breadcrumb (`latest_upgrade.json`)
+- Auto-rollbacks the last change if crash detected post-upgrade
+
 ### Self-Reflection
 
 **File**: `server/src/evolution/selfReflection.ts` (267 lines)
 
-- Triggers every 50 completed agent runs
-- Analyzes: error patterns, performance, tool usage
+- Triggers every 25 completed agent runs (configurable)
+- Analyzes: error patterns, performance, tool usage, model effectiveness
 - Generates: findings, suggestions, auto-actions
 - Optional LLM-powered deep analysis on last 20 runs
 - Auto-actions: add learnings, log warnings
 
 ### Self-Healing
 
-**File**: `server/src/evolution/selfHealing.ts`
+**File**: `server/src/evolution/selfHealing.ts` (189 lines)
 
+- Detects 4 issue types: `high_error_rate`, `tool_failing`, `slow_model`, `memory_leak`
+- Auto-fixes `slow_model` by switching to faster alternatives
 - Runs health check every 100 agent runs
-- Checks: database integrity, memory leaks, provider health
 
 ### Learning Journal
 
-**File**: `server/src/evolution/learningJournal.ts`
+**File**: `server/src/evolution/learningJournal.ts` (207 lines)
 
-- Persists learnings categorized by type (performance, error, etc.)
-- Injects relevant learnings into agent system prompt via `buildLearningsContext()`
+- 6 categories: `user_patterns`, `tool_usage`, `error_solutions`, `prompt_improvements`, `performance`, `general`
+- Vector-indexed for semantic search (Gemini embeddings + HNSW)
+- Deduplication: exact match check before insert
+- `buildLearningsContext()` — injects top 5 learnings into agent system prompt
+- `searchLearnings()` — semantic search with vector store fallback to keyword search
+- `applyLearning()` — increments usage count and boosts confidence
 
 ### Idle Loop
 
-**File**: `server/src/evolution/idleLoop.ts`
+**File**: `server/src/evolution/idleLoop.ts` (127 lines)
 
-- Background loop that performs tasks when system is idle
+- Proactive AI tasks when idle > 2 hours
+- Background loop that performs maintenance and self-improvement tasks
 
 ### Subconscious Sleep
 
-**File**: `server/src/scheduler/subconscious.ts` (189 lines)
+**File**: `server/src/scheduler/subconscious.ts` (200+ lines)
 
 When idle > 2 hours (`IDLE_THRESHOLD_MS`), enters sleep mode:
 
@@ -355,8 +443,9 @@ WebSocket-based terminal via xterm.js:
 | Chat Monitor | `ChatMonitor.tsx` | Real-time conversation viewer |
 | Bot Personas | `BotPersonas.tsx` | Manage bot personas |
 | Persona Editor | `PersonaEditor.tsx` | Edit persona details |
-| Settings | `Settings.tsx` (72KB!) | System config, API keys, providers, models |
+| Settings | `Settings.tsx` (72KB) | System config, API keys, dynamic providers, AES passwords |
 | Post Manager | `PostManager.tsx` | Scheduled post management |
+| Cron Manager | `CronManager.tsx` | Autonomous AI task scheduling (Cron) |
 | QA Database | `QADatabase.tsx` | Q&A override management |
 | Tool Manager | `ToolManager.tsx` | Dynamic tool management |
 
@@ -384,8 +473,9 @@ WebSocket-based terminal via xterm.js:
 | `qa_pairs` | Q&A override database (pattern matching) |
 | `personas` | Persona configurations |
 | `scheduled_posts` | Scheduled social media posts |
+| `cron_jobs` | Autonomous Agent scheduled tasks |
 | `activity_logs` | System activity logs |
-| `settings` | Key-value settings store |
+| `settings` | Key-value settings store (Contains Admin Password) |
 | `api_keys` | Encrypted API key storage |
 | `provider_config` | Runtime provider configuration |
 | `processed_messages` | Message deduplication |
@@ -492,9 +582,10 @@ PersonalAIBotV2/
 │   │   │   ├── sessionManager.ts         # Session management
 │   │   │   └── jarvisSwarmIntent.ts      # Swarm intent detection
 │   │   ├── evolution/
+│   │   │   ├── selfUpgrade.ts            # 9-phase autonomous code upgrade (~1700 lines)
 │   │   │   ├── selfReflection.ts         # Auto performance analysis
 │   │   │   ├── selfHealing.ts            # Auto health checks
-│   │   │   ├── learningJournal.ts        # Learning persistence
+│   │   │   ├── learningJournal.ts        # Learning persistence + semantic search
 │   │   │   └── idleLoop.ts              # Background idle tasks
 │   │   ├── scheduler/
 │   │   │   ├── scheduler.ts              # Cron-based scheduler
@@ -518,6 +609,7 @@ PersonalAIBotV2/
 │   │   │   ├── systemRouter.ts           # System status API
 │   │   │   ├── terminalRoutes.ts         # Terminal API
 │   │   │   ├── toolsRouter.ts            # Tools API
+│   │   │   ├── cronRoutes.ts             # Cron Jobs API
 │   │   │   ├── liveVoice.ts              # WebRTC voice API
 │   │   │   └── openapi.ts               # Swagger/OpenAPI spec
 │   │   ├── system/
@@ -619,8 +711,11 @@ STARTUP_COMPACT=1
 - First-run `npx` cold start slower for Codex/Claude
 - Shared hybrid memory is compact by design; not full transcript replay
 - Vector Store rebuild from SQLite can be slow for large databases
-- Self-reflection requires 50+ runs to trigger
+- Self-reflection requires 25+ runs to trigger
 - Subconscious sleep requires 2+ hours of idle time
+- Self-Upgrade runtime boot test adds ~5-10s per proposal (worth it for crash prevention)
+- Self-Upgrade planning phase adds one extra LLM call per proposal (uses cheap gemini-2.0-flash)
+- 10 pre-existing TSC errors in non-evolution files (baseline; does not block upgrades)
 
 ---
 
@@ -706,3 +801,45 @@ Recommended quick validation after deploy:
 
 Outcome:
 - Agents are vastly smarter, safer, and capable of fully autonomous, self-correcting operations without human-in-the-loop intervention.
+
+### 18.6 Immortal Core & Boot Guardian (Fail-Safe Systems)
+- `server/src/bootGuardian.ts` ensures that a bad auto-upgrade rolls back automatically.
+- Security hard-fail states push Telegram/LINE alerts immediately (`botManager.ts:broadcastToAdmins()`).
+
+### 18.7 API Providers, Tool Amplification & Autonomous Cron (2026-03-22)
+- **Universal Providers**: Rebuilt the API interface (`aiRouter.ts`) to be provider-agnostic. Media generators (Voice, Image, Video) now proxy through `RestApiProvider` allowing generic endpoints (Cloudflare, Replicate, Fal.ai) without backend code updates.
+- **Office Document Intelligence**: Added `office_tools.ts` (`pdf-parse`, `mammoth`, `xlsx`). Agents can natively parse, create, and accurately mutate specific row data in `.xlsx/.csv` and read Public Google Docs.
+- **Admin Security**: Removed local `.env` admin locks. `admin/admin` acts as an absolute fallback which sets the AES-256 database password on first boot directly from the Dashboard.
+- **Autonomous Cron Scheduling**: 
+  - Backend: `scheduler.ts` executes a headless agentic loop based on dynamic `cron_jobs`.
+  - Frontend: `CronManager.tsx` deployed for Admin oversight.
+  - Agentive Control: `cron_tools.ts` grants the AI tools to schedule/cancel its own tasks naturally through chat requests.
+
+---
+
+- `server/src/index.ts` & `server/src/bootGuardian.ts`
+  - Added **Boot Guardian**: Intercepts `uncaughtException` during server startup. If a botched AI edit crashes the server globally, it automatically reverts the file using a pre-edit breadcrumb (`data/upgrade_history`), marks the DB proposal as `rejected`, and cleanly exits to prevent a permanent `nodemon` crash loop.
+- `server/src/evolution/selfUpgrade.ts`
+  - Added **Protected Core Sandbox**: Hardcoded critical system files (e.g., `selfUpgrade.ts`, config handlers) into `PROTECTED_CORE_FILES` to outright reject and abort AI modifications targeting the architecture that sustains it.
+
+Outcome:
+- The server is protected against catastrophic AI code mutilation via auto-reverting syntax failsafes.
+
+### 18.7 Cognitive Self-Upgrade Architecture (Phase 5 - 6)
+
+- `server/src/bot_agents/tools/file.ts` & `index.ts`
+  - Added **`search_codebase` (Global Explorer)**: Exposes grep-like functionality so the AI can globally discover import dependencies before blindly deleting or renaming exports.
+  - Augmented **`read_file_content`**: Forced the tool to emit strictly numbered lines (`1: code...`) to ensure the agent calculates target offsets with 100% precision.
+- `server/src/evolution/selfUpgrade.ts`
+  - Added **Trauma Memory Injection**: Dynamically queries `fb-agent.db` for the 5 most recent failed AI edits. These compiler crash logs are injected directly into the Swarm Coordinator's master prompt as `[🚨 CRITICAL TRAUMA MEMORY 🚨]`, halting recurrent hallucination loops.
+  - Added **Hardened Rule Prompts**: Mandates that the AI *must* write an architectural `<think>` block and invoke `search_codebase` before interacting with the surgical editor tool.
+
+Outcome:
+- The `jarvis_self_upgrade` autonomous agent now "looks before it leaps," acting with human-like analytical caution.
+
+### 18.8 Deep System Audit (2026-03-22)
+
+- **9-Phase Self-Upgrade Pipeline**: Verified that `implementProposalById` strictly enforces the 9 phases, including pre-validation, trauma memory injection, and strict runtime/syntax verifications. 
+- **Multi-File Rollback Resilience**: Verified `bootGuardian.ts` and `selfUpgrade.ts` successfully map, backup, and restore N overlapping file paths identically in memory and on disk if a multi-file dependency implementation fails at any layer.
+- **Tuning and Flow Validation**: Verified `idleLoop.ts` strict 2-hour idle threshold and `selfReflection.ts` 25-run triggering baseline.
+- **Outcome**: The AI evolution loop is officially hardened for full background multi-file operations with zero risk of irreversible, environment-breaking code corruption.

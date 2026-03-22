@@ -196,7 +196,7 @@ async function handleGetMyConfig({ ctx, getProviderNames }: SystemToolContext) {
   }
 }
 
-async function handleListAvailableModels({ listModels, getProviderNames }: SystemToolContext, args: any) {
+async function handleListAvailableModels({ listModels, getProviderNames }: SystemToolContext, args: Record<string, unknown>) {
   try {
     const filterProvider = args?.provider as string | undefined;
     const providers = filterProvider ? [filterProvider] : getProviderNames();
@@ -255,8 +255,14 @@ async function handleSetMyModel({ ctx, listModels, getProviderNames }: SystemToo
       } catch { /* ignore */ }
     }
 
-    // Case 1: Jarvis (Global Config)
-    if (ctx.botId === 'jarvis' || !getBot(ctx.botId)) {
+    const bot = getBot(ctx.botId);
+
+    if (!bot && ctx.botId !== 'jarvis') {
+      return `❌ บอท ${ctx.botId} ไม่พบ`;
+    }
+
+    // Case 1: Jarvis or non-existent bot (Global Config)
+    if (ctx.botId === 'jarvis' || !bot) {
       const config = configManager.getConfig();
       if (auto !== undefined) {
         config.autoRouting = auto;
@@ -273,7 +279,6 @@ async function handleSetMyModel({ ctx, listModels, getProviderNames }: SystemToo
     }
 
     // Case 2: Specific Bot (LINE/Telegram)
-    const bot = getBot(ctx.botId)!;
     const currentConfig = (bot.config ?? {}) as any;
     
     if (auto !== undefined) {

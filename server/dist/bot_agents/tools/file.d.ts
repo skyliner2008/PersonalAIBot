@@ -1,4 +1,7 @@
 import { FunctionDeclaration } from '@google/genai';
+declare global {
+    var onFileWrittenByTool: ((filePath: string) => void) | undefined;
+}
 export declare const listFilesDeclaration: FunctionDeclaration;
 export declare function listFiles({ directory_path }: {
     directory_path: string;
@@ -21,4 +24,9 @@ export declare function replaceCodeBlock({ file_path, exact_old_string, new_stri
     file_path: string;
     exact_old_string: string;
     new_string: string;
+}): Promise<string>;
+export declare const searchCodebaseDeclaration: FunctionDeclaration;
+export declare function searchCodebase({ query, directory }: {
+    query: string;
+    directory?: string;
 }): Promise<string>;

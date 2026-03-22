@@ -8,6 +8,8 @@ import {
   getProposalStats,
   updateProposalStatus,
   deleteProposal,
+  retryAllRejectedProposals,
+  deleteAllRejectedProposals,
   getUpgradeStatus,
   toggleContinuousScan,
   notifyUserActivity,
@@ -81,6 +83,18 @@ router.delete('/proposals/:id', asyncHandler(async (req, res) => {
   }
 }));
 
+// POST /api/upgrade/proposals/retry-rejected
+router.post('/proposals/retry-rejected', asyncHandler(async (_req, res) => {
+  const count = retryAllRejectedProposals();
+  res.json({ ok: true, count, message: `${count} rejected proposals moved to pending.` });
+}));
+
+// DELETE /api/upgrade/proposals/rejected
+router.delete('/proposals/rejected', asyncHandler(async (_req, res) => {
+  const count = deleteAllRejectedProposals();
+  res.json({ ok: true, count, message: `${count} rejected proposals deleted.` });
+}));
+
 // GET /api/upgrade/proposals/:id/diff — Get before/after code diff for implemented proposals
 router.get('/proposals/:id/diff', asyncHandler(async (req, res) => {
   const id = parseInt(String(req.params.id));
@@ -125,7 +139,7 @@ router.get('/proposals/:id/log', asyncHandler(async (req, res) => {
 router.post('/scan', asyncHandler(async (_req, res) => {
   const rootDir = path.resolve(process.cwd(), 'src');
   try {
-    const isActive = toggleContinuousScan(rootDir);
+    const isActive = await toggleContinuousScan(rootDir);
     res.json({ ok: true, message: isActive ? `Continuous Scan started` : `Continuous Scan stopped`, isActive });
   } catch (err: any) {
     res.status(500).json({ ok: false, error: err.message });

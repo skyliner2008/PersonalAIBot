@@ -4,7 +4,7 @@
 
 import type { FunctionDeclaration } from '@google/genai';
 
-export type ToolCategory = 'utility' | 'os' | 'file' | 'browser' | 'web' | 'memory' | 'communication' | 'system';
+export type ToolCategory = 'utility' | 'os' | 'file' | 'browser' | 'web' | 'memory' | 'communication' | 'system' | 'media' | 'office' | 'cron';
 export type ToolRiskLevel = 'low' | 'medium' | 'high';
 export type ToolPlatform = 'telegram' | 'line' | 'facebook' | 'all';
 
@@ -55,6 +55,8 @@ const defaultTools: Omit<ToolMeta, 'declaration'>[] = [
   { name: 'write_file_content', displayName: 'Write File', description: 'เขียนเนื้อหาไฟล์', category: 'file', riskLevel: 'medium', platforms: ['all'], tags: ['file', 'write'], enabledByDefault: false },
   { name: 'delete_file', displayName: 'Delete File', description: 'ลบไฟล์', category: 'file', riskLevel: 'high', platforms: ['all'], tags: ['file', 'delete'], enabledByDefault: false },
   { name: 'send_file_to_chat', displayName: 'Send File to Chat', description: 'ส่งไฟล์ให้ผู้ใช้ในแชท', category: 'communication', riskLevel: 'low', platforms: ['telegram', 'line'], tags: ['file', 'send', 'chat'], enabledByDefault: true },
+  { name: 'replace_code_block', displayName: 'Replace Code Block', description: 'ผ่าตัดโค้ด: แทนที่บล็อคโค้ดเดิมด้วยโค้ดใหม่', category: 'file', riskLevel: 'medium', platforms: ['all'], tags: ['file', 'edit', 'code', 'replace'], enabledByDefault: false },
+  { name: 'search_codebase', displayName: 'Search Codebase', description: 'ค้นหาโค้ดในโปรเจกต์', category: 'file', riskLevel: 'low', platforms: ['all'], tags: ['file', 'search', 'code', 'grep'], enabledByDefault: false },
 
   // Browser
   { name: 'browser_navigate', displayName: 'Browser Navigate', description: 'เปิดเว็บเพจ', category: 'browser', riskLevel: 'medium', platforms: ['all'], tags: ['browser', 'navigate'], enabledByDefault: false },
@@ -101,6 +103,22 @@ const defaultTools: Omit<ToolMeta, 'declaration'>[] = [
   { name: 'list_specialists', displayName: 'List Specialists', description: 'แสดงรายการ specialist ที่ใช้ได้ในระบบ', category: 'system', riskLevel: 'low', platforms: ['all'], tags: ['swarm', 'specialist', 'list'], enabledByDefault: true },
   { name: 'add_cli_agent', displayName: 'Add CLI Agent', description: 'เพิ่ม CLI Agent ใหม่แบบอัตโนมัติ', category: 'system', riskLevel: 'high', platforms: ['all'], tags: ['system', 'cli', 'integration', 'admin'], enabledByDefault: true },
   { name: 'audit_cli_integration', displayName: 'Audit CLI Integration', description: 'ตรวจสอบการเชื่อมต่อของ CLI Agent', category: 'system', riskLevel: 'low', platforms: ['all'], tags: ['system', 'cli', 'audit', 'debug'], enabledByDefault: true },
+
+  // Media Generation Tools
+  { name: 'generate_image', displayName: 'Image Generation', description: 'สร้างรูปภาพจากข้อความ (AI Image Generator)', category: 'media', riskLevel: 'low', platforms: ['all'], tags: ['media', 'image', 'generation', 'ai'], enabledByDefault: true },
+  { name: 'generate_speech', displayName: 'Text to Speech', description: 'สร้างไฟล์เสียงพูดจากข้อความ (TTS)', category: 'media', riskLevel: 'low', platforms: ['all'], tags: ['media', 'audio', 'tts', 'voice'], enabledByDefault: true },
+  { name: 'generate_video', displayName: 'Video Generation', description: 'สร้างวิดีโอจากข้อความ (AI Video Generator)', category: 'media', riskLevel: 'low', platforms: ['all'], tags: ['media', 'video', 'generation', 'ai'], enabledByDefault: true },
+
+  // Office & Productivity Tools
+  { name: 'read_document', displayName: 'Read Document', description: 'อ่านข้อความจากไฟล์เอกสาร (PDF, DOCX, XLSX, CSV)', category: 'office', riskLevel: 'low', platforms: ['all'], tags: ['office', 'read', 'pdf', 'word', 'excel'], enabledByDefault: true },
+  { name: 'create_document', displayName: 'Create Document', description: 'สร้างไฟล์เอกสารใหม่ (PDF, DOCX, XLSX)', category: 'office', riskLevel: 'medium', platforms: ['all'], tags: ['office', 'create', 'pdf', 'word', 'excel'], enabledByDefault: true },
+  { name: 'edit_document', displayName: 'Edit Excel/CSV', description: 'แก้ไขหรือเพิ่มข้อมูลตาราง Excel / CSV เดิม', category: 'office', riskLevel: 'medium', platforms: ['all'], tags: ['office', 'edit', 'excel', 'csv'], enabledByDefault: true },
+  { name: 'read_google_doc', displayName: 'Read Google Docs', description: 'ดึงข้อมูลข้อความจาก public Google Docs / Sheets URL', category: 'office', riskLevel: 'low', platforms: ['all'], tags: ['office', 'web', 'google', 'docs'], enabledByDefault: true },
+
+  // Cron / Scheduler Tools
+  { name: 'create_cron_job', displayName: 'Create Cron Job', description: 'ตั้งเวลาให้ AI ทำงานอัตโนมัติ (เช่น ทุกเช้า, ทุกชั่วโมง)', category: 'cron', riskLevel: 'medium', platforms: ['telegram', 'line'], tags: ['cron', 'schedule', 'automation', 'time'], enabledByDefault: true },
+  { name: 'list_cron_jobs', displayName: 'List Cron Jobs', description: 'ดูรายการงานอัตโนมัติของตัวเอง', category: 'cron', riskLevel: 'low', platforms: ['telegram', 'line'], tags: ['cron', 'list', 'schedule'], enabledByDefault: true },
+  { name: 'delete_cron_job', displayName: 'Delete Cron Job', description: 'ลบหรือยกเลิกตารางงานอัตโนมัติ', category: 'cron', riskLevel: 'medium', platforms: ['telegram', 'line'], tags: ['cron', 'delete', 'cancel'], enabledByDefault: true },
 ];
 
 // ── Registry API ─────────────────────────────────────

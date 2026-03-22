@@ -14,7 +14,7 @@ function isLocalRuntime(): boolean {
 // localStorage only for non-sensitive preferences that should persist.
 function getStoredToken(): string | null {
   try {
-    return sessionStorage.getItem(JWT_TOKEN_KEY) || localStorage.getItem(JWT_TOKEN_KEY) || null;
+    return localStorage.getItem(JWT_TOKEN_KEY) || sessionStorage.getItem(JWT_TOKEN_KEY) || null;
   } catch {
     return null;
   }
@@ -22,9 +22,7 @@ function getStoredToken(): string | null {
 
 function setStoredToken(token: string): void {
   try {
-    sessionStorage.setItem(JWT_TOKEN_KEY, token);
-    // Migrate: remove from localStorage if still there
-    try { localStorage.removeItem(JWT_TOKEN_KEY); } catch { /* ok */ }
+    localStorage.setItem(JWT_TOKEN_KEY, token);
   } catch {
     // ignore storage failures
   }
@@ -32,8 +30,8 @@ function setStoredToken(token: string): void {
 
 function clearStoredToken(): void {
   try {
-    sessionStorage.removeItem(JWT_TOKEN_KEY);
     localStorage.removeItem(JWT_TOKEN_KEY);
+    sessionStorage.removeItem(JWT_TOKEN_KEY);
   } catch {
     // ignore storage failures
   }
@@ -41,13 +39,7 @@ function clearStoredToken(): void {
 
 function safeStorageSet(key: string, value: string): void {
   try {
-    // Passwords go to sessionStorage; username can stay in localStorage
-    if (key === ADMIN_PASSWORD_KEY) {
-      sessionStorage.setItem(key, value);
-      try { localStorage.removeItem(key); } catch { /* ok */ }
-    } else {
-      localStorage.setItem(key, value);
-    }
+    localStorage.setItem(key, value);
   } catch {
     // ignore storage failures
   }
@@ -55,11 +47,7 @@ function safeStorageSet(key: string, value: string): void {
 
 function safeStorageGet(key: string): string {
   try {
-    // Try sessionStorage first for sensitive keys, then localStorage for migration
-    if (key === ADMIN_PASSWORD_KEY || key === JWT_TOKEN_KEY) {
-      return sessionStorage.getItem(key) || localStorage.getItem(key) || '';
-    }
-    return localStorage.getItem(key) || '';
+    return localStorage.getItem(key) || sessionStorage.getItem(key) || '';
   } catch {
     return '';
   }
@@ -97,22 +85,26 @@ let promptedForCredentials = false;
 let authPrimePromise: Promise<string | null> | null = null;
 let authPrimed = false;
 
-async function tryLoginWithCredential(cred: { username: string; password: string }): Promise<string | null> {
+// Track failed credentials to prevent 429 Rate Limit loops from aggressive polling intervals
+const failedCredentials = new Set<string>();
+
+async function tryLoginWithCredential(cred: { username: string; password: string }): Promise<{ token: string | null; status: number }> {
   try {
     const res = await fetch(`${BASE}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username: cred.username, password: cred.password }),
     });
-    if (!res.ok) return null;
+    if (!res.ok) return { token: null, status: res.status };
     const data = await res.json();
-    if (!data?.token) return null;
-    setStoredToken(data.token);
+    const token = data?.data?.token || data?.token; // Try both standard envelope and raw format
+    if (!token) return { token: null, status: res.status };
+    setStoredToken(token);
     safeStorageSet(ADMIN_USER_KEY, cred.username);
     safeStorageSet(ADMIN_PASSWORD_KEY, cred.password);
-    return data.token as string;
+    return { token: token as string, status: 200 };
   } catch {
-    return null;
+    return { token: null, status: 0 }; // network error
   }
 }
 
@@ -138,15 +130,40 @@ async function tryAcquireToken(): Promise<string | null> {
 
   tokenRefreshPromise = (async () => {
     for (const cred of getAdminCredentials()) {
-      const token = await tryLoginWithCredential(cred);
-      if (token) return token;
+      const key = `${cred.username}:${cred.password}`;
+      if (failedCredentials.has(key)) continue;
+
+      const result = await tryLoginWithCredential(cred);
+      if (result.token) {
+        failedCredentials.clear();
+        return result.token;
+      } else if (result.status === 401) {
+        // Only blacklist if explicitly unauthorized (wrong password)
+        // If 429, do not blacklist, allow retry later!
+        failedCredentials.add(key);
+      }
     }
 
     // Last-resort local fallback: ask once for credentials and remember them.
     const manualCred = promptCredentialInput();
     if (manualCred) {
-      const token = await tryLoginWithCredential(manualCred);
-      if (token) return token;
+      const manualKey = `${manualCred.username}:${manualCred.password}`;
+      if (failedCredentials.has(manualKey)) {
+         return null;
+      }
+      
+      const result = await tryLoginWithCredential(manualCred);
+      if (result.token) {
+        failedCredentials.clear();
+        return result.token;
+      } else {
+        if (result.status === 401) {
+          failedCredentials.add(manualKey);
+        } else if (result.status === 429) {
+          console.warn('Login rate limited (429). Please wait.');
+          if (typeof window !== 'undefined') window.alert("Too many login attempts. Please wait 5 minutes before trying again.");
+        }
+      }
     }
 
     return null;
@@ -523,6 +540,10 @@ export const api = {
     request(`/upgrade/proposals/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
   deleteUpgradeProposal: (id: number) =>
     request(`/upgrade/proposals/${id}`, { method: 'DELETE' }),
+  retryAllRejectedProposals: () =>
+    request('/upgrade/proposals/retry-rejected', { method: 'POST' }),
+  deleteAllRejectedProposals: () =>
+    request('/upgrade/proposals/rejected', { method: 'DELETE' }),
   triggerUpgradeScan: () =>
     request('/upgrade/scan', { method: 'POST' }),
   updateUpgradeConfig: (config: { intervalMs?: number, idleThresholdMs?: number }) =>
@@ -547,4 +568,11 @@ export const api = {
     request(`/upgrade/proposals/${id}/diff`),
   getUpgradeProposalLog: (id: number) =>
     request(`/upgrade/proposals/${id}/log`),
+
+  // Cron Jobs (Agentic Automation)
+  getCronJobs: () => request('/cron-jobs'),
+  createCronJob: (data: any) => request('/cron-jobs', { method: 'POST', body: JSON.stringify(data) }),
+  updateCronJob: (id: string, data: any) => request(`/cron-jobs/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteCronJob: (id: string) => request(`/cron-jobs/${id}`, { method: 'DELETE' }),
+  toggleCronJob: (id: string) => request(`/cron-jobs/${id}/toggle`, { method: 'POST' }),
 };

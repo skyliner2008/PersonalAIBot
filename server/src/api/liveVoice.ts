@@ -162,7 +162,7 @@ export class LiveVideoClient extends EventEmitter {
 
     this.ws.on('close', (code, reason) => {
       const reasonText = Buffer.isBuffer(reason) ? reason.toString('utf8') : String(reason || '');
-      console.log(`[LiveVoice] Connection closed: ${code} - ${reasonText}`);
+      logger.info(`Connection closed: ${code} - ${reasonText}`);
       this.isConnected = false;
       this.ws = null;
 

@@ -1,11 +1,19 @@
 import type { AIMessage } from '../types.js';
 
+export const MAX_TOPIC_LENGTH = 500;
+export const MAX_CONTENT_LENGTH = 5000;
+export const MAX_COMMENT_LENGTH = 1000;
+
 export function buildContentPrompt(
   topic: string,
   style: string = 'engaging',
   language: string = 'th',
   extraInstructions?: string
 ): AIMessage[] {
+  if (!topic || topic.trim().length === 0) {
+    throw new Error('Topic is required');
+  }
+
   const langMap: Record<string, string> = {
     th: 'ภาษาไทย',
     en: 'English',
@@ -39,6 +47,13 @@ export function buildCommentReplyPrompt(
   commenterName: string,
   replyStyle: string = 'friendly'
 ): AIMessage[] {
+  if (!postContent || postContent.trim().length === 0) {
+    throw new Error('Post content is required');
+  }
+  if (!commentText || commentText.trim().length === 0) {
+    throw new Error('Comment text is required');
+  }
+
   return [
     {
       role: 'system',

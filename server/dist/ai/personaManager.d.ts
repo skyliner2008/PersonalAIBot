@@ -16,8 +16,13 @@ declare class PersonaManager {
     private personasDir;
     private cache;
     private TTL_MS;
+    private pendingWrites;
+    private writeTimeouts;
+    private DEBOUNCE_MS;
     constructor();
     private ensureDirExists;
+    private validateInputs;
+    private getFilePath;
     private loadFile;
     private saveFile;
     /** Force-clear cache so next loadPersona() re-reads from disk */

@@ -449,6 +449,60 @@ export async function searchArchival(chatId: string, query: string, limit: numbe
     return results;
 }
 
+/** Calculate importance score for a fact based on semantic similarity, recency, and length */
+function _calculateFactScore(semanticScore: number, createdAt: string | number, factLength: number): { score: number; semantic: number } {
+    const now = Date.now();
+    const ageMs = now - new Date(createdAt).getTime();
+    // Recency score: decays over 30 days
+    const recencyScore = Math.exp(-ageMs / (30 * 24 * 60 * 60 * 1000)) * 0.5 + 0.5;
+    // Length bonus: prefer longer facts up to 200 chars
+    const lengthBonus = Math.min(factLength / 200, 1) * 0.1;
+    // Weighted importance
+    const importanceScore = (semanticScore * 0.7) + (recencyScore * 0.2) + lengthBonus;
+    return { score: importanceScore, semantic: semanticScore };
+}
+
+async function _searchVectorArchival(queryVec: number[], chatId: string, limit: number, threshold: number): Promise<string[]> {
+    if (!vectorStoreReady) return [];
+    try {
+        const vs = await getVectorStore();
+        const results = await vs.search(queryVec, Math.max(limit * 2, 10), { chatId, type: 'archival' });
+
+        if (results.length > 0) {
+            const scored = results.map(r => ({
+                fact: r.text,
+                ..._calculateFactScore(r.score, r.metadata.createdAt, r.text.length)
+            }))
+                .filter(r => r.semantic > threshold)
+                .sort((a, b) => b.score - a.score)
+                .slice(0, limit);
+
+            return scored.map(s => s.fact);
+        }
+    } catch (err) {
+        console.warn('[Memory] Vector store search failed:', err);
+    }
+    return [];
+}
+
+function _searchSqliteArchival(queryVec: number[], chatId: string, limit: number, threshold: number): string[] {
+    const queryVecTyped = new Float32Array(queryVec);
+    const facts = getArchivalFacts(chatId);
+    if (facts.length === 0) return [];
+
+    const scored = facts
+        .filter(f => f.embedding)
+        .map(f => ({
+            fact: f.fact,
+            ..._calculateFactScore(cosineSimilarity(queryVecTyped, f.embedding!), f.createdAt || 0, f.fact.length)
+        }))
+        .filter(r => r.semantic > threshold)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, limit);
+
+    return scored.map(s => s.fact);
+}
+
 async function _searchArchivalCore(chatId: string, query: string, limit: number, threshold: number): Promise<string[]> {
     const textFallbackSearch = (): string[] => {
         const safeQ = escapeLikePattern(query.substring(0, 50));
@@ -457,69 +511,20 @@ async function _searchArchivalCore(chatId: string, query: string, limit: number,
         return rows.map(r => r.fact);
     };
 
-    if (!embeddingProvider) {
-        return textFallbackSearch();
-    }
+    if (!embeddingProvider) return textFallbackSearch();
 
     try {
         const queryVec = await embedText(query);
-        if (!queryVec || queryVec.length === 0) {
-            return textFallbackSearch();
-        }
+        if (!queryVec || queryVec.length === 0) return textFallbackSearch();
 
-        // Try Vector Store search first
-        if (vectorStoreReady) {
-            try {
-                const vs = await getVectorStore();
-                const results = await vs.search(queryVec, Math.max(limit * 2, 10), { chatId, type: 'archival' });
+        // 1. Try Vector Store
+        const vectorResults = await _searchVectorArchival(queryVec, chatId, limit, threshold);
+        if (vectorResults.length > 0) return vectorResults;
 
-                if (results.length > 0) {
-                    // Apply recency and length bonuses on top of vector similarity
-                    const now = Date.now();
-                    const scored = results.map(r => {
-                        const ageMs = now - new Date(r.metadata.createdAt).getTime();
-                        const recencyScore = Math.exp(-ageMs / (30 * 24 * 60 * 60 * 1000)) * 0.5 + 0.5;
-                        const lengthBonus = Math.min(r.text.length / 200, 1) * 0.1;
-                        const importanceScore = (r.score * 0.7) + (recencyScore * 0.2) + lengthBonus;
-                        return { fact: r.text, score: importanceScore, semantic: r.score };
-                    })
-                        .filter(r => r.semantic > threshold)
-                        .sort((a, b) => b.score - a.score)
-                        .slice(0, limit);
+        // 2. Try SQLite Cosine Similarity
+        const sqliteResults = _searchSqliteArchival(queryVec, chatId, limit, threshold);
+        if (sqliteResults.length > 0) return sqliteResults;
 
-                    if (scored.length > 0) {
-                        return scored.map(s => s.fact);
-                    }
-                }
-            } catch (err) {
-                console.warn('[Memory] Vector store search failed, falling back to SQLite:', err);
-            }
-        }
-
-        // Fallback: SQLite cosine similarity (slower but always works)
-        const queryVecTyped = new Float32Array(queryVec);
-        const facts = getArchivalFacts(chatId);
-        if (facts.length === 0) return [];
-
-        const now = Date.now();
-        const scored = facts
-            .filter(f => f.embedding)
-            .map(f => {
-                const semanticScore = cosineSimilarity(queryVecTyped, f.embedding!);
-                // 🎯 Importance = semantic similarity (70%) + recency (20%) + length bonus (10%)
-                const ageMs = now - new Date(f.createdAt || 0).getTime();
-                const recencyScore = Math.exp(-ageMs / (30 * 24 * 60 * 60 * 1000)) * 0.5 + 0.5;
-                const lengthBonus = Math.min(f.fact.length / 200, 1) * 0.1;
-                const importanceScore = (semanticScore * 0.7) + (recencyScore * 0.2) + lengthBonus;
-                return { fact: f.fact, score: importanceScore, semantic: semanticScore };
-            })
-            .filter(r => r.semantic > threshold)
-            .sort((a, b) => b.score - a.score)
-            .slice(0, limit);
-
-        if (scored.length > 0) {
-            return scored.map(s => s.fact);
-        }
         return textFallbackSearch();
     } catch (e) {
         console.error('[Memory] Archival search error:', e);

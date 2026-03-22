@@ -13,6 +13,10 @@ export function setSocketIO(server: SocketServer): void {
   io = server;
 }
 
+export function getSocketIO(): SocketServer | null {
+  return io;
+}
+
 /**
  * Broadcast an event to all connected clients
  */

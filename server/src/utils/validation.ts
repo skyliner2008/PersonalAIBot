@@ -11,23 +11,17 @@ import { ValidationError } from '../utils/errorHandler.js';
 /**
  * Validate request body against a Zod schema
  */
-export const validateBody = (schema: ZodSchema) => {
-  return validate(schema, 'body');
-};
+export const validateBody = (schema: ZodSchema) => validate(schema, 'body');
 
 /**
  * Validate request query parameters against a Zod schema
  */
-export const validateQuery = (schema: ZodSchema) => {
-  return validate(schema, 'query');
-};
+export const validateQuery = (schema: ZodSchema) => validate(schema, 'query');
 
 /**
  * Validate request URL parameters against a Zod schema
  */
-export const validateParams = (schema: ZodSchema) => {
-  return validate(schema, 'params');
-};
+export const validateParams = (schema: ZodSchema) => validate(schema, 'params');
 
 /**
  * Validate multiple request parts at once
@@ -45,7 +39,7 @@ export const validate = (schema: ZodSchema, source: 'body' | 'query' | 'params')
     } catch (error) {
       if (error instanceof ZodError) {
         // Format Zod errors into a more readable structure
-        const errors = formatZodErrors(error);
+        const errors = formatZodError(error);
         next(new ValidationError('Validation failed', errors));
       } else {
         next(error);
@@ -57,11 +51,11 @@ export const validate = (schema: ZodSchema, source: 'body' | 'query' | 'params')
 /**
  * Format Zod errors into a structured object
  */
-function formatZodErrors(zodError: ZodError): Record<string, string[]> {
+function formatZodError(zodError: ZodError): Record<string, string[]> {
   const errors: Record<string, string[]> = {};
 
   for (const issue of zodError.errors) {
-    const path = issue.path.join('.');
+    const path = Array.isArray(issue.path) ? issue.path.join('.') : String(issue.path);
     const message = formatZodIssueMessage(issue);
 
     if (!errors[path]) {
@@ -74,50 +68,81 @@ function formatZodErrors(zodError: ZodError): Record<string, string[]> {
 }
 
 /**
+ * Helper functions to format specific Zod issues
+ */
+function formatInvalidTypeIssue(issue: Extract<ZodIssue, { code: 'invalid_type' }>): string {
+  return `Expected ${issue.expected}, got ${issue.received}`;
+}
+
+function formatInvalidStringIssue(issue: Extract<ZodIssue, { code: 'invalid_string' }>): string {
+  if (issue.validation === 'email') {
+    return 'Invalid email format';
+  }
+  if (issue.validation === 'url') {
+    return 'Invalid URL format';
+  }
+  return `Invalid string format`;
+}
+
+function formatTooSmallIssue(issue: Extract<ZodIssue, { code: 'too_small' }>): string {
+  if (issue.type === 'string') {
+    return `Minimum length is ${issue.minimum} characters`;
+  }
+  if (issue.type === 'number') {
+    return `Minimum value is ${issue.minimum}`;
+  }
+  if (issue.type === 'array') {
+    return `Minimum ${issue.minimum} items required`;
+  }
+  return `Value is too small`;
+}
+
+function formatTooBigIssue(issue: Extract<ZodIssue, { code: 'too_big' }>): string {
+  if (issue.type === 'string') {
+    return `Maximum length is ${issue.maximum} characters`;
+  }
+  if (issue.type === 'number') {
+    return `Maximum value is ${issue.maximum}`;
+  }
+  if (issue.type === 'array') {
+    return `Maximum ${issue.maximum} items allowed`;
+  }
+  return `Value is too big`;
+}
+
+function formatCustomIssue(issue: Extract<ZodIssue, { code: 'custom' }>, path: string): string {
+  return issue.message || `Invalid ${path}`;
+}
+
+function formatInvalidEnumValueIssue(issue: Extract<ZodIssue, { code: 'invalid_enum_value' }>): string {
+  return `Value must be one of: ${issue.options.join(', ')}`;
+}
+
+function formatDefaultIssue(issue: ZodIssue, path: string): string {
+  return issue.message || `Invalid ${path}`;
+}
+
+/**
  * Format a single Zod issue into a user-friendly message
  */
 function formatZodIssueMessage(issue: ZodIssue): string {
-  const path = issue.path.join('.');
-  
+  const path = Array.isArray(issue.path) ? issue.path.join('.') : String(issue.path);
+
   switch (issue.code) {
     case 'invalid_type':
-      return `Expected ${issue.expected}, got ${issue.received}`;
+      return formatInvalidTypeIssue(issue);
     case 'invalid_string':
-      if (issue.validation === 'email') {
-        return 'Invalid email format';
-      }
-      if (issue.validation === 'url') {
-        return 'Invalid URL format';
-      }
-      return `Invalid string format`;
+      return formatInvalidStringIssue(issue);
     case 'too_small':
-      if ('type' in issue && issue.type === 'string') {
-        return `Minimum length is ${issue.minimum} characters`;
-      }
-      if ('type' in issue && issue.type === 'number') {
-        return `Minimum value is ${issue.minimum}`;
-      }
-      if ('type' in issue && issue.type === 'array') {
-        return `Minimum ${issue.minimum} items required`;
-      }
-      return `Value is too small`;
+      return formatTooSmallIssue(issue);
     case 'too_big':
-      if ('type' in issue && issue.type === 'string') {
-        return `Maximum length is ${issue.maximum} characters`;
-      }
-      if ('type' in issue && issue.type === 'number') {
-        return `Maximum value is ${issue.maximum}`;
-      }
-      if ('type' in issue && issue.type === 'array') {
-        return `Maximum ${issue.maximum} items allowed`;
-      }
-      return `Value is too big`;
+      return formatTooBigIssue(issue);
     case 'custom':
-      return issue.message || `Invalid ${path}`;
+      return formatCustomIssue(issue, path);
     case 'invalid_enum_value':
-      return `Value must be one of: ${issue.options.join(', ')}`;
+      return formatInvalidEnumValueIssue(issue);
     default:
-      return issue.message || `Invalid ${path}`;
+      return formatDefaultIssue(issue, path);
   }
 }
 
@@ -125,16 +150,16 @@ function formatZodIssueMessage(issue: ZodIssue): string {
  * Create a partial validation (allows unknown fields)
  */
 export const validatePartial = (schema: AnyZodObject) => {
+  const partialSchema = schema.partial();
   return (req: Request, _res: Response, next: NextFunction) => {
     try {
-      const partialSchema = schema.partial();
       const data = req.body;
       const validated = partialSchema.parse(data);
       req.body = validated;
       next();
     } catch (error) {
       if (error instanceof ZodError) {
-        const errors = formatZodErrors(error);
+        const errors = formatZodError(error);
         next(new ValidationError('Validation failed', errors));
       } else {
         next(error);
@@ -160,7 +185,7 @@ export const validateAll = (...validations: ReturnType<typeof validateBody>[]) =
       }
       
       const middleware = validations[index++];
-      middleware(req, _res as Response, runNext as NextFunction);
+      middleware(req, _res, runNext as NextFunction);
     };
     
     runNext();

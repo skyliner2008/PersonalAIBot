@@ -15,6 +15,18 @@ const BLOCKED_DIRS = [
     /^\/proc/i,
 ];
 const BLOCKED_EXTENSIONS = new Set(['.exe', '.dll', '.sys', '.bat', '.cmd', '.msi', '.scr', '.reg']);
+async function executeFileOperation(filePath, mode, errorPrefix, operation) {
+    const resolvedPath = path.resolve(filePath);
+    const check = validateFilePath(filePath, mode);
+    if (!check.safe)
+        return check.reason;
+    try {
+        return await operation(resolvedPath);
+    }
+    catch (error) {
+        return `${errorPrefix}: ${error.message}`;
+    }
+}
 function validateFilePath(filePath, mode = 'write') {
     const resolved = path.resolve(filePath);
     const normalized = resolved.replace(/\\/g, '/');
@@ -62,7 +74,7 @@ export async function listFiles({ directory_path }) {
         return check.reason;
     try {
         const resolvedPath = path.resolve(directory_path);
-        const files = fs.readdirSync(resolvedPath);
+        const files = await fs.promises.readdir(resolvedPath);
         return `รายชื่อไฟล์ใน ${resolvedPath}:\n${files.join('\n')}`;
     }
     catch (error) {
@@ -87,13 +99,15 @@ export const readFileContentDeclaration = {
     },
 };
 export async function readFileContent({ file_path }) {
-    const check = validateFilePath(file_path, 'read');
+    const check = validateFilePath(file_path, 'read'); // updated
     if (!check.safe)
         return check.reason;
     try {
         const resolvedPath = path.resolve(file_path);
         const content = fs.readFileSync(resolvedPath, 'utf8');
-        return `เนื้อหาในไฟล์ ${resolvedPath}:\n---\n${content}\n---`;
+        const lines = content.split('\n');
+        const numberedContent = lines.map((line, index) => `${index + 1}: ${line}`).join('\n');
+        return `เนื้อหาในไฟล์ ${resolvedPath} (พร้อมเลขบรรทัด):\n---\n${numberedContent}\n---`;
     }
     catch (error) {
         return `ไม่สามารถอ่านไฟล์ได้: ${error.message}`;
@@ -222,6 +236,81 @@ export async function replaceCodeBlock({ file_path, exact_old_string, new_string
     }
     catch (error) {
         return `Error failed to replace code block: ${error.message}`;
+    }
+}
+// ==========================================
+// 6. Search Codebase (grep-like)
+// ==========================================
+export const searchCodebaseDeclaration = {
+    name: "search_codebase",
+    description: "ค้นหาข้อความ ตัวแปร หรือชื่อฟังก์ชัน (grep-like) ทั่วทั้งโปรเจกต์ เพื่อดูลำดับการเรียกใช้และ Dependencies",
+    parameters: {
+        type: Type.OBJECT,
+        properties: {
+            query: {
+                type: Type.STRING,
+                description: "คำประโยคที่ต้องการค้นหา เช่น 'validateBody'",
+            },
+            directory: {
+                type: Type.STRING,
+                description: "พาธหรือโฟลเดอร์สำหรับค้นหา (ค่าเริ่มต้นคือ ./server/src)",
+            }
+        },
+        required: ["query"],
+    },
+};
+export async function searchCodebase({ query, directory }) {
+    try {
+        const startDir = path.resolve(directory && directory.trim() !== '' ? directory : path.join(process.cwd(), 'src'));
+        const results = [];
+        const MAX_RESULTS = 50;
+        function walkDir(currentDir) {
+            if (results.length >= MAX_RESULTS)
+                return;
+            const files = fs.readdirSync(currentDir);
+            for (const file of files) {
+                if (results.length >= MAX_RESULTS)
+                    return;
+                const fullPath = path.join(currentDir, file);
+                if (file === 'node_modules' || file === 'dist' || file === '.git' || file === '.gemini' || file === 'data' || file.startsWith('.'))
+                    continue;
+                try {
+                    const stat = fs.statSync(fullPath);
+                    if (stat.isDirectory()) {
+                        walkDir(fullPath);
+                    }
+                    else if (stat.isFile() && (file.endsWith('.ts') || file.endsWith('.tsx') || file.endsWith('.js') || file.endsWith('.json') || file.endsWith('.css') || file.endsWith('.md'))) {
+                        const content = fs.readFileSync(fullPath, 'utf8');
+                        const lines = content.split('\n');
+                        let fileHasMatch = false;
+                        lines.forEach((line, index) => {
+                            if (line.includes(query)) {
+                                if (!fileHasMatch) {
+                                    results.push(`\n[${path.relative(process.cwd(), fullPath)}]`);
+                                    fileHasMatch = true;
+                                }
+                                results.push(`  ${index + 1}: ${line.trim()}`);
+                            }
+                        });
+                    }
+                }
+                catch (e) {
+                    // ignore
+                }
+            }
+        }
+        walkDir(startDir);
+        if (results.length === 0) {
+            return `ไม่พบผลลัพธ์การค้นหาคำว่า "${query}" ใน ${startDir}`;
+        }
+        const output = results.join('\n');
+        if (results.length >= MAX_RESULTS) {
+            return output + '\n... (มีผลลัพธ์อีกมาก แต่แสดงเพียง 50 รายการแรก)';
+        }
+        return output;
+    }
+    catch (error) {
+        return `Error searching codebase: ${error.message}`;
     }
 }
 //# sourceMappingURL=file.js.map

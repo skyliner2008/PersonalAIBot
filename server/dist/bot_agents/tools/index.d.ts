@@ -10,13 +10,6 @@ export declare const createSendFileHandler: (ctx: BotContext) => ({ file_path, c
 export declare const memorySearchDeclaration: FunctionDeclaration;
 export declare const memorySaveDeclaration: FunctionDeclaration;
 export declare const tools: FunctionDeclaration[];
-/**
- * Get all tools including dynamic ones
- */
-export declare function getAllTools(): FunctionDeclaration[];
-export declare const getFunctionHandlers: (ctx: BotContext, sysCtx?: SystemToolContext, chatId?: string) => ToolHandlerMap;
-export declare function refreshDynamicToolsRegistry(): Promise<void>;
-/** @deprecated Legacy */
-export declare function setCurrentChatId(_chatId: string): void;
-/** @deprecated Legacy */
-export declare function getCurrentChatId(): string;
+export declare const getFunctionHandlers: (ctx: BotContext, sysCtx?: SystemToolContext) => ToolHandlerMap;
+/** Set the current chatId for memory tools — called by agent before tool execution */
+export declare function setCurrentChatId(chatId: string): void;

@@ -7,7 +7,7 @@ import * as os from 'os';
 import { approvalSystem } from '../../utils/approvalSystem.js';
 import { createLogger } from '../../utils/logger.js';
 
-const logger = createLogger('os-tool');
+const logger = createLogger('os-tool'); // test change
 
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
@@ -80,6 +80,32 @@ function isSafeCommand(command: string): { safe: boolean; reason?: string, type?
   }
 
   return { safe: true };
+}
+
+/**
+ * Helper to handle command execution and error reporting consistently
+ */
+async function safeExec(
+  action: () => Promise<{ stdout: string; stderr: string }>,
+  context: { successMsg?: string; errorPrefix: string; format?: (stdout: string) => string }
+): Promise<string> {
+  try {
+    const { stdout, stderr } = await action();
+    const result = stdout.trim();
+    
+    if (stderr) {
+      logger.warn(`${context.errorPrefix} Stderr: ${stderr}`);
+      const base = context.successMsg ? `${context.successMsg}\n\n` : '';
+      return `${base}Output:\n${result || '(ไม่มี output)'}\n\nWarnings:\n${stderr}`;
+    }
+
+    if (context.format) return context.format(result);
+    return context.successMsg || `✅ Output:\n${result || '(ไม่มี output)'}`;
+  } catch (error: any) {
+    logger.error(`${context.errorPrefix}:`, error);
+    const stderrInfo = error.stderr ? `\n${error.stderr}` : '';
+    return `❌ ${context.errorPrefix}: ${error.message}${stderrInfo}`;
+  }
 }
 
 // ==========================================
@@ -156,7 +182,7 @@ export const openApplicationDeclaration: FunctionDeclaration = {
   parameters: {
     type: Type.OBJECT,
     properties: {
-      app_name_or_path: {
+      appNameOrPath: {
         type: Type.STRING,
         description: "ชื่อโปรแกรม (เช่น notepad) หรือ พาธเต็ม",
       },
@@ -230,8 +256,8 @@ export const runPythonDeclaration: FunctionDeclaration = {
 };
 
 export async function runPython({ code }: { code: string }): Promise<string> {
-  const tmpDir = path.join(os.tmpdir(), 'ai_python');
-  if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+  const tmpDir = path.join(os.tmpdir(), 'ai_python_sandbox');
+  fs.mkdirSync(tmpDir, { recursive: true });
   const tmpFile = path.join(tmpDir, `script_${Date.now()}.py`);
   try {
     fs.writeFileSync(tmpFile, code, 'utf8');

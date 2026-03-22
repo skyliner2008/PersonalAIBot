@@ -111,6 +111,22 @@ export function getMaxMemoryMessages(): number {
   return parseIntegerSetting('max_memory_messages', 25, 5, 200);
 }
 
+export function getAutoReplyEnabled(): boolean {
+  return parseBooleanSetting('auto_reply_enabled', true);
+}
+
+export function getAutoCommentReplyEnabled(): boolean {
+  return parseBooleanSetting('auto_comment_reply_enabled', true);
+}
+
+export function getMaxToolRetries(): number {
+  return parseIntegerSetting('max_tool_retries', 3, 0, 10);
+}
+
+export function getSwarmTimeoutMs(): number {
+  return parseIntegerSetting('swarm_timeout_ms', 120_000, 10_000, 600_000);
+}
+
 export function getVoiceToolBridgeTimeoutMs(): number {
   return parseIntegerSetting(
     'voice_tool_bridge_timeout_ms',
@@ -216,6 +232,26 @@ export function getRuntimeControlSnapshot(): RuntimeControlSnapshotItem[] {
       key: 'max_memory_messages',
       value: getMaxMemoryMessages(),
       source: resolveRuntimeSettingSource('max_memory_messages'),
+    },
+    {
+      key: 'auto_reply_enabled',
+      value: getAutoReplyEnabled(),
+      source: resolveRuntimeSettingSource('auto_reply_enabled'),
+    },
+    {
+      key: 'auto_comment_reply_enabled',
+      value: getAutoCommentReplyEnabled(),
+      source: resolveRuntimeSettingSource('auto_comment_reply_enabled'),
+    },
+    {
+      key: 'max_tool_retries',
+      value: getMaxToolRetries(),
+      source: resolveRuntimeSettingSource('max_tool_retries'),
+    },
+    {
+      key: 'swarm_timeout_ms',
+      value: getSwarmTimeoutMs(),
+      source: resolveRuntimeSettingSource('swarm_timeout_ms'),
     },
     {
       key: 'voice_tool_bridge_timeout_ms',

@@ -12,6 +12,7 @@ read_file_content
 write_file_content
 delete_file
 replace_code_block
+search_codebase
 send_file_to_chat
 
 # Web & Search (critical for voice queries like gold price, weather, news)

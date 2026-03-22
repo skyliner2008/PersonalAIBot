@@ -30,8 +30,13 @@ export class OpenRouterProvider implements AIProvider {
   }
 
   async chat(messages: AIMessage[], options?: AICompletionOptions): Promise<AIChatResponse> {
-    const key = this.getKey();
-    if (!key) throw new Error('OpenRouter API key not configured');
+    let key: string | null = null;
+    if (!this.cachedModels || (Date.now() - this.lastFetch >= 3600000)) {
+      key = this.getKey();
+      if (!key) throw new Error('OpenRouter API key not configured');
+    } else {
+      key = this.cachedKey;
+    }
 
     const res = await fetch(`${BASE_URL}/chat/completions`, {
       method: 'POST',
@@ -105,8 +110,9 @@ export class OpenRouterProvider implements AIProvider {
       const data = await res.json();
       const models = data.data?.map((m: { id: string }) => m.id).slice(0, 100) || [];
       this.cachedModels = models;
-      this.lastFetch = now;
-      return models;
+        this.lastFetch = now;
+        this.cachedKey = key || null;
+        return models;
     } catch (e) {
       console.error('[OpenRouter] Failed to parse models response:', e);
       return this.cachedModels || [];

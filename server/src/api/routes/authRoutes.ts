@@ -9,10 +9,14 @@ const authLoginSchema = z.object({
   password: z.string().min(1),
 });
 
+const refreshTokenSchema = z.object({
+  refreshToken: z.string().optional(),
+});
+
 const authRoutes = Router();
 const loginLimiter = rateLimit({
   windowMs: 5 * 60 * 1000, // 5 minutes
-  max: 5, // Limit each IP to 5 requests per 5 minutes
+  max: 100, // Limit each IP to 100 requests per 5 minutes
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many login attempts. Please wait 5 minutes and try again.' },
@@ -33,13 +37,48 @@ authRoutes.post('/auth/login', loginLimiter, validateBody(authLoginSchema), asyn
   }
 });
 
-// Create a custom request interface
-interface CustomRequest extends Request {
+/**
+ * RBAC (Role-Based Access Control) Configuration
+ * Defines granular roles and permissions for the application.
+ */
+export type UserRole = 'admin' | 'manager' | 'editor' | 'viewer' | 'user';
+
+export interface CustomRequest extends Request {
   user?: {
+    id?: string;
     username: string;
-    role: 'admin' | 'viewer';
+    role: UserRole | string;
+    permissions?: string[];
   };
 }
+
+/**
+ * Middleware to check for specific permissions.
+ * Admin role bypasses permission checks.
+ */
+export const checkPermissions = (requiredPermissions: string[]) => {
+  return (req: CustomRequest, res: Response, next: NextFunction) => {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    if (req.user.role === 'admin') {
+      return next();
+    }
+
+    const userPermissions = req.user.permissions || [];
+    const hasAll = requiredPermissions.every(p => userPermissions.includes(p));
+
+    if (!hasAll) {
+      return res.status(403).json({
+        error: 'Forbidden',
+        message: 'Insufficient permissions'
+      });
+    }
+
+    next();
+  };
+};
 
 authRoutes.get('/auth/me', requireAuth(), (req: CustomRequest, res) => {
   res.json({ user: req.user });

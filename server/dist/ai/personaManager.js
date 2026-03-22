@@ -1,6 +1,7 @@
 import fs from 'fs';
+const TOOL_REGEX = /^(?!#|\/\/)\s*([\w-]+)/gm;
 import path from 'path';
-export const PLATFORMS = ['fb-extension', 'line', 'telegram', 'system'];
+export const PLATFORMS = ['fb-extension', 'line', 'telegram', 'facebook', 'discord', 'custom', 'system'];
 // Default content per file
 const DEFAULTS = {
     'AGENTS.md': `# Role\nคุณคือผู้ช่วย AI ส่วนตัว (Personal AI Assistant)\n\n# Goal\nเป้าหมายของคุณคือการช่วยเหลือผู้ใช้งานอย่างเต็มที่และถูกต้องที่สุด\n`,
@@ -11,14 +12,33 @@ const DEFAULTS = {
 class PersonaManager {
     personasDir;
     cache = new Map();
-    TTL_MS = 5000;
+    TTL_MS = 60000; // 1 minute fallback, primarily invalidated by fs.watch
+    pendingWrites = new Map();
+    writeTimeouts = new Map();
+    DEBOUNCE_MS = 1000;
     constructor() {
         this.personasDir = path.join(process.cwd(), 'personas');
         this.ensureDirExists(this.personasDir);
+        // Ensure directories for all platforms exist on startup
+        for (const platform of PLATFORMS) {
+            this.ensureDirExists(path.join(this.personasDir, platform));
+        }
     }
     ensureDirExists(dir) {
-        if (!fs.existsSync(dir))
-            fs.mkdirSync(dir, { recursive: true });
+        fs.mkdirSync(dir, { recursive: true });
+    }
+    validateInputs(platform, filename) {
+        if (!PLATFORMS.includes(platform)) {
+            throw new Error(`Security Violation: Invalid platform '${platform}'`);
+        }
+        if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+            throw new Error(`Security Violation: Invalid filename '${filename}'`);
+        }
+    }
+    getFilePath(platform, filename) {
+        const platformDir = path.join(this.personasDir, platform);
+        this.ensureDirExists(platformDir);
+        return path.join(platformDir, filename);
     }
     loadFile(platform, filename) {
         const platformDir = path.join(this.personasDir, platform);
@@ -80,12 +100,13 @@ class PersonaManager {
         const enabledTools = toolsText
             .split('\n')
             .map(line => line.trim())
-            .filter(line => line.length > 0 && !line.startsWith('#') && !line.startsWith('//'))
-            // Strip markdown decorators (backticks/asterisks) from edges only — NOT hyphens,
-            // because tool names like "web-search" legitimately contain hyphens.
-            .map(line => line.replace(/^[`*\s]+|[`*\s]+$/g, '').trim())
+            .map(line => line.match(/^(?!#|\/\/)\s*([\w-]+)/)?.[1])
             .filter(Boolean);
-        const config = { systemInstruction, enabledTools };
+        // Security: Restrict 'run_command' to 'system' platform only
+        const finalEnabledTools = platform === 'system'
+            ? enabledTools
+            : enabledTools.filter(tool => tool !== 'run_command');
+        const config = { systemInstruction, enabledTools: finalEnabledTools };
         this.cache.set(platform, { config, lastLoaded: now });
         return config;
     }

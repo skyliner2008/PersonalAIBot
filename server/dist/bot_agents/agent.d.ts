@@ -16,8 +16,7 @@ export interface AgentRun {
     taskType?: string;
 }
 export declare class Agent {
-    private providers;
-    constructor(apiKey: string);
+    constructor();
     processMessage(chatId: string, message: string, ctx: BotContext, attachments?: Part[]): Promise<string>;
     private _processMessageCore;
     private resolveModelConfig;

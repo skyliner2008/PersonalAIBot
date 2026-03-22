@@ -8,6 +8,7 @@
 import crypto from 'crypto';
 import { Request, Response, NextFunction } from 'express';
 import { createLogger } from './logger.js';
+import { getSetting, getCredential } from '../database/db.js';
 
 const log = createLogger('Auth');
 const NODE_ENV = process.env.NODE_ENV || 'development';
@@ -30,10 +31,8 @@ if (!process.env.JWT_SECRET) {
 if (!process.env.ADMIN_PASSWORD) {
   if (IS_DEV) {
     if (!STARTUP_COMPACT) {
-      log.warn('ADMIN_PASSWORD not set - using development fallback credentials (admin/admin)');
+      log.warn('ADMIN_PASSWORD not set - using fallback credentials (admin/admin)');
     }
-  } else {
-    log.error('ADMIN_PASSWORD not set outside development - admin login is disabled until configured');
   }
 }
 
@@ -51,12 +50,25 @@ interface User {
 }
 
 function validateCredentials(username: string, password: string): User | null {
-  const adminUser = process.env.ADMIN_USER || DEFAULT_DEV_ADMIN_USER;
-  const configuredAdminPass = process.env.ADMIN_PASSWORD;
-  const adminPass = configuredAdminPass || (IS_DEV ? DEFAULT_DEV_ADMIN_PASSWORD : '');
+  const adminUser = process.env.ADMIN_USER || getSetting('admin_user') || DEFAULT_DEV_ADMIN_USER;
+  const configuredAdminPass = process.env.ADMIN_PASSWORD || getCredential('admin_password');
 
-  if (adminPass && username === adminUser && password === adminPass) {
-    return { username: adminUser, role: 'admin' };
+  log.warn(`[AuthDebug] validateCredentials Attempt -> User: ${username}, SystemAdmin: ${adminUser}, ConfiguredPassExists: ${!!configuredAdminPass}`);
+
+  if (configuredAdminPass) {
+    // If a password is explicitly set electronically (ENV or DB), require it
+    if (username === adminUser && password === configuredAdminPass) {
+      log.warn(`[AuthDebug] SUCCESS via configuredAdminPass`);
+      return { username: adminUser, role: 'admin' };
+    }
+    log.warn(`[AuthDebug] FAILED via configuredAdminPass (password mismatch)`);
+  } else {
+    // Fallback if completely unconfigured to prevent permanent lock-out
+    if (username === adminUser && password === DEFAULT_DEV_ADMIN_PASSWORD) {
+      log.warn(`[AuthDebug] SUCCESS via fallback admin/admin`);
+      return { username: adminUser, role: 'admin' };
+    }
+    log.warn(`[AuthDebug] FAILED via fallback (expected admin/admin)`);
   }
 
   const viewerUser = process.env.VIEWER_USER;

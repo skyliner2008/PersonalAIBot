@@ -11,11 +11,14 @@ import {
   clipboardRead, clipboardReadDeclaration,
   clipboardWrite, clipboardWriteDeclaration,
 } from './os.js';
-import { listFiles, listFilesDeclaration, readFileContent, readFileContentDeclaration, writeFileContent, writeFileContentDeclaration, deleteFile, deleteFileDeclaration } from './file.js';
+import { listFiles, listFilesDeclaration, readFileContent, readFileContentDeclaration, writeFileContent, writeFileContentDeclaration, deleteFile, deleteFileDeclaration, replaceCodeBlock, replaceCodeBlockDeclaration, searchCodebase, searchCodebaseDeclaration } from './file.js';
 import { browserNavigate, browserNavigateDeclaration, browserClick, browserClickDeclaration, browserType, browserTypeDeclaration, browserClose, browserCloseDeclaration } from './browser.js';
 import { webSearch, webSearchDeclaration, readWebpage, readWebpageDeclaration, mouseClick, mouseClickDeclaration, keyboardType, keyboardTypeDeclaration } from './limitless.js';
 import { systemToolDeclarations, getSystemToolHandlers, type SystemToolContext } from './system.js';
 import { evolutionToolDeclarations, getEvolutionToolHandlers } from './evolution.js';
+import { generateImageDeclaration, generateSpeechDeclaration, generateVideoDeclaration, createMediaHandlers } from './media_generation.js';
+import { readDocumentDeclaration, createDocumentDeclaration, editDocumentDeclaration, readGoogleDocDeclaration, createOfficeHandlers } from './office_tools.js';
+import { createCronJobDeclaration, listCronJobsDeclaration, deleteCronJobDeclaration, createCronHandlers } from './cron_tools.js';
 
 export type { BotContext, SystemToolContext };
 
@@ -176,6 +179,9 @@ export const tools = [
   writeFileContentDeclaration,
   deleteFileDeclaration,
   sendFileToChatDeclaration,
+  // Surgical Edit & Search Tools
+  replaceCodeBlockDeclaration,
+  searchCodebaseDeclaration,
   // Browser Tools
   browserNavigateDeclaration,
   browserClickDeclaration,
@@ -193,13 +199,31 @@ export const tools = [
   ...systemToolDeclarations,
   // Self-Evolution Tools
   ...evolutionToolDeclarations,
+  generateImageDeclaration,
+  generateSpeechDeclaration,
+  generateVideoDeclaration,
+  // Office & Productivity Tools
+  readDocumentDeclaration,
+  createDocumentDeclaration,
+  editDocumentDeclaration,
+  readGoogleDocDeclaration,
+  createCronJobDeclaration,
+  listCronJobsDeclaration,
+  deleteCronJobDeclaration,
 ];
 
 // Per-request chatId holder — set by the handler wrapper
 let _currentChatId = '';
 
 export const getFunctionHandlers = (ctx: BotContext, sysCtx?: SystemToolContext): ToolHandlerMap => {
+  const mediaHandlers = createMediaHandlers(ctx);
+  const officeHandlers = createOfficeHandlers(ctx);
+  const cronHandlers = createCronHandlers(ctx);
+
   const handlers: ToolHandlerMap = {
+    ...mediaHandlers,
+    ...officeHandlers,
+    ...cronHandlers,
     // Utility
     get_current_time: getCurrentTime,
     echo_message: echoMessage,
@@ -218,6 +242,9 @@ export const getFunctionHandlers = (ctx: BotContext, sysCtx?: SystemToolContext)
     write_file_content: writeFileContent,
     delete_file: deleteFile,
     send_file_to_chat: createSendFileHandler(ctx),
+    // Surgical Edit & Search
+    replace_code_block: replaceCodeBlock,
+    search_codebase: searchCodebase,
     // Browser
     browser_navigate: browserNavigate,
     browser_click: browserClick,

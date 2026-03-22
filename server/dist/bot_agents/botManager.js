@@ -14,6 +14,11 @@ import { getProviderApiKey } from '../config/settingsSecurity.js';
 import { getAgentCompatibleProviders } from '../providers/agentRuntime.js';
 import { verifyCliConnections } from '../terminal/commandRouter.js';
 import { createLogger } from '../utils/logger.js';
+import { getAutoReplyEnabled } from '../config/runtimeSettings.js';
+import { startChatMonitor, stopChatMonitor } from '../automation/chatBot.js';
+import { startCommentMonitor, stopCommentMonitor } from '../automation/commentBot.js';
+import { getSocketIO } from '../utils/socketBroadcast.js';
+import { getAdminIds } from '../terminal/messagingBridge.js';
 dotenv.config();
 const TELEGRAM_MESSAGE_MAX_LENGTH = 4096;
 const TELEGRAM_TYPING_PULSE_MS = 4500;
@@ -24,6 +29,19 @@ function botInfo(message) {
     if (!STARTUP_COMPACT) {
         logger.info(message);
     }
+}
+/**
+ * Utility to truncate long messages and append ellipsis.
+ * Prevents performance issues with extremely large strings and respects platform limits.
+ */
+function truncateMessage(text, maxLength) {
+    if (text.length <= maxLength)
+        return text;
+    return text.substring(0, maxLength - 3) + '...';
+}
+/** Standardizes chatId construction across platforms */
+function formatChatId(platform, id) {
+    return `${platform}_${id}`;
 }
 function hasConfiguredLlmApiKey() {
     try {
@@ -45,13 +63,17 @@ function getAiAgent() {
         return null;
     }
     try {
-        aiAgent = new Agent(process.env.GEMINI_API_KEY || '');
+        aiAgent = new Agent();
         return aiAgent;
     }
     catch (err) {
         console.error('[BotManager] Failed to initialize shared AI Agent:', err);
         return null;
     }
+}
+/** Helper to mark a bot as error in the registry */
+function updateBotStatusOnError(botId, errorMessage) {
+    updateBot(botId, { status: 'error', last_error: errorMessage });
 }
 // Active bot instances
 // Maps bot registry ID to the running instance handle
@@ -78,7 +100,6 @@ function runTelegramAdminCommandAsync(bot, botId, chatId, userMessage, userId) {
     const typingPulse = setInterval(() => {
         void bot.telegram.sendChatAction(chatId, 'typing').catch(() => undefined);
     }, TELEGRAM_TYPING_PULSE_MS);
-    void bot.telegram.sendChatAction(chatId, 'typing').catch(() => undefined);
     void (async () => {
         try {
             const result = await handleAdminCommand(userMessage, 'telegram', userId);
@@ -95,7 +116,7 @@ function runTelegramAdminCommandAsync(bot, botId, chatId, userMessage, userId) {
 }
 // Telegram bot helpers
 async function handleTelegramMultimodal(ctx, agent, botConfig) {
-    const chatId = `telegram_${ctx.chat.id.toString()}`;
+    const chatId = formatChatId('telegram', ctx.chat.id);
     let fileId = '';
     let mimeType = '';
     if ('document' in ctx.message) {
@@ -132,7 +153,7 @@ async function handleTelegramMultimodal(ctx, agent, botConfig) {
 }
 async function handleTelegramText(ctx, bot, agent, botConfig) {
     const userMessage = ctx.message.text;
-    const chatId = `telegram_${ctx.chat.id.toString()}`;
+    const chatId = formatChatId('telegram', ctx.chat.id);
     // Allow admin commands and empty messages (in boss mode) to pass
     if (userMessage.startsWith('/') && !userMessage.startsWith('/admin'))
         return;
@@ -142,7 +163,10 @@ async function handleTelegramText(ctx, bot, agent, botConfig) {
         runTelegramAdminCommandAsync(bot, botConfig.id, ctx.chat.id, userMessage, userId);
         return;
     }
-    console.log(`[Telegram:${botConfig.id}] ${chatId}: ${userMessage}`);
+    if (!getAutoReplyEnabled()) {
+        return; // Auto-reply disabled globally
+    }
+    logger.info(`[Telegram:${botConfig.id}] ${chatId}: ${userMessage}`);
     await ctx.sendChatAction('typing');
     try {
         upsertConversation(chatId, ctx.chat.id.toString(), "Telegram User");
@@ -179,8 +203,8 @@ function setupTelegramBotHandlers(bot, agent, botConfig) {
         ctx.reply(`Hello! I am ${botConfig.name} - Personal AI Assistant`);
     });
     bot.command('clear', (ctx) => {
-        const chatId = ctx.chat.id.toString();
-        clearMemory(`telegram_${chatId}`);
+        const chatId = formatChatId('telegram', ctx.chat.id);
+        clearMemory(chatId);
         ctx.reply('Memory cleared successfully.');
     });
     bot.on(['document', 'photo'], (ctx) => handleTelegramMultimodal(ctx, agent, botConfig));
@@ -203,21 +227,22 @@ function setupTelegramBotHandlers(bot, agent, botConfig) {
 function startTelegramBot(botConfig) {
     const agent = getAiAgent();
     if (!agent) {
-        updateBot(botConfig.id, { status: 'error', last_error: 'No configured LLM provider key' });
+        updateBotStatusOnError(botConfig.id, 'No configured LLM provider key');
         return;
     }
     const token = botConfig.credentials.bot_token;
     if (!token) {
         console.warn(`[BotManager] Telegram bot "${botConfig.id}" - missing bot_token`);
-        updateBot(botConfig.id, { status: 'error', last_error: 'Missing bot_token' });
+        updateBotStatusOnError(botConfig.id, 'Missing bot_token');
         return;
     }
     try {
         const bot = new Telegraf(token, { handlerTimeout: TELEGRAM_HANDLER_TIMEOUT_MS });
         setupTelegramBotHandlers(bot, agent, botConfig);
+        botInfo(`[BotManager] Telegram bot "${botConfig.id}" starting...`);
+        updateBot(botConfig.id, { status: 'active', last_error: null });
         bot.launch({ dropPendingUpdates: true }).then(() => {
             botInfo(`[BotManager] Telegram bot "${botConfig.id}" ready`);
-            updateBot(botConfig.id, { status: 'active', last_error: null });
         }).catch((err) => {
             console.error(`[BotManager] Telegram bot "${botConfig.id}" launch failed:`, err);
             const raw = String(err?.description || err?.message || err || '');
@@ -225,7 +250,7 @@ function startTelegramBot(botConfig) {
             const humanMessage = isConflict
                 ? '409 Telegram polling conflict: token is being used by another running bot/process'
                 : raw;
-            updateBot(botConfig.id, { status: 'error', last_error: humanMessage });
+            updateBotStatusOnError(botConfig.id, humanMessage);
         });
         activeBots.set(botConfig.id, {
             type: 'telegram',
@@ -240,94 +265,113 @@ function startTelegramBot(botConfig) {
     }
     catch (err) {
         console.error(`[BotManager] Telegram bot "${botConfig.id}" error:`, err);
-        updateBot(botConfig.id, { status: 'error', last_error: err.message });
+        updateBotStatusOnError(botConfig.id, err.message);
+    }
+}
+// LINE bot helpers
+async function handleLineFileReply(lineClient, userId, fileUrl, caption) {
+    if (!userId) {
+        logger.error('[LINE] handleLineFileReply: userId is missing');
+        return 'Failed to send file: missing user ID';
+    }
+    try {
+        // Sanitize the URL to prevent XSS and ensure it's properly encoded
+        const sanitizedUrl = encodeURI(fileUrl);
+        const ext = sanitizedUrl.split('.').pop()?.toLowerCase() || '';
+        const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
+        const videoExts = ['mp4', 'mpeg', 'mov'];
+        const audioExts = ['mp3', 'wav', 'm4a'];
+        let message;
+        if (imageExts.includes(ext)) {
+            message = { type: 'image', originalContentUrl: sanitizedUrl, previewImageUrl: sanitizedUrl };
+        }
+        else if (videoExts.includes(ext)) {
+            message = { type: 'video', originalContentUrl: sanitizedUrl, previewImageUrl: sanitizedUrl };
+        }
+        else if (audioExts.includes(ext)) {
+            message = { type: 'audio', originalContentUrl: sanitizedUrl, duration: 60000 };
+        }
+        else {
+            const fileName = sanitizedUrl.split('/').pop() || 'file';
+            // Basic escaping for text content to mitigate XSS in downstream consumers (e.g. dashboards)
+            const safeCaption = (caption || fileName).replace(/[<>]/g, '');
+            message = { type: 'text', text: `File: ${safeCaption}` + "\\n" + `Download: ${sanitizedUrl}` };
+        }
+        try {
+            await lineClient.pushMessage(userId, [message]);
+        }
+        catch (pushErr) {
+            logger.error(`[LINE] pushMessage error: ${pushErr.message}`, pushErr);
+            return `Failed to send file: ${pushErr.message}`;
+        }
+        return `Sent file link successfully`;
+    }
+    catch (err) {
+        logger.error(`[LINE] handleLineFileReply overall error: ${err.message}`, err);
+        return `Failed to send file: ${err.message}`;
+    }
+}
+async function handleLineEvent(event, agent, botConfig, lineClient) {
+    if (event.type !== 'message' || event.message.type !== 'text')
+        return;
+    const userMessage = event.message.text;
+    const userId = event.source.userId;
+    if (!userId)
+        return;
+    const chatId = formatChatId('line', userId);
+    try {
+        // Intercept admin commands AND active Boss Mode sessions from LINE
+        if (isAdminCommand(userMessage) || isBossModeActive('line', userId)) {
+            const result = await handleAdminCommand(userMessage, 'line', userId);
+            const trimmed = result.length > 5000 ? result.substring(0, 4997) + '...' : result;
+            await lineClient.pushMessage(userId, { type: 'text', text: trimmed });
+            return;
+        }
+        if (!getAutoReplyEnabled()) {
+            return; // Auto-reply disabled globally
+        }
+        console.log(`[LINE:${botConfig.id}] ${chatId}: ${userMessage}`);
+        upsertConversation(chatId, userId, "LINE User");
+        const responseText = await agent.processMessage(chatId, userMessage, {
+            botId: botConfig.id,
+            botName: botConfig.name,
+            platform: 'line',
+            replyWithFile: async (fileUrl, caption) => handleLineFileReply(lineClient, userId, fileUrl, caption)
+        });
+        const text = responseText.length > 5000 ? responseText.substring(0, 4997) + '...' : responseText;
+        await lineClient.pushMessage(userId, { type: 'text', text });
+    }
+    catch (err) {
+        console.error(`[LINE:${botConfig.id}] Error chat=${chatId}:`, err);
+        throw err;
     }
 }
 // LINE bot factory
 function startLineBot(app, botConfig) {
     const agent = getAiAgent();
     if (!agent) {
-        updateBot(botConfig.id, { status: 'error', last_error: 'No configured LLM provider key' });
+        updateBotStatusOnError(botConfig.id, 'No configured LLM provider key');
         return;
     }
     const accessToken = botConfig.credentials.channel_access_token;
     const secret = botConfig.credentials.channel_secret;
     if (!accessToken || !secret) {
         console.warn(`[BotManager] LINE bot "${botConfig.id}" - missing credentials`);
-        updateBot(botConfig.id, { status: 'error', last_error: 'Missing channel_access_token or channel_secret' });
+        updateBotStatusOnError(botConfig.id, 'Missing channel_access_token or channel_secret');
         return;
     }
     try {
         const lineConfig = { channelAccessToken: accessToken, channelSecret: secret };
         const lineClient = new LineClient(lineConfig);
-        // Register both the new path AND the legacy /webhook/line path for backward compat
         const webhookPaths = [`/webhook/line/${botConfig.id}`];
-        // If this is the env-migrated bot, also listen on the original /webhook/line
         if (String(botConfig.id || '').toLowerCase() === 'env-line') {
             webhookPaths.push('/webhook/line');
         }
-        // Create an isolated router for this LINE bot so we can unmount it later
         const lineRouter = express.Router();
         for (const webhookPath of webhookPaths) {
             lineRouter.post(webhookPath, lineMiddleware(lineConfig), (req, res) => {
                 res.status(200).json({});
-                const eventPromises = (req.body.events || []).map(async (event) => {
-                    if (event.type !== 'message' || event.message.type !== 'text')
-                        return;
-                    const userMessage = event.message.text;
-                    const userId = event.source.userId;
-                    const chatId = `line_${userId}`;
-                    if (!userId)
-                        return;
-                    try {
-                        // Intercept admin commands AND active Boss Mode sessions from LINE
-                        if (isAdminCommand(userMessage) || isBossModeActive('line', userId)) {
-                            const result = await handleAdminCommand(userMessage, 'line', userId);
-                            const trimmed = result.length > 5000 ? result.substring(0, 4997) + '...' : result;
-                            await lineClient.pushMessage(userId, { type: 'text', text: trimmed });
-                            return;
-                        }
-                        console.log(`[LINE:${botConfig.id}] ${chatId}: ${userMessage}`);
-                        upsertConversation(chatId, userId, "LINE User");
-                        const responseText = await agent.processMessage(chatId, userMessage, {
-                            botId: botConfig.id,
-                            botName: botConfig.name,
-                            platform: 'line',
-                            replyWithFile: async (fileUrl, caption) => {
-                                try {
-                                    const ext = fileUrl.split('.').pop()?.toLowerCase() || '';
-                                    const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
-                                    const videoExts = ['mp4', 'mpeg', 'mov'];
-                                    const audioExts = ['mp3', 'wav', 'm4a'];
-                                    let message;
-                                    if (imageExts.includes(ext)) {
-                                        message = { type: 'image', originalContentUrl: fileUrl, previewImageUrl: fileUrl };
-                                    }
-                                    else if (videoExts.includes(ext)) {
-                                        message = { type: 'video', originalContentUrl: fileUrl, previewImageUrl: fileUrl };
-                                    }
-                                    else if (audioExts.includes(ext)) {
-                                        message = { type: 'audio', originalContentUrl: fileUrl, duration: 60000 };
-                                    }
-                                    else {
-                                        const fileName = fileUrl.split('/').pop() || 'file';
-                                        message = { type: 'text', text: `File: ${caption || fileName}` + "\\n" + `Download: ${fileUrl}` };
-                                    }
-                                    await lineClient.pushMessage(userId, [message]);
-                                    return `Sent file link successfully`;
-                                }
-                                catch (err) {
-                                    return `Failed to send file: ${err.message}`;
-                                }
-                            }
-                        });
-                        const text = responseText.length > 5000 ? responseText.substring(0, 4997) + '...' : responseText;
-                        await lineClient.pushMessage(userId, { type: 'text', text });
-                    }
-                    catch (err) {
-                        console.error(`[LINE:${botConfig.id}] Error chat=${chatId}:`, err);
-                    }
-                });
+                const eventPromises = (req.body.events || []).map((event) => handleLineEvent(event, agent, botConfig, lineClient));
                 Promise.allSettled(eventPromises).then(results => {
                     const failures = results.filter(r => r.status === 'rejected');
                     if (failures.length > 0) {
@@ -336,9 +380,7 @@ function startLineBot(app, botConfig) {
                 });
             });
         }
-        // Add a custom property to the router function to find it later
         lineRouter.botId = botConfig.id;
-        // Mount the router under root (webhook paths already contain /webhook)
         app.use('/', lineRouter);
         lineRouters.set(botConfig.id, lineRouter);
         botInfo(`[BotManager] LINE bot "${botConfig.id}" webhook ready at ${webhookPaths.join(', ')}`);
@@ -347,10 +389,8 @@ function startLineBot(app, botConfig) {
             type: 'line',
             instance: lineClient,
             stop: () => {
-                // Remove the router from Express stack to prevent route stacking
                 const stack = app._router?.stack;
                 if (stack) {
-                    // Try to find the layer that contains our specific router
                     const idx = stack.findIndex((layer) => layer.handle && layer.handle.botId === botConfig.id);
                     if (idx >= 0) {
                         stack.splice(idx, 1);
@@ -363,7 +403,7 @@ function startLineBot(app, botConfig) {
     }
     catch (err) {
         console.error(`[BotManager] LINE bot "${botConfig.id}" error:`, err);
-        updateBot(botConfig.id, { status: 'error', last_error: err.message });
+        updateBotStatusOnError(botConfig.id, err.message);
     }
 }
 // Legacy environment migration
@@ -419,6 +459,7 @@ export function startBotInstance(app, botId) {
     }
     if (!getAiAgent()) {
         console.error(`[BotManager] Cannot start bot "${botId}" - no configured LLM provider key`);
+        updateBotStatusOnError(botId, 'Missing LLM provider API key (e.g. Gemini). Please configure one.');
         return false;
     }
     const botConfig = getBot(botId);
@@ -433,9 +474,37 @@ export function startBotInstance(app, botId) {
         case 'line':
             startLineBot(effectiveApp, botConfig);
             return true;
+        case 'facebook':
+            const io = getSocketIO();
+            if (!io) {
+                console.error(`[BotManager] Cannot start Facebook bot "${botId}" - Socket.IO not initialized`);
+                updateBotStatusOnError(botId, 'Socket.IO subsystem not ready for Facebook Automation');
+                return false;
+            }
+            // Start both Chat and Comment monitors
+            startChatMonitor(io).catch(err => {
+                console.error('[BotManager] Error starting FB Chat Monitor:', err);
+            });
+            startCommentMonitor(io).catch(err => {
+                console.error('[BotManager] Error starting FB Comment Monitor:', err);
+            });
+            // Register in activeBots so it can be stopped
+            activeBots.set(botConfig.id, {
+                type: 'facebook',
+                instance: null,
+                stop: () => {
+                    const activeIo = getSocketIO();
+                    if (activeIo) {
+                        stopChatMonitor(activeIo);
+                        stopCommentMonitor(activeIo);
+                    }
+                }
+            });
+            updateBot(botConfig.id, { status: 'active', last_error: null });
+            return true;
         default:
             console.warn(`[BotManager] Platform "${botConfig.platform}" not yet implemented for bot "${botId}"`);
-            updateBot(botId, { status: 'error', last_error: `Platform "${botConfig.platform}" not supported yet` });
+            updateBotStatusOnError(botId, `Platform "${botConfig.platform}" not supported yet`);
             return false;
     }
 }
@@ -443,11 +512,14 @@ export function startBotInstance(app, botId) {
 export function stopBotInstance(botId) {
     const active = activeBots.get(botId);
     if (active) {
-        active.stop();
+        try {
+            active.stop();
+        }
+        catch (e) { }
         activeBots.delete(botId);
-        updateBot(botId, { status: 'stopped' });
-        console.log(`[BotManager] Stopped bot "${botId}"`);
+        console.log(`[BotManager] Stopped bot "${botId}" process`);
     }
+    updateBot(botId, { status: 'stopped', last_error: null });
 }
 /** Start all bots (called at server startup) */
 export function startBots(app) {
@@ -470,6 +542,46 @@ export function startBots(app) {
     verifyCliConnections().catch((err) => {
         console.error('[BotManager] Error verifying CLI connections:', err);
     });
+}
+/** Broadcast an alert message to all configured Admin Telegram/Line IDs */
+export async function broadcastToAdmins(message) {
+    const formattedMessage = `🚨 [SYSTEM ALERT]\n${message}`;
+    // Broadcast via active Telegram Bots
+    const telegramAdmins = getAdminIds('telegram');
+    if (telegramAdmins.size > 0) {
+        for (const [id, botData] of activeBots.entries()) {
+            if (botData.type === 'telegram' && botData.instance) {
+                const telegraf = botData.instance;
+                for (const adminId of telegramAdmins) {
+                    try {
+                        await telegraf.telegram.sendMessage(adminId, formattedMessage);
+                    }
+                    catch (e) {
+                        console.error(`[AdminAlert] Failed to notify Telegram admin ${adminId} via bot ${id}`);
+                    }
+                }
+            }
+        }
+    }
+    // Broadcast via active LINE Bots
+    const lineAdmins = getAdminIds('line');
+    if (lineAdmins.size > 0) {
+        for (const [id, botData] of activeBots.entries()) {
+            if (botData.type === 'line' && botData.instance) {
+                const lineClient = botData.instance;
+                for (const adminId of lineAdmins) {
+                    try {
+                        await lineClient.pushMessage(adminId, { type: 'text', text: formattedMessage });
+                    }
+                    catch (e) {
+                        console.error(`[AdminAlert] Failed to notify LINE admin ${adminId} via bot ${id}`);
+                    }
+                }
+            }
+        }
+    }
+}
+export function setupBotManagerRoutes(app) {
     // Dashboard API and static files
     app.use('/personal-ai', express.static('public_personal_ai'));
     app.get('/api/config', (_req, res) => {
@@ -497,7 +609,7 @@ export function startBots(app) {
             res.status(500).json({ error: 'AI Agent is not initialized' });
             return;
         }
-        const { message, chatId = 'web_dashboard_user' } = req.body;
+        const { message, chatId = 'web_dashboard_user', platform = 'web', botId = 'web-cli' } = req.body;
         if (!message) {
             res.status(400).json({ error: 'Message is required' });
             return;
@@ -505,9 +617,9 @@ export function startBots(app) {
         try {
             upsertConversation(chatId, 'web_dashboard', 'Web Dashboard User');
             const ctx = {
-                botId: 'env-telegram',
+                botId,
                 botName: 'Web CLI Bot',
-                platform: 'telegram',
+                platform: platform,
                 replyWithText: async (_text) => {
                     // For Web CLI, we don't stream back intermediate text yet, 
                     // we just return the final response.

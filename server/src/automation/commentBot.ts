@@ -4,8 +4,9 @@ import { addLog, dbAll, dbGet, dbRun } from '../database/db.js';
 import { aiChat } from '../ai/aiRouter.js';
 import { buildCommentReplyPrompt } from '../ai/prompts/contentCreator.js';
 import type { Server as SocketServer } from 'socket.io';
-import { getCommentReplyDelayMs } from '../config/runtimeSettings.js';
+import { getCommentReplyDelayMs, getAutoCommentReplyEnabled } from '../config/runtimeSettings.js';
 import { createLogger } from '../utils/logger.js';
+import { broadcastToAdmins } from '../bot_agents/botManager.js';
 
 const logger = createLogger('CommentBot');
 let isMonitoring = false;
@@ -54,8 +55,9 @@ export async function startCommentMonitor(io: SocketServer): Promise<void> {
       }
 
       if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-        logger.error('Too many errors, auto-stopping...');
+        logger.error(`Fatal crash in Comment monitor: ${msg}. Broadcasting to admins and shutting down.`);
         addLog('commentbot', 'Auto-stopped (repeated errors)', msg, 'error');
+        broadcastToAdmins(`Facebook Comment Auto-Reply crashed and was shut down.\nReason: ${msg}`);
         forceStop(io);
       }
     }
@@ -85,9 +87,11 @@ export function stopCommentMonitor(io: SocketServer): void {
  * Check all active watched posts for new comments.
  */
 async function checkWatchedPosts(io: SocketServer): Promise<void> {
-  const watches = dbAll(
+  if (!getAutoCommentReplyEnabled()) return; // Skip if auto-comment-reply is globally disabled
+
+  const watches: { id: number; replies_count: number; max_replies: number; fb_post_url: string; reply_style: string | null }[] = dbAll(
     'SELECT * FROM comment_watches WHERE is_active = 1 AND auto_reply = 1'
-  ) as any[];
+  );
 
   for (const watch of watches) {
     if (!isMonitoring || !isRunning()) return;

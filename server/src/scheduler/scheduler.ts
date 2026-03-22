@@ -3,6 +3,9 @@ import { addLog, dbAll, dbRun, cleanupOldLogs, cleanupOldProcessedMessages } fro
 import { processPendingPosts } from '../automation/postManager.js';
 import type { Server as SocketServer } from 'socket.io';
 import { createLogger } from '../utils/logger.js';
+import { Agent } from '../bot_agents/agent.js';
+import { sendDirectMessage } from '../bot_agents/botManager.js';
+import { getBot } from '../bot_agents/registries/botRegistry.js';
 
 const logger = createLogger('scheduler');
 
@@ -106,8 +109,49 @@ export function refreshCronJobs(io: SocketServer): void {
       }
     });
 
-    cronJobs.set(String(post.id), job);
-    addLog('scheduler', `Cron job registered`, `Post ${post.id}: ${post.cron_expression}`, 'info');
+    cronJobs.set(`post_${post.id}`, job);
+    addLog('scheduler', `Auto-Post registered`, `Post ${post.id}: ${post.cron_expression}`, 'info');
+  }
+
+  // Load generic ai recurring jobs (Agentic Automation)
+  const aiJobs = dbAll(
+    `SELECT * FROM cron_jobs WHERE is_active = 1`
+  ) as any[];
+
+  for (const job of aiJobs) {
+    if (!cron.validate(job.cron_expression)) {
+      addLog('scheduler', `Invalid cron: ${job.cron_expression}`, `Cron ${job.name}`, 'warning');
+      continue;
+    }
+
+    const task = cron.schedule(job.cron_expression, async () => {
+      try {
+        const agent = new Agent();
+        const bot = getBot(job.bot_id);
+        
+        const ctx = {
+            botId: job.bot_id,
+            botName: bot ? bot.name : 'Automated Bot',
+            platform: job.platform as any,
+            replyWithText: async (t: string) => {}, // Suppress mid-stream typing logs for headless
+            replyWithFile: async (fp: string, cap?: string) => { return ""; } // Stub
+        };
+
+        const prompt = `[SYSTEM AUTOMATION]\nถึงเวลาทำสิ่งนี้แล้ว: ${job.prompt}\n(จงทำตามคำสั่งแล้วสร้างคำตอบเพื่อส่งให้ฉันเดี๋ยวนี้)`;
+        
+        addLog('scheduler', `Cron Job Started`, `${job.name}`, 'info');
+        const result = await agent.processMessage(job.chat_id, prompt, ctx);
+        
+        await sendDirectMessage(job.bot_id, job.chat_id, result);
+        addLog('scheduler', `Cron Job Completed`, `${job.name}`, 'success');
+      } catch (err: any) {
+        addLog('scheduler', `Cron Job Error`, `[${job.name}] ${err.message}`, 'error');
+        console.error(`[Scheduler] AI Cron Job Error: ${err.message}`);
+      }
+    });
+
+    cronJobs.set(`ai_${job.id}`, task);
+    addLog('scheduler', `AI Cron Job registered`, `${job.name}: ${job.cron_expression}`, 'info');
   }
 }
 

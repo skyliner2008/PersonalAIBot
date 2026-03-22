@@ -81,6 +81,31 @@ export class OpenAICompatibleProvider implements AIProvider {
     }, { context: `OpenAI:${this.providerId}` });
   }
 
+  async generateImage(prompt: string, modelName?: string, options?: Record<string, any>): Promise<{ url?: string; b64_json?: string; revised_prompt?: string }[]> {
+    const response = await this.client.images.generate({
+      prompt,
+      model: modelName || 'dall-e-3',
+      n: options?.n || 1,
+      size: options?.size || '1024x1024',
+      response_format: options?.response_format || 'url',
+    });
+    return response.data.map(d => ({
+      url: d.url,
+      b64_json: d.b64_json,
+      revised_prompt: d.revised_prompt
+    }));
+  }
+
+  async generateSpeech(text: string, modelName?: string, voice?: string): Promise<Buffer> {
+    const response = await this.client.audio.speech.create({
+      model: modelName || 'tts-1',
+      voice: (voice as any) || 'alloy',
+      input: text,
+      response_format: 'mp3',
+    });
+    return Buffer.from(await response.arrayBuffer());
+  }
+
   async listModels(): Promise<string[]> {
     try {
       // เรียก GET /models จาก API จริงของ provider (timeout 8 วินาที)

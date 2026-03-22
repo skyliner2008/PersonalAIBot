@@ -43,6 +43,7 @@ import { SwarmStateStore } from './swarmStateStore.js';
 import { SpecialistDispatcher } from './specialistDispatcher.js';
 import { SwarmBatchManager } from './swarmBatchManager.js';
 import { SwarmHealthTracker } from './swarmHealthTracker.js';
+import { getSwarmTimeoutMs, getMaxToolRetries, getSwarmSkipReviewerGate, getSwarmSkipBackgroundEnrichment } from '../config/runtimeSettings.js';
 import { createLogger } from '../utils/logger.js';
 
 const logger = createLogger('Swarm');
@@ -339,13 +340,11 @@ export class SwarmCoordinator {
         .filter((idx) => Number.isInteger(idx) && idx >= 0 && idx < taskIds.length)
         .map((idx) => taskIds[idx]);
       const cliSpecialist = isCliSpecialistName(task.specialist);
-      const defaultTimeoutMs = cliSpecialist
-        ? readPositiveIntEnv('SWARM_CLI_TASK_TIMEOUT_MS', DEFAULT_SWARM_CLI_TASK_TIMEOUT_MS)
-        : readPositiveIntEnv('SWARM_AGENT_TASK_TIMEOUT_MS', DEFAULT_SWARM_AGENT_TASK_TIMEOUT_MS);
+      const dbTimeoutMs = getSwarmTimeoutMs();
+      const defaultTimeoutMs = cliSpecialist ? dbTimeoutMs : Math.min(dbTimeoutMs, 45_000); // 45s max or fallback for normal agents
       const timeoutMs = task.timeout ?? defaultTimeoutMs;
-      const defaultMaxRetries = cliSpecialist
-        ? readPositiveIntEnv('SWARM_CLI_TASK_RETRIES', 0)
-        : readPositiveIntEnv('SWARM_AGENT_TASK_RETRIES', 1);
+      
+      const defaultMaxRetries = cliSpecialist ? 0 : getMaxToolRetries();
       const maxRetries = task.maxRetries ?? defaultMaxRetries;
 
       const taskId = await this.delegateTask(

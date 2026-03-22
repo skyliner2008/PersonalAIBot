@@ -45,27 +45,27 @@ async function dismissPopups(page) {
 export async function isLoggedIn() {
     try {
         const page = await getMainPage();
-        console.log('[FB] Checking login status...');
+        log.info('Checking login status...');
         await navigateWithRetry(page, FB_URL);
         await humanDelay(2000, 4000);
         await dismissPopups(page);
         const url = page.url();
         // If redirected to login page
         if (url.includes('login') || url.includes('checkpoint')) {
-            console.log('[FB] On login/checkpoint page → not logged in');
+            log.info('On login/checkpoint page -> not logged in');
             return false;
         }
         // Check for login form → not logged in
         const loginForm = await page.$('input[name="email"]');
         if (loginForm) {
-            console.log('[FB] Login form found → not logged in');
+            log.info('Login form found -> not logged in');
             return false;
         }
-        console.log('[FB] No login form → logged in');
+        log.info('No login form -> logged in');
         return true;
     }
     catch (e) {
-        console.error('[FB] Login check error:', e);
+        log.error('Login check error', { error: String(e) });
         addLog('facebook', 'Login check failed', String(e), 'error');
         return false;
     }
@@ -76,7 +76,7 @@ export async function isLoggedIn() {
 async function fillFacebookLoginForm(page, email, pass) {
     const emailInput = await page.$('input[name="email"]');
     if (emailInput && !await emailInput.isVisible()) {
-        console.log('[FB] Email input exists but not visible, waiting...');
+        log.info('[FB] Email input exists but not visible, waiting...');
         await page.waitForSelector('input[name="email"]', { state: 'visible', timeout: 10000 });
     }
     console.log('[FB] Login form found, filling credentials...');
@@ -272,7 +272,7 @@ export async function createPost(content, target = 'profile', targetId) {
             }
         }
         if (!clicked) {
-            addLog('post', 'Failed to find post composer', undefined, 'error');
+            await addLog('post', 'Failed to find post composer', undefined, 'error');
             return false;
         }
         await humanDelay(2000, 3000);

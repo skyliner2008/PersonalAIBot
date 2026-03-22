@@ -17,14 +17,12 @@ export function getPluginRuntimeSnapshots(): PluginRuntimeSnapshot[] {
   const browserRunning = isRunning();
   const chatMonitorActive = isChatMonitorActive();
   const commentMonitorActive = isCommentMonitorActive();
-  const monitorCount = Number(chatMonitorActive) + Number(commentMonitorActive);
+  const monitorCount = (chatMonitorActive ? 1 : 0) + (commentMonitorActive ? 1 : 0);
 
   let status: PluginRuntimeStatus = 'offline';
   if (browserRunning && monitorCount > 0) {
     status = 'active';
-  } else if (browserRunning) {
-    status = 'degraded';
-  } else if (monitorCount > 0) {
+  } else if (browserRunning || monitorCount > 0) {
     status = 'degraded';
   }
 

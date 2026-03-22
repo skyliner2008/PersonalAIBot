@@ -11,6 +11,7 @@ import terminalRoutes from './terminalRoutes.js';
 import providerRoutes from './providerRoutes.js';
 import systemRouter from './systemRouter.js';
 import upgradeRoutes from './upgradeRoutes.js';
+import cronRoutes from './cronRoutes.js';
 import { chatQueue, webhookQueue } from '../queue.js';
 import { setWebhookBroadcast } from '../facebook/webhookHandler.js';
 import { requireReadWriteAuth } from '../utils/auth.js';
@@ -71,6 +72,7 @@ function setupApiRoutes(app: express.Express, readWriteGuard: express.RequestHan
   app.use('/api/system', systemRouter);
   app.use('/api', router);
   app.use('/api/tools', toolsRouter);
+  app.use('/api/cron-jobs', readWriteGuard, cronRoutes);
   app.use('/api/bots', botsRouter);
   app.use('/api/fb-graph', readWriteGuard, fbRouter);
   app.use('/api/swarm', swarmRoutes);

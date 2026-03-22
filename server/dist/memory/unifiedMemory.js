@@ -298,113 +298,102 @@ let embeddingProvider = null;
 export function setEmbeddingProvider(fn) {
     embeddingProvider = fn;
 }
+/** Get embedding for a fact if provider is available */
+async function _getFactEmbedding(fact) {
+    if (!embeddingProvider)
+        return { embedding: null, vector: [] };
+    try {
+        const vec = await embeddingProvider(fact);
+        return {
+            embedding: Buffer.from(new Float32Array(vec).buffer),
+            vector: vec
+        };
+    }
+    catch (e) {
+        console.error('[Memory] Embedding failed, saving without:', e);
+        return { embedding: null, vector: [] };
+    }
+}
+/** Check if a similar fact already exists (similarity > 0.9) */
+function _findDuplicateFact(chatId, embedding) {
+    const existing = getArchivalFacts(chatId);
+    const embFloat = new Float32Array(embedding.buffer, embedding.byteOffset, embedding.byteLength / 4);
+    for (const ex of existing) {
+        if (ex.embedding) {
+            const sim = cosineSimilarity(embFloat, ex.embedding);
+            if (sim > 0.9)
+                return { id: ex.id };
+        }
+    }
+    return null;
+}
+/** Sync archival fact to vector store */
+async function _syncFactToVectorStore(id, fact, vector, chatId) {
+    if (!vectorStoreReady || vector.length === 0)
+        return;
+    try {
+        const vs = await getVectorStore();
+        await vs.upsert({
+            id: `archival_${id}`,
+            text: fact,
+            embedding: vector,
+            metadata: {
+                chatId,
+                type: 'archival',
+                createdAt: new Date().toISOString(),
+            },
+        });
+    }
+    catch (err) {
+        log.warn('Failed to update vector store:', { error: String(err) });
+    }
+}
+/** Prune archival memory if limit exceeded (short and old facts first) */
+async function _pruneArchivalMemory(chatId) {
+    const count = getDb().prepare('SELECT COUNT(*) as c FROM archival_memory WHERE chat_id = ?').get(chatId)?.c || 0;
+    if (count <= ARCHIVAL_LIMIT)
+        return;
+    const excess = count - ARCHIVAL_LIMIT;
+    const toDelete = getDb().prepare(`
+        SELECT id FROM archival_memory WHERE chat_id = ?
+        ORDER BY LENGTH(fact) ASC, created_at ASC LIMIT ?
+    `).all(chatId, excess);
+    if (toDelete.length === 0)
+        return;
+    const placeholders = toDelete.map(() => '?').join(',');
+    getDb().prepare(`DELETE FROM archival_memory WHERE id IN (${placeholders})`)
+        .run(...toDelete.map(r => r.id));
+    if (vectorStoreReady) {
+        try {
+            const vs = await getVectorStore();
+            for (const row of toDelete)
+                await vs.delete(`archival_${row.id}`);
+        }
+        catch (err) {
+            console.warn('[Memory] Vector store pruning failed:', err);
+        }
+    }
+}
 export async function saveArchivalFact(chatId, fact) {
     // Use per-chatId mutex to prevent concurrent duplicate checks
     return memoryMutex.withLock(`archival:${chatId}`, async () => {
-        let embedding = null;
-        let embeddingVec = [];
-        if (embeddingProvider) {
-            try {
-                const vec = await embeddingProvider(fact);
-                embedding = Buffer.from(new Float32Array(vec).buffer);
-                embeddingVec = vec;
-            }
-            catch (e) {
-                console.error('[Memory] Embedding failed, saving without:', e);
-            }
-        }
+        const { embedding, vector } = await _getFactEmbedding(fact);
         // Dedup: check if very similar fact already exists
-        if (embedding && embeddingVec.length > 0) {
-            const existing = getArchivalFacts(chatId);
-            for (const ex of existing) {
-                if (ex.embedding) {
-                    const sim = cosineSimilarity(new Float32Array(embedding.buffer, embedding.byteOffset, embedding.byteLength / 4), ex.embedding);
-                    if (sim > 0.9) {
-                        // Update existing instead of inserting duplicate
-                        const updated = getDb().prepare('UPDATE archival_memory SET fact = ?, embedding = ?, created_at = CURRENT_TIMESTAMP WHERE id = ?')
-                            .run(fact, embedding, ex.id);
-                        // Also update in vector store
-                        if (vectorStoreReady) {
-                            try {
-                                const vs = await getVectorStore();
-                                const doc = {
-                                    id: `archival_${ex.id}`,
-                                    text: fact,
-                                    embedding: embeddingVec,
-                                    metadata: {
-                                        chatId,
-                                        type: 'archival',
-                                        createdAt: new Date().toISOString(),
-                                    },
-                                };
-                                await vs.upsert(doc);
-                            }
-                            catch (err) {
-                                log.warn('Failed to update vector store:', { error: String(err) });
-                            }
-                        }
-                        return;
-                    }
-                }
+        if (embedding) {
+            const dup = _findDuplicateFact(chatId, embedding);
+            if (dup) {
+                getDb().prepare('UPDATE archival_memory SET fact = ?, embedding = ?, created_at = CURRENT_TIMESTAMP WHERE id = ?')
+                    .run(fact, embedding, dup.id);
+                await _syncFactToVectorStore(dup.id, fact, vector, chatId);
+                return;
             }
         }
+        // Insert new fact
         const result = getDb().prepare('INSERT INTO archival_memory (chat_id, fact, embedding) VALUES (?, ?, ?)')
             .run(chatId, fact, embedding);
-        // Add to vector store for fast semantic search
-        if (vectorStoreReady && embeddingVec.length > 0) {
-            try {
-                const vs = await getVectorStore();
-                // Use SQLite rowid or generate ID
-                const newId = result.lastInsertRowid || Date.now();
-                const doc = {
-                    id: `archival_${newId}`,
-                    text: fact,
-                    embedding: embeddingVec,
-                    metadata: {
-                        chatId,
-                        type: 'archival',
-                        createdAt: new Date().toISOString(),
-                    },
-                };
-                await vs.upsert(doc);
-            }
-            catch (err) {
-                console.warn('[Memory] Failed to add to vector store:', err);
-            }
-        }
-        // 🧠 Smart Pruning — ถ้าเกิน ARCHIVAL_LIMIT ให้ลบ facts ที่สั้นและเก่าที่สุดออก
-        // (ไม่ลบแบบ FIFO ล้วนๆ — facts สั้นมักมีคุณค่าน้อยกว่า)
-        const count = getDb().prepare('SELECT COUNT(*) as c FROM archival_memory WHERE chat_id = ?').get(chatId);
-        if (count?.c > ARCHIVAL_LIMIT) {
-            const excess = count.c - ARCHIVAL_LIMIT;
-            // ลบ facts ที่สั้นที่สุดก่อน (priority: short = low-value), หากสั้นเท่ากันให้ลบเก่าก่อน
-            const toDelete = getDb().prepare(`
-                SELECT id FROM archival_memory
-                WHERE chat_id = ?
-                ORDER BY LENGTH(fact) ASC, created_at ASC
-                LIMIT ?
-            `).all(chatId, excess);
-            getDb().prepare(`
-                DELETE FROM archival_memory WHERE id IN (
-                    SELECT id FROM archival_memory
-                    WHERE chat_id = ?
-                    ORDER BY LENGTH(fact) ASC, created_at ASC
-                    LIMIT ?
-                )
-            `).run(chatId, excess);
-            // Also delete from vector store
-            if (vectorStoreReady) {
-                try {
-                    const vs = await getVectorStore();
-                    for (const row of toDelete) {
-                        await vs.delete(`archival_${row.id}`);
-                    }
-                }
-                catch (err) {
-                    console.warn('[Memory] Failed to delete from vector store:', err);
-                }
-            }
-        }
+        const newId = result.lastInsertRowid || Date.now();
+        await _syncFactToVectorStore(newId, fact, vector, chatId);
+        await _pruneArchivalMemory(chatId);
     }); // end memoryMutex.withLock
 }
 export async function searchArchival(chatId, query, limit = 3, threshold = 0.65) {
@@ -419,6 +408,56 @@ export async function searchArchival(chatId, query, limit = 3, threshold = 0.65)
     }
     return results;
 }
+/** Calculate importance score for a fact based on semantic similarity, recency, and length */
+function _calculateFactScore(semanticScore, createdAt, factLength) {
+    const now = Date.now();
+    const ageMs = now - new Date(createdAt).getTime();
+    // Recency score: decays over 30 days
+    const recencyScore = Math.exp(-ageMs / (30 * 24 * 60 * 60 * 1000)) * 0.5 + 0.5;
+    // Length bonus: prefer longer facts up to 200 chars
+    const lengthBonus = Math.min(factLength / 200, 1) * 0.1;
+    // Weighted importance
+    const importanceScore = (semanticScore * 0.7) + (recencyScore * 0.2) + lengthBonus;
+    return { score: importanceScore, semantic: semanticScore };
+}
+async function _searchVectorArchival(queryVec, chatId, limit, threshold) {
+    if (!vectorStoreReady)
+        return [];
+    try {
+        const vs = await getVectorStore();
+        const results = await vs.search(queryVec, Math.max(limit * 2, 10), { chatId, type: 'archival' });
+        if (results.length > 0) {
+            const scored = results.map(r => ({
+                fact: r.text,
+                ..._calculateFactScore(r.score, r.metadata.createdAt, r.text.length)
+            }))
+                .filter(r => r.semantic > threshold)
+                .sort((a, b) => b.score - a.score)
+                .slice(0, limit);
+            return scored.map(s => s.fact);
+        }
+    }
+    catch (err) {
+        console.warn('[Memory] Vector store search failed:', err);
+    }
+    return [];
+}
+function _searchSqliteArchival(queryVec, chatId, limit, threshold) {
+    const queryVecTyped = new Float32Array(queryVec);
+    const facts = getArchivalFacts(chatId);
+    if (facts.length === 0)
+        return [];
+    const scored = facts
+        .filter(f => f.embedding)
+        .map(f => ({
+        fact: f.fact,
+        ..._calculateFactScore(cosineSimilarity(queryVecTyped, f.embedding), f.createdAt || 0, f.fact.length)
+    }))
+        .filter(r => r.semantic > threshold)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, limit);
+    return scored.map(s => s.fact);
+}
 async function _searchArchivalCore(chatId, query, limit, threshold) {
     const textFallbackSearch = () => {
         const safeQ = escapeLikePattern(query.substring(0, 50));
@@ -426,64 +465,20 @@ async function _searchArchivalCore(chatId, query, limit, threshold) {
             .all(chatId, `%${safeQ}%`, limit);
         return rows.map(r => r.fact);
     };
-    if (!embeddingProvider) {
+    if (!embeddingProvider)
         return textFallbackSearch();
-    }
     try {
         const queryVec = await embedText(query);
-        if (!queryVec || queryVec.length === 0) {
+        if (!queryVec || queryVec.length === 0)
             return textFallbackSearch();
-        }
-        // Try Vector Store search first
-        if (vectorStoreReady) {
-            try {
-                const vs = await getVectorStore();
-                const results = await vs.search(queryVec, Math.max(limit * 2, 10), { chatId, type: 'archival' });
-                if (results.length > 0) {
-                    // Apply recency and length bonuses on top of vector similarity
-                    const now = Date.now();
-                    const scored = results.map(r => {
-                        const ageMs = now - new Date(r.metadata.createdAt).getTime();
-                        const recencyScore = Math.exp(-ageMs / (30 * 24 * 60 * 60 * 1000)) * 0.5 + 0.5;
-                        const lengthBonus = Math.min(r.text.length / 200, 1) * 0.1;
-                        const importanceScore = (r.score * 0.7) + (recencyScore * 0.2) + lengthBonus;
-                        return { fact: r.text, score: importanceScore, semantic: r.score };
-                    })
-                        .filter(r => r.semantic > threshold)
-                        .sort((a, b) => b.score - a.score)
-                        .slice(0, limit);
-                    if (scored.length > 0) {
-                        return scored.map(s => s.fact);
-                    }
-                }
-            }
-            catch (err) {
-                console.warn('[Memory] Vector store search failed, falling back to SQLite:', err);
-            }
-        }
-        // Fallback: SQLite cosine similarity (slower but always works)
-        const queryVecTyped = new Float32Array(queryVec);
-        const facts = getArchivalFacts(chatId);
-        if (facts.length === 0)
-            return [];
-        const now = Date.now();
-        const scored = facts
-            .filter(f => f.embedding)
-            .map(f => {
-            const semanticScore = cosineSimilarity(queryVecTyped, f.embedding);
-            // 🎯 Importance = semantic similarity (70%) + recency (20%) + length bonus (10%)
-            const ageMs = now - new Date(f.createdAt || 0).getTime();
-            const recencyScore = Math.exp(-ageMs / (30 * 24 * 60 * 60 * 1000)) * 0.5 + 0.5;
-            const lengthBonus = Math.min(f.fact.length / 200, 1) * 0.1;
-            const importanceScore = (semanticScore * 0.7) + (recencyScore * 0.2) + lengthBonus;
-            return { fact: f.fact, score: importanceScore, semantic: semanticScore };
-        })
-            .filter(r => r.semantic > threshold)
-            .sort((a, b) => b.score - a.score)
-            .slice(0, limit);
-        if (scored.length > 0) {
-            return scored.map(s => s.fact);
-        }
+        // 1. Try Vector Store
+        const vectorResults = await _searchVectorArchival(queryVec, chatId, limit, threshold);
+        if (vectorResults.length > 0)
+            return vectorResults;
+        // 2. Try SQLite Cosine Similarity
+        const sqliteResults = _searchSqliteArchival(queryVec, chatId, limit, threshold);
+        if (sqliteResults.length > 0)
+            return sqliteResults;
         return textFallbackSearch();
     }
     catch (e) {

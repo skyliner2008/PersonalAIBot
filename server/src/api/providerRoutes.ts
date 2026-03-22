@@ -389,7 +389,7 @@ router.post('/:id/toggle', (req: Request, res: Response) => {
     const success = toggleProvider(id, enabled);
     if (success) {
       const provider = getProvider(id);
-      res.json({ success: true, enabled: provider?.enabled });
+      res.json({ success: true, enabled: provider?.enabled ?? false });
     } else {
       res.status(404).json({ success: false, error: 'Provider not found' });
     }

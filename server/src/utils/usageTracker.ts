@@ -13,7 +13,7 @@ import { dbRun, dbGet, dbAll, getDb } from '../database/db.js';
 import { createLogger } from './logger.js';
 
 const log = createLogger('UsageTracker');
-console.log('Test match 2');
+log.info('UsageTracker initialized');
 
 // ============ Types ============
 
@@ -133,7 +133,7 @@ export function trackUsage(record: UsageRecord): void {
   }
 }
 
-// ============ Query Stats ============
+// ============ Query Stats & Helpers ============
 
 /** Get per-provider summary for the last N hours (default 24h) */
 export function getUsageSummary(hours: number = 24): UsageSummary {

@@ -1,4 +1,5 @@
 // Web CLI Restart Trigger
+import './bootGuardian.js';
 import express from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
@@ -278,7 +279,7 @@ async function main() {
     // --- Security: Rate Limiting ---
     const apiLimiter = rateLimit({
         windowMs: 1 * 60 * 1000,
-        max: 120,
+        max: 300, // Increased from 120 to support rapid Dashboard Batch Approvals
         standardHeaders: true,
         legacyHeaders: false,
         message: { error: 'Too many requests, please try again later.' },
@@ -492,7 +493,7 @@ async function main() {
         startBots(app);
         // Initialize Swarm Coordinator with Socket.IO notifications
         const swarmCoordinator = getSwarmCoordinator();
-        const systemAgent = new Agent(process.env.GEMINI_API_KEY || '');
+        const systemAgent = new Agent();
         await swarmCoordinator.init(systemAgent);
         // Wire AI Agent handler for terminal @agent commands
         setAgentHandler(async (message, platform, userId) => {

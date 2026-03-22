@@ -8,7 +8,17 @@
  */
 
 import { createLogger } from './logger.js';
-const log = createLogger('Retry');
+const log = createLogger('Retry Utility');
+
+/**
+ * Calculate exponential backoff delay with jitter
+ */
+function calculateDelay(attempt: number, baseDelayMs: number, maxDelayMs: number): number {
+  return Math.min(
+    baseDelayMs * Math.pow(2, attempt - 1) + Math.random() * 500,
+    maxDelayMs
+  );
+}
 
 /** Errors that should NOT be retried */
 const NON_RETRYABLE_PATTERNS = [
@@ -25,13 +35,14 @@ export interface RetryOptions {
   baseDelayMs?: number;
   maxDelayMs?: number;
   context?: string;  // for logging: "GeminiProvider", "OpenAI", etc.
+  nonRetryablePatterns?: string[];
 }
 
 /**
  * Execute an async function with exponential backoff retry
  */
 export async function withRetry<T>(
-  fn: () => Promise<T>,
+  operation: () => Promise<T>,
   opts: RetryOptions = {}
 ): Promise<T> {
   const {
@@ -45,7 +56,7 @@ export async function withRetry<T>(
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      return await fn();
+      return await operation();
     } catch (err: unknown) {
       lastError = err;
       const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
@@ -61,8 +72,9 @@ export async function withRetry<T>(
           baseDelayMs * Math.pow(2, attempt - 1) + Math.random() * 500,
           maxDelayMs
         );
+        const redactedMsg = msg.replace(/(api[-_]?key|password)=.+?(?=&|$)/gi, '$1=REDACTED');
         log.warn(`[${context}] Attempt ${attempt}/${maxRetries} failed, retrying in ${Math.round(delay)}ms`, {
-          error: msg.substring(0, 100),
+          error: msg.substring(0, 100).replace(/(api[-_]?key|password)=.+?(?=&|$)/gi, '$1=REDACTED'),
           attempt,
         });
         await new Promise(r => setTimeout(r, delay));

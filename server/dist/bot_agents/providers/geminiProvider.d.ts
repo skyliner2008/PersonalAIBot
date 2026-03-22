@@ -22,8 +22,14 @@ export declare class GeminiProvider implements AIProvider {
     private v1Models;
     private isVertexAI;
     constructor(apiKey: string, options?: GeminiProviderOptions);
+    /** Creates a GoogleGenAI client with common configuration. */
+    private createGenAIClient;
     /** Get the appropriate client for a model (v1beta or v1) */
     private getClientForModel;
+    /** Prepares the content array for v1 retry by adding the system instruction. */
+    private prepareContentsForV1Retry;
+    /** Merges tool calls from different sources, eliminating duplicates. */
+    private mergeToolCalls;
     generateResponse(modelName: string, systemInstruction: string, contents: Content[], tools?: FunctionDeclaration[], useGoogleSearch?: boolean): Promise<AIResponse>;
     listModels(): Promise<string[]>;
 }

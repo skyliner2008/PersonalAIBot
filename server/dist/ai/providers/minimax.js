@@ -11,22 +11,60 @@ export class MiniMaxProvider {
         return getSetting('ai_minimax_model') || 'MiniMax-M2.5';
     }
     async chat(messages, options) {
+        if (!messages || messages.length === 0) {
+            throw new Error('Messages array cannot be empty');
+        }
+        // Validate message structure
+        for (const msg of messages) {
+            if (!msg.role || !msg.content) {
+                throw new Error('Invalid message structure: each message must have role and content');
+            }
+        }
         const key = this.getKey();
         if (!key)
             throw new Error('MiniMax API key not configured');
+        const isStream = options?.stream ?? false;
+        const body = {
+            model: options?.model || this.getModel(),
+            messages,
+            temperature: options?.temperature ?? 0.7,
+            max_tokens: options?.maxTokens ?? 500,
+        };
+        if (isStream) {
+            body.stream = true;
+        }
         const res = await fetch(`${BASE_URL}/chat/completions`, {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                model: options?.model || this.getModel(),
-                messages,
-                temperature: options?.temperature ?? 0.7,
-                max_tokens: options?.maxTokens ?? 500,
-            }),
+            body: JSON.stringify(body),
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
             throw new Error(`MiniMax error ${res.status}: ${err.error?.message || res.statusText}`);
+        }
+        if (isStream) {
+            if (!res.body)
+                throw new Error('No response body');
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let fullText = '';
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done)
+                    break;
+                const chunk = decoder.decode(value);
+                const lines = chunk.split('\n').filter(l => l.startsWith('data: '));
+                for (const line of lines) {
+                    try {
+                        const data = JSON.parse(line.slice(6));
+                        if (data.choices?.[0]?.delta?.content) {
+                            fullText += data.choices[0].delta.content;
+                        }
+                    }
+                    catch { /* skip invalid JSON */ }
+                }
+            }
+            return { text: fullText, usage: undefined };
         }
         const data = await res.json();
         const text = data.choices?.[0]?.message?.content?.trim() || '';
@@ -40,8 +78,10 @@ export class MiniMaxProvider {
     async testConnection() {
         try {
             const key = this.getKey();
-            if (!key)
+            if (!key) {
+                console.warn('[Minimax] API key not configured');
                 return false;
+            }
             const res = await fetch(`${BASE_URL}/chat/completions`, {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
@@ -51,10 +91,15 @@ export class MiniMaxProvider {
                     max_tokens: 1,
                 }),
             });
-            return res.ok;
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                console.warn(`[Minimax] Connection test failed: ${res.status} - ${err.error?.message || res.statusText}`);
+                return false;
+            }
+            return true;
         }
         catch (e) {
-            console.debug('[Minimax] API validation failed:', String(e));
+            console.error('[Minimax] API validation failed:', String(e));
             return false;
         }
     }

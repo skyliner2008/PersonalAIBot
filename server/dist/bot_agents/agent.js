@@ -1,6 +1,5 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { GoogleGenAI } from '@google/genai';
 import { tools, getFunctionHandlers } from './tools/index.js';
 import { getBot } from './registries/botRegistry.js';
 import { addMessage as umAddMessage, addEpisode, buildContext, setCoreMemory, saveArchivalFact, setEmbeddingProvider, } from '../memory/unifiedMemory.js';
@@ -8,8 +7,8 @@ import { setSummarizeProvider } from '../memory/conversationSummarizer.js';
 import { classifyTask, TaskType, getBestModelForTask } from './config/aiConfig.js';
 import { configManager } from './config/configManager.js';
 import { personaManager } from '../ai/personaManager.js';
-import { GeminiProvider } from './providers/geminiProvider.js';
-import { OpenAICompatibleProvider } from './providers/openaiCompatibleProvider.js';
+import { getProvider, getRegistry } from '../providers/registry.js';
+import { createAgentRuntimeProvider } from '../providers/agentRuntime.js';
 import { createLogger } from '../utils/logger.js';
 const log = createLogger('Agent');
 // ============================================================
@@ -84,6 +83,10 @@ function enqueueForUser(chatId, task) {
             ]);
             return result;
         }
+        catch (err) {
+            console.warn(`[AgentQueue] Task Queue Error: ${err.message}`);
+            return `❌ System Error: ${err.message}`;
+        }
         finally {
             const cnt = queueCounts.get(chatId) ?? 1;
             if (cnt <= 1)
@@ -128,20 +131,17 @@ function finishRun(run, stats, reply, error) {
     run.error = error;
 }
 export class Agent {
-    providers;
-    constructor(apiKey) {
-        this.providers = {
-            gemini: new GeminiProvider(apiKey),
-            openai: new OpenAICompatibleProvider(process.env.OPENAI_API_KEY || ''),
-            minimax: new OpenAICompatibleProvider(process.env.MINIMAX_API_KEY || '', 'https://api.minimax.io/v1')
-        };
-        const ai = new GoogleGenAI({ apiKey });
+    constructor() {
         import('../memory/embeddingProvider.js').then(module => {
             setEmbeddingProvider(module.embedText);
         }).catch(e => console.error("Failed to inject embedding provider", e));
         setSummarizeProvider(async (prompt) => {
-            const res = await this.providers.gemini.generateResponse('gemini-2.0-flash-lite', 'สรุปบทสนทนาให้กระชับ ไม่เกิน 3 บรรทัด ภาษาไทย', [{ role: 'user', parts: [{ text: prompt }] }]);
-            return res.text?.trim() || '';
+            const p = createAgentRuntimeProvider('gemini');
+            if (p) {
+                const res = await p.generateResponse('gemini-2.0-flash-lite', 'สรุปบทสนทนาให้กระชับ ไม่เกิน 3 บรรทัด ภาษาไทย', [{ role: 'user', parts: [{ text: prompt }] }]);
+                return res.text?.trim() || '';
+            }
+            return '';
         });
     }
     processMessage(chatId, message, ctx, attachments) {
@@ -164,7 +164,7 @@ export class Agent {
                 ...configuredFallbacks,
                 ...this.getFallbackChainFromMd().map(f => ({ provider: f.provider, modelName: f.model }))
             ].filter((v, i, a) => a.findIndex(t => t.provider === v.provider && t.modelName === v.modelName) === i);
-            console.log(`[Router] ${taskType} | Mode: ${autoRouting ? 'Adaptive' : 'Manual'} | Choices: ${modelChoicesList.length}`);
+            log.info(`[Router] ${taskType} | Mode: ${autoRouting ? 'Adaptive' : 'Manual'} | Choices: ${modelChoicesList.length}`);
             // 2. Build Context
             const memoryCtx = await buildContext(chatId, cleanMessage, { maxArchival: 5, archivalThreshold: 0.55 });
             umAddMessage(chatId, 'user', cleanMessage);
@@ -199,7 +199,9 @@ export class Agent {
             const sysCtx = {
                 ctx: ctx || { botId: 'default', botName: 'AI', platform: 'telegram', replyWithFile: async () => '' },
                 listModels: (p) => this.getAvailableModels(p),
-                getProviderNames: () => Object.keys(this.providers)
+                getProviderNames: () => {
+                    return Object.keys(getRegistry().providers);
+                }
             };
             const allHandlers = getFunctionHandlers(ctx || sysCtx.ctx, sysCtx);
             const activeHandlers = {};
@@ -208,22 +210,28 @@ export class Agent {
                     activeHandlers[name] = fn;
             }
             let activeTools = tools.filter(t => t.name && enabledToolNames.includes(t.name));
-            const useGoogleSearch = enabledToolNames.includes('google_search');
+            // Prevent web search spam during autonomous execution tasks
+            if (taskType === TaskType.CODE || taskType === TaskType.SYSTEM) {
+                activeTools = activeTools.filter(t => t.name !== 'web_search' && t.name !== 'google_search');
+            }
+            const useGoogleSearch = enabledToolNames.includes('google_search') && taskType !== TaskType.CODE;
             // --- DYNAMIC TOOL ROUTING (Token Optimization) ---
             if (activeTools.length > 5) {
                 try {
                     const routerPrompt = `You are a tool selector. User said: "${cleanMessage}". Available tools: ${activeTools.map(t => t.name).join(', ')}. Return ONLY a JSON array of max 5 tool names needed. Return [] if none needed. Do NOT use markdown code blocks, just the JSON array.`;
-                    const routerContents = [{ role: 'user', parts: [{ text: routerPrompt }] }];
-                    const routerRes = await this.providers.gemini.generateResponse('gemini-2.0-flash-lite', 'You are a tool selector.', routerContents);
-                    if (routerRes.text) {
-                        const match = routerRes.text.match(/\[.*?\]/s);
-                        if (match) {
-                            const selected = JSON.parse(match[0]);
-                            if (Array.isArray(selected)) {
-                                // Always keep some core self-reflection tools if they were enabled
-                                const essential = ['memory_save', 'search_knowledge'];
-                                activeTools = activeTools.filter(t => t.name && (selected.includes(t.name) || essential.includes(t.name)));
-                                console.log(`[DynamicRouter] Tools reduced to ${activeTools.length}:`, activeTools.map(t => t.name));
+                    const p = createAgentRuntimeProvider('gemini');
+                    if (p) {
+                        const routerRes = await p.generateResponse('gemini-2.0-flash-lite', 'You are a tool selector.', [{ role: 'user', parts: [{ text: routerPrompt }] }]);
+                        if (routerRes.text) {
+                            const match = routerRes.text.match(/\[.*?\]/s);
+                            if (match) {
+                                const selected = JSON.parse(match[0]);
+                                if (Array.isArray(selected)) {
+                                    // Always keep some core self-reflection tools if they were enabled
+                                    const essential = ['memory_save', 'search_knowledge', 'replace_code_block', 'run_command', 'read_file', 'system_terminal'];
+                                    activeTools = activeTools.filter(t => t.name && (selected.includes(t.name) || essential.includes(t.name)));
+                                    console.log(`[DynamicRouter] Tools reduced to ${activeTools.length}:`, activeTools.map(t => t.name));
+                                }
                             }
                         }
                     }
@@ -348,53 +356,85 @@ export class Agent {
         return { config, autoRouting: globalConfig.autoRouting };
     }
     resolveProvider(config) {
-        const primary = this.providers[config.provider];
-        if (primary)
-            return { provider: primary, providerName: config.provider, modelName: config.modelName };
+        const pDef = getProvider(config.provider);
+        if (pDef && pDef.enabled) {
+            const p = createAgentRuntimeProvider(config.provider);
+            if (p)
+                return { provider: p, providerName: config.provider, modelName: config.modelName };
+        }
         const fallbackChain = this.getFallbackChainFromMd();
         for (const fb of fallbackChain) {
-            const p = this.providers[fb.provider];
-            if (p)
-                return { provider: p, providerName: fb.provider, modelName: fb.model };
+            const fbDef = getProvider(fb.provider);
+            if (fbDef && fbDef.enabled) {
+                const fbP = createAgentRuntimeProvider(fb.provider);
+                if (fbP)
+                    return { provider: fbP, providerName: fb.provider, modelName: fb.model };
+            }
         }
         return { provider: null, providerName: 'none', modelName: '' };
     }
     getFallbackChainFromMd() {
         try {
-            const filePath = path.join(process.cwd(), 'server', 'personas', 'system', 'ROUTING.md');
-            if (fs.existsSync(filePath)) {
-                const content = fs.readFileSync(filePath, 'utf8');
-                const matches = content.matchAll(/^\d+\.\s*([^:]+):\s*(.+)$/gm);
-                const chain = Array.from(matches).map(m => ({ provider: m[1].trim().toLowerCase(), model: m[2].trim() }));
-                if (chain.length > 0)
-                    return chain;
+            // Try multiple possible locations for ROUTING.md (cwd may be project root or server/)
+            const candidates = [
+                path.join(process.cwd(), 'server', 'personas', 'system', 'ROUTING.md'),
+                path.join(process.cwd(), 'personas', 'system', 'ROUTING.md'),
+                path.resolve(__dirname, '..', '..', 'personas', 'system', 'ROUTING.md'),
+            ];
+            for (const filePath of candidates) {
+                if (fs.existsSync(filePath)) {
+                    const content = fs.readFileSync(filePath, 'utf8');
+                    const matches = content.matchAll(/^\d+\.\s*([^:]+):\s*(.+)$/gm);
+                    const chain = Array.from(matches).map(m => ({ provider: m[1].trim().toLowerCase(), model: m[2].trim() }));
+                    if (chain.length > 0)
+                        return chain;
+                }
             }
         }
         catch { }
-        return [{ provider: 'gemini', model: 'gemini-1.5-flash' }, { provider: 'openai', model: 'gpt-4o-mini' }];
+        // Improved default fallback — prefer modern models
+        return [
+            { provider: 'gemini', model: 'gemini-2.5-flash' },
+            { provider: 'gemini', model: 'gemini-2.0-flash' },
+            { provider: 'minimax', model: 'MiniMax-M2.7' },
+        ];
     }
     buildTimeoutResponse(stats) {
         return `⏰ Timeout. Completed: ${stats.toolCalls.filter(t => t.success).map(t => t.name).join(', ')}`;
     }
     async extractFact(chatId, userMsg, aiMsg) {
         try {
-            const res = await this.providers.gemini.generateResponse('gemini-2.0-flash-lite', 'Extract one fact about the user.', [{ role: 'user', parts: [{ text: `U:${userMsg}\nA:${aiMsg}` }] }]);
-            if (res.text && res.text !== 'NONE')
-                await saveArchivalFact(chatId, res.text);
+            const p = createAgentRuntimeProvider('gemini');
+            if (p) {
+                const res = await p.generateResponse('gemini-2.0-flash-lite', 'Extract one fact about the user.', [{ role: 'user', parts: [{ text: `U:${userMsg}\nA:${aiMsg}` }] }]);
+                if (res.text && res.text !== 'NONE')
+                    await saveArchivalFact(chatId, res.text);
+            }
         }
         catch { }
     }
     async extractCoreProfile(chatId, userMsg, aiMsg) {
         try {
-            const res = await this.providers.gemini.generateResponse('gemini-2.0-flash-lite', 'Summarize user profile.', [{ role: 'user', parts: [{ text: `U:${userMsg}\nA:${aiMsg}` }] }]);
-            if (res.text)
-                setCoreMemory(chatId, 'human', res.text);
+            const p = createAgentRuntimeProvider('gemini');
+            if (p) {
+                const res = await p.generateResponse('gemini-2.0-flash-lite', 'Summarize user profile.', [{ role: 'user', parts: [{ text: `U:${userMsg}\nA:${aiMsg}` }] }]);
+                if (res.text)
+                    setCoreMemory(chatId, 'human', res.text);
+            }
         }
         catch { }
     }
     async getAvailableModels(providerName) {
-        const provider = this.providers[providerName];
-        return provider ? await provider.listModels() : [];
+        try {
+            const p = createAgentRuntimeProvider(providerName);
+            if (p && 'listModels' in p && typeof p.listModels === 'function') {
+                return await p.listModels();
+            }
+            return [];
+        }
+        catch {
+            return [];
+        }
     }
 }
 //# sourceMappingURL=agent.js.map

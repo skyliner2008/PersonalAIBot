@@ -20,6 +20,9 @@ import { stripThinkTags } from '../../utils.js';
 import { asyncHandler } from '../../utils/errorHandler.js';
 import { validateBody } from '../../utils/validation.js';
 import { SSEWriter, streamGeminiResponse } from '../../utils/streamManager.js';
+import { createLogger } from '../../utils/logger.js';
+
+const logger = createLogger('chat-routes');
 
 const chatReplySchema = z.object({
   conversationId: z.string().optional(),
@@ -80,7 +83,7 @@ chatRoutes.post('/chat/reply', validateBody(chatReplySchema), asyncHandler(async
     return res.status(500).json({ success: false, error: 'Failed to build memory context' });
   }
 
-  console.log(
+  logger.info(
     `[Chat] Provider: ${chatProvider.id}, Model: ${chatProviderModel}, Conv: ${convId}, Memory: core=${memCtx.stats.coreBlocks} working=${memCtx.stats.workingMessages} archival=${memCtx.stats.archivalFacts}`,
   );
   addLog(

@@ -27,6 +27,9 @@ const categoryIcons: Record<string, string> = {
   memory: '🧠',
   communication: '💬',
   system: '🛠️',
+  media: '🎨',
+  office: '📄',
+  cron: '⏳',
 };
 
 const categoryLabels: Record<string, string> = {
@@ -38,6 +41,9 @@ const categoryLabels: Record<string, string> = {
   memory: 'Memory',
   communication: 'Communication',
   system: 'System / Management',
+  media: 'Generative Media',
+  office: 'Office Documents',
+  cron: 'Automated Cron Jobs',
 };
 
 const riskBadge: Record<string, { bg: string; text: string; icon: any }> = {

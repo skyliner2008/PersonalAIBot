@@ -2,8 +2,9 @@ import { newPage, humanDelay, isRunning, navigateWithRetry } from './browser.js'
 import { addLog, dbAll, dbGet, dbRun } from '../database/db.js';
 import { aiChat } from '../ai/aiRouter.js';
 import { buildCommentReplyPrompt } from '../ai/prompts/contentCreator.js';
-import { getCommentReplyDelayMs } from '../config/runtimeSettings.js';
+import { getCommentReplyDelayMs, getAutoCommentReplyEnabled } from '../config/runtimeSettings.js';
 import { createLogger } from '../utils/logger.js';
+import { broadcastToAdmins } from '../bot_agents/botManager.js';
 const logger = createLogger('CommentBot');
 let isMonitoring = false;
 let pollInterval = null;
@@ -24,7 +25,7 @@ export async function startCommentMonitor(io) {
             return;
         // Auto-stop if browser is gone
         if (!isRunning()) {
-            console.log('[CommentBot] Browser closed, auto-stopping...');
+            logger.warn('Browser closed, auto-stopping...');
             addLog('commentbot', 'Auto-stopped (browser closed)', undefined, 'warning');
             forceStop(io);
             return;
@@ -37,7 +38,7 @@ export async function startCommentMonitor(io) {
             consecutiveErrors++;
             const msg = e?.message || String(e);
             if (msg.includes('closed') || msg.includes('destroyed') || msg.includes('disposed') || msg.includes('Target page')) {
-                console.log('[CommentBot] Page/browser closed, stopping...');
+                logger.warn('Page/browser closed, stopping...');
                 forceStop(io);
                 return;
             }
@@ -45,8 +46,9 @@ export async function startCommentMonitor(io) {
                 addLog('commentbot', 'Poll error', msg, 'warning');
             }
             if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-                console.log('[CommentBot] Too many errors, auto-stopping...');
+                logger.error(`Fatal crash in Comment monitor: ${msg}. Broadcasting to admins and shutting down.`);
                 addLog('commentbot', 'Auto-stopped (repeated errors)', msg, 'error');
+                broadcastToAdmins(`Facebook Comment Auto-Reply crashed and was shut down.\nReason: ${msg}`);
                 forceStop(io);
             }
         }
@@ -73,6 +75,8 @@ export function stopCommentMonitor(io) {
  * Check all active watched posts for new comments.
  */
 async function checkWatchedPosts(io) {
+    if (!getAutoCommentReplyEnabled())
+        return; // Skip if auto-comment-reply is globally disabled
     const watches = dbAll('SELECT * FROM comment_watches WHERE is_active = 1 AND auto_reply = 1');
     for (const watch of watches) {
         if (!isMonitoring || !isRunning())
@@ -130,7 +134,7 @@ async function checkWatchedPosts(io) {
                         await page.close();
                 }
                 catch (e) {
-                    console.debug('[CommentBot] page close:', String(e));
+                    logger.debug(`page close error: ${String(e)}`);
                 }
             }
         }

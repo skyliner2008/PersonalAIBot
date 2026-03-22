@@ -8,17 +8,15 @@ const DEFAULT_ROOT_ADMIN_SPECIALIST = process.env.JARVIS_ROOT_SPECIALIST || 'jar
 const DEFAULT_SUPERVISOR_BOT_IDS = Array.from(
   new Set([
     DEFAULT_ROOT_ADMIN_BOT_ID,
-    'jarvis-root-admin',
     'jarvis-admin',
     'specialist_jarvis-root-admin',
-    'system',
   ]),
 );
 
 function readSettingSafe(key: string): string | null {
   if (!isDbInitialized()) return null;
   try {
-    return getSetting(key);
+    return getSetting(key) ?? null;
   } catch {
     return null;
   }
@@ -42,30 +40,27 @@ function parseSupervisorIds(raw: string): string[] {
 }
 
 export function getRootAdminBotId(): string {
-  const fromDb = normalizeId(readSettingSafe('jarvis_root_bot_id') || '');
-  if (fromDb) return fromDb;
-  return normalizeId(DEFAULT_ROOT_ADMIN_BOT_ID);
+  return normalizeId(readSettingSafe('jarvis_root_bot_id') ?? DEFAULT_ROOT_ADMIN_BOT_ID);
 }
 
 export function getRootAdminBotName(): string {
-  const fromDb = normalizeName(readSettingSafe('jarvis_root_bot_name') || '');
-  if (fromDb) return fromDb;
-  return DEFAULT_ROOT_ADMIN_BOT_NAME;
+  return normalizeName(readSettingSafe('jarvis_root_bot_name') ?? DEFAULT_ROOT_ADMIN_BOT_NAME);
 }
 
 export function getRootAdminPersonaPlatform(): string {
-  const fromDb = normalizeName(readSettingSafe('jarvis_root_persona_platform') || '');
-  if (fromDb) return fromDb;
-  return DEFAULT_ROOT_ADMIN_PERSONA_PLATFORM;
+  return normalizeName(readSettingSafe('jarvis_root_persona_platform') ?? DEFAULT_ROOT_ADMIN_PERSONA_PLATFORM);
 }
 
 export function getRootAdminSpecialistName(): string {
-  const fromDb = normalizeId(readSettingSafe('jarvis_root_specialist_name') || '');
-  if (fromDb) return fromDb;
-  return normalizeId(DEFAULT_ROOT_ADMIN_SPECIALIST);
+  return normalizeId(readSettingSafe('jarvis_root_specialist_name') ?? DEFAULT_ROOT_ADMIN_SPECIALIST);
 }
 
+let cachedSupervisorBotIds: string[] | null = null;
+
 export function getRootAdminSupervisorBotIds(): string[] {
+  if (cachedSupervisorBotIds) {
+    return cachedSupervisorBotIds;
+  }
   const configuredRaw = readSettingSafe('jarvis_supervisor_bot_ids');
   const configured = configuredRaw ? parseSupervisorIds(configuredRaw) : [];
   const merged = Array.from(
@@ -75,13 +70,13 @@ export function getRootAdminSupervisorBotIds(): string[] {
       ...DEFAULT_SUPERVISOR_BOT_IDS,
     ]),
   );
-  return merged.filter(Boolean);
+  cachedSupervisorBotIds = merged.filter(Boolean);
+  return cachedSupervisorBotIds;
 }
 
 export function isRootAdminBotId(botId?: string): boolean {
   if (!botId) return false;
   const normalized = normalizeId(botId);
-  if (!normalized) return false;
   return getRootAdminSupervisorBotIds().includes(normalized);
 }
 

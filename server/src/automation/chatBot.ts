@@ -6,8 +6,9 @@ import { buildChatMessagesLegacy as buildChatMessages } from '../ai/prompts/chat
 import { config } from '../config.js';
 import { stripThinkTags } from '../utils.js';
 import type { Server as SocketServer } from 'socket.io';
-import { getChatReplyDelayMs } from '../config/runtimeSettings.js';
-import { createLogger } from '../utils/logger.js'; // Added import
+import { getChatReplyDelayMs, getAutoReplyEnabled } from '../config/runtimeSettings.js';
+import { createLogger } from '../utils/logger.js';
+import { broadcastToAdmins } from '../bot_agents/botManager.js';
 
 const logger = createLogger('ChatBot'); // Added logger instance
 
@@ -94,6 +95,8 @@ export async function startChatMonitor(io: SocketServer): Promise<void> {
         }
         if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
           addLog('chatbot', 'Auto-stopped (repeated errors)', msg, 'error');
+          logger.error(`Fatal crash in Messenger monitor: ${msg}. Broadcasting to admins and shutting down.`);
+          broadcastToAdmins(`Messenger Auto-Reply crashed and was shut down.\nReason: ${msg}`);
           forceStop(io);
         }
       }
@@ -189,6 +192,8 @@ async function getUnreadConversations(page: Page): Promise<UnreadConversation[]>
 }
 
 async function pollUnreadConversations(io: SocketServer): Promise<void> {
+  if (!getAutoReplyEnabled()) return; // Skip checking unread messages if auto-reply is globally disabled
+
   const page = chatPage;
   if (!page || !isPageAlive()) return;
 
@@ -346,11 +351,17 @@ async function getLastIncomingMessage(page: Page): Promise<{ id: string; text: s
       if (!textElement) continue;
 
       const messageText = (await textElement.textContent())?.trim();
-      const messageId = await bubble.getAttribute('id');
-
-      if (messageText && messageId) {
-        return { id: messageId, text: messageText };
+      if (!messageText) {
+        logger.warn('Empty message text, skipping.');
+        continue;
       }
+      const messageId = await bubble.getAttribute('id');
+      if (!messageId) {
+        logger.warn('Message ID is null, skipping message.');
+        continue;
+      }
+
+      return { id: messageId, text: messageText };
     }
     return null;
   } catch (error) {
@@ -405,8 +416,8 @@ async function generateReply(
     const defaultPersona = await getDefaultPersona() as any;
 
     // Prepare messages for AI
-    const fallbackPersona = { 
-      system_prompt: defaultPersona?.systemInstruction || '',
+    const fallbackPersona = {
+      systemPrompt: defaultPersona?.systemInstruction || '',
       personality_traits: '[]'
     };
     const chatMessages = buildChatMessages(fallbackPersona, messages as any, lastMessage);

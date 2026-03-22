@@ -15,6 +15,11 @@ import { getProviderApiKey } from '../config/settingsSecurity.js';
 import { getAgentCompatibleProviders } from '../providers/agentRuntime.js';
 import { verifyCliConnections } from '../terminal/commandRouter.js';
 import { createLogger } from '../utils/logger.js';
+import { getAutoReplyEnabled } from '../config/runtimeSettings.js';
+import { startChatMonitor, stopChatMonitor } from '../automation/chatBot.js';
+import { startCommentMonitor, stopCommentMonitor } from '../automation/commentBot.js';
+import { getSocketIO } from '../utils/socketBroadcast.js';
+import { getAdminIds } from '../terminal/messagingBridge.js';
 
 dotenv.config();
 
@@ -191,6 +196,10 @@ async function handleTelegramText(ctx: any, bot: Telegraf<any>, agent: Agent, bo
         return;
     }
 
+    if (!getAutoReplyEnabled()) {
+        return; // Auto-reply disabled globally
+    }
+
     logger.info(`[Telegram:${botConfig.id}] ${chatId}: ${userMessage}`);
     await ctx.sendChatAction('typing');
 
@@ -275,9 +284,12 @@ function startTelegramBot(botConfig: BotInstance): void {
 
         setupTelegramBotHandlers(bot, agent, botConfig);
 
+        botInfo(`[BotManager] Telegram bot "${botConfig.id}" starting...`);
+        updateBot(botConfig.id, { status: 'active', last_error: null });
+
         bot.launch({ dropPendingUpdates: true }).then(() => {
             botInfo(`[BotManager] Telegram bot "${botConfig.id}" ready`);
-            updateBot(botConfig.id, { status: 'active', last_error: null });
+
         }).catch((err: any) => {
             console.error(`[BotManager] Telegram bot "${botConfig.id}" launch failed:`, err);
             const raw = String(err?.description || err?.message || err || '');
@@ -355,6 +367,10 @@ async function handleLineEvent(event: WebhookEvent, agent: Agent, botConfig: Bot
             const trimmed = result.length > 5000 ? result.substring(0, 4997) + '...' : result;
             await lineClient.pushMessage(userId, { type: 'text', text: trimmed });
             return;
+        }
+
+        if (!getAutoReplyEnabled()) {
+            return; // Auto-reply disabled globally
         }
 
         console.log(`[LINE:${botConfig.id}] ${chatId}: ${userMessage}`);
@@ -501,6 +517,7 @@ export function startBotInstance(app: express.Express | null, botId: string): bo
     }
     if (!getAiAgent()) {
         console.error(`[BotManager] Cannot start bot "${botId}" - no configured LLM provider key`);
+        updateBotStatusOnError(botId, 'Missing LLM provider API key (e.g. Gemini). Please configure one.');
         return false;
     }
 
@@ -517,6 +534,36 @@ export function startBotInstance(app: express.Express | null, botId: string): bo
         case 'line':
             startLineBot(effectiveApp, botConfig);
             return true;
+        case 'facebook':
+            const io = getSocketIO();
+            if (!io) {
+                console.error(`[BotManager] Cannot start Facebook bot "${botId}" - Socket.IO not initialized`);
+                updateBotStatusOnError(botId, 'Socket.IO subsystem not ready for Facebook Automation');
+                return false;
+            }
+            
+            // Start both Chat and Comment monitors
+            startChatMonitor(io).catch(err => {
+                console.error('[BotManager] Error starting FB Chat Monitor:', err);
+            });
+            startCommentMonitor(io).catch(err => {
+                console.error('[BotManager] Error starting FB Comment Monitor:', err);
+            });
+
+            // Register in activeBots so it can be stopped
+            activeBots.set(botConfig.id, {
+                type: 'facebook',
+                instance: null,
+                stop: () => {
+                    const activeIo = getSocketIO();
+                    if (activeIo) {
+                        stopChatMonitor(activeIo);
+                        stopCommentMonitor(activeIo);
+                    }
+                }
+            });
+            updateBot(botConfig.id, { status: 'active', last_error: null });
+            return true;
         default:
             console.warn(`[BotManager] Platform "${botConfig.platform}" not yet implemented for bot "${botId}"`);
             updateBotStatusOnError(botId, `Platform "${botConfig.platform}" not supported yet`);
@@ -528,11 +575,11 @@ export function startBotInstance(app: express.Express | null, botId: string): bo
 export function stopBotInstance(botId: string): void {
     const active = activeBots.get(botId);
     if (active) {
-        active.stop();
+        try { active.stop(); } catch (e) {}
         activeBots.delete(botId);
-        updateBot(botId, { status: 'stopped' });
-        console.log(`[BotManager] Stopped bot "${botId}"`);
+        console.log(`[BotManager] Stopped bot "${botId}" process`);
     }
+    updateBot(botId, { status: 'stopped', last_error: null });
 }
 
 /** Start all bots (called at server startup) */
@@ -560,7 +607,48 @@ export function startBots(app: express.Express) {
     verifyCliConnections().catch((err: any) => {
         console.error('[BotManager] Error verifying CLI connections:', err);
     });
+}
 
+/** Broadcast an alert message to all configured Admin Telegram/Line IDs */
+export async function broadcastToAdmins(message: string): Promise<void> {
+    const formattedMessage = `🚨 [SYSTEM ALERT]\n${message}`;
+    
+    // Broadcast via active Telegram Bots
+    const telegramAdmins = getAdminIds('telegram');
+    if (telegramAdmins.size > 0) {
+        for (const [id, botData] of activeBots.entries()) {
+            if (botData.type === 'telegram' && botData.instance) {
+                const telegraf = botData.instance as Telegraf;
+                for (const adminId of telegramAdmins) {
+                    try {
+                        await telegraf.telegram.sendMessage(adminId, formattedMessage);
+                    } catch (e) {
+                        console.error(`[AdminAlert] Failed to notify Telegram admin ${adminId} via bot ${id}`);
+                    }
+                }
+            }
+        }
+    }
+
+    // Broadcast via active LINE Bots
+    const lineAdmins = getAdminIds('line');
+    if (lineAdmins.size > 0) {
+        for (const [id, botData] of activeBots.entries()) {
+            if (botData.type === 'line' && botData.instance) {
+                const lineClient = botData.instance as LineClient;
+                for (const adminId of lineAdmins) {
+                    try {
+                        await lineClient.pushMessage(adminId, { type: 'text', text: formattedMessage });
+                    } catch (e) {
+                        console.error(`[AdminAlert] Failed to notify LINE admin ${adminId} via bot ${id}`);
+                    }
+                }
+            }
+        }
+    }
+}
+
+export function setupBotManagerRoutes(app: express.Express) {
     // Dashboard API and static files
     app.use('/personal-ai', express.static('public_personal_ai'));
 
@@ -648,6 +736,36 @@ export function stopBots(): void {
 /** Get list of active bot IDs */
 export function getActiveBotIds(): string[] {
     return Array.from(activeBots.keys());
+}
+
+/** Headless message sending for Agents and Cron Jobs */
+export async function sendDirectMessage(botId: string, chatPlatformId: string, text: string): Promise<boolean> {
+    const act = activeBots.get(botId);
+    if (!act || !act.instance) {
+        console.warn(`[BotManager] Cannot send direct message: bot ${botId} is not active`);
+        return false;
+    }
+
+    try {
+        if (act.type === 'telegram') {
+            const telegraf = act.instance as Telegraf;
+            // platform_userid -> userid
+            const uidStr = chatPlatformId.replace(/^telegram_/, '');
+            const uidInt = parseInt(uidStr, 10) || uidStr;
+            await sendTelegramText(telegraf, uidInt, text);
+            return true;
+        } else if (act.type === 'line') {
+            const lineClient = act.instance as LineClient;
+            const uidStr = chatPlatformId.replace(/^line_/, '');
+            const trimmed = text.length > 5000 ? text.substring(0, 4997) + '...' : text;
+            await lineClient.pushMessage(uidStr, { type: 'text', text: trimmed });
+            return true;
+        }
+        return false;
+    } catch (e: any) {
+        console.error(`[BotManager] Headless send error for ${botId}: ${e.message}`);
+        return false;
+    }
 }
 
 

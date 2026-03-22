@@ -32,6 +32,7 @@ export class ProjectWorkspace {
   public state: WorkspaceState;
   private agentInstance: Agent;
   private isRunning: boolean = false;
+  private logger = createLogger('Workspace');
   
   constructor(goal: string, chatId: string, agentInstance: Agent, maxTurns: number = 50) {
     this.state = {
@@ -55,7 +56,7 @@ export class ProjectWorkspace {
 
     // Kick off the background loop without waiting
     this.runLoop().catch(err => {
-      console.error(`[Workspace ${this.state.id}] Background loop error:`, err);
+      this.logger.error(`[Workspace ${this.state.id}] Background loop error:`, err);
       this.state.status = 'failed';
     });
 
@@ -72,7 +73,7 @@ export class ProjectWorkspace {
       }
 
       this.state.currentTurn++;
-      console.log(`[Workspace ${this.state.id}] Turn ${this.state.currentTurn}/${this.state.maxTurns} - Status: ${this.state.status}`);
+      this.logger.info(`[Workspace ${this.state.id}] Turn ${this.state.currentTurn}/${this.state.maxTurns} - Status: ${this.state.status}`);
 
       try {
         if (this.state.status === 'planning') {
@@ -83,7 +84,7 @@ export class ProjectWorkspace {
           await this.doReviewTurn();
         }
       } catch (err: any) {
-        console.error(`[Workspace ${this.state.id}] Error in loop:`, err);
+        this.logger.error(`[Workspace ${this.state.id}] Error in loop:`, err);
         this.logHistory('system', `Error: ${err.message}`);
         this.state.status = 'failed';
         this.isRunning = false;
@@ -94,7 +95,7 @@ export class ProjectWorkspace {
     }
 
     this.isRunning = false;
-    console.log(`[Workspace ${this.state.id}] Loop ended. Final status: ${this.state.status}`);
+    this.logger.info(`[Workspace ${this.state.id}] Loop ended. Final status: ${this.state.status}`);
   }
 
   private async doPlanningTurn(): Promise<void> {
