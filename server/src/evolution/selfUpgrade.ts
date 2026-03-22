@@ -1299,10 +1299,9 @@ ${originalContent.split('\n').slice(0, 100).join('\n')}
 AUTO-REJECT if ANY of these apply:
 - Proposal changes an interface, type, or exported function signature
 - Proposal adds imports for packages not visible in the file
-- Proposal is about "add logging" or "add error handling" to working code
 - Proposal description is vague (e.g., "optimize", "improve", "refactor" without specifics)
 - Suggested fix references methods/properties that might not exist on the type
-- Change would affect > 3 files
+- Change would affect > 20 files
 - The "bug" described is actually correct existing behavior
 - The fix is already implemented in the code (redundant)
 
@@ -1973,10 +1972,23 @@ ${originalContent}
         }
         phaseLog('🤖 Implement', `${specialistName} returned: status=${result.status}`);
 
-        // Track API usage
+        // Track API usage based on real Swarm generation in the DB
         try {
-          const inTokens = Math.floor(prompt.length / 3.5);
-          const outTokens = Math.floor((result.result?.length || 0) / 3.5);
+          const rows = getDb().prepare(`
+            SELECT SUM(prompt_tokens) as tin, SUM(completion_tokens) as tout
+            FROM usage_tracking
+            WHERE task IN ('code_generation', 'coding', 'agent', 'chat') 
+            AND created_at >= datetime(?, 'unixepoch')
+          `).get(Math.floor(waitStart / 1000)) as { tin: number; tout: number } | undefined;
+
+          let inTokens = rows?.tin || 0;
+          let outTokens = rows?.tout || 0;
+
+          // Fallback if no usage captured
+          if (inTokens === 0 && outTokens === 0) {
+            inTokens = Math.floor(prompt.length / 3.5);
+            outTokens = Math.floor((result.result?.length || 0) / 3.5);
+          }
           const agentModel = getImplementModel();
           trackUpgradeTokens(agentModel, inTokens, outTokens);
         } catch (e) { log.warn(`Token tracking estimation failed: ${String(e)}`); }
