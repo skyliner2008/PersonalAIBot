@@ -200,14 +200,14 @@ router.post('/implement/:id', asyncHandler(async (req, res) => {
 import { updateUpgradeConfig, setUpgradePaused } from '../evolution/selfUpgrade.js';
 
 router.patch('/config', asyncHandler(async (req, res) => {
-  const { intervalMs, idleThresholdMs } = req.body as { intervalMs?: number, idleThresholdMs?: number };
+  const { intervalMs, idleThresholdMs, autoFix } = req.body as { intervalMs?: number, idleThresholdMs?: number, autoFix?: boolean };
   
-  if (!intervalMs && !idleThresholdMs) {
+  if (intervalMs === undefined && idleThresholdMs === undefined && autoFix === undefined) {
     res.status(400).json({ ok: false, error: 'Missing configuration parameters' });
     return;
   }
 
-  await updateUpgradeConfig({ intervalMs, idleThresholdMs });
+  await updateUpgradeConfig({ intervalMs, idleThresholdMs, autoFix });
   res.json({ ok: true, message: 'Configuration updated successfully' });
 }));
 

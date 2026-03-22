@@ -546,7 +546,7 @@ export const api = {
     request('/upgrade/proposals/rejected', { method: 'DELETE' }),
   triggerUpgradeScan: () =>
     request('/upgrade/scan', { method: 'POST' }),
-  updateUpgradeConfig: (config: { intervalMs?: number, idleThresholdMs?: number }) =>
+  updateUpgradeConfig: (config: { intervalMs?: number, idleThresholdMs?: number, autoFix?: boolean }) =>
     request('/upgrade/config', { 
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },

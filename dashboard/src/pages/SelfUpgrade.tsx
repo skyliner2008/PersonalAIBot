@@ -270,6 +270,16 @@ export default function SelfUpgrade() {
     }
   };
 
+  const handleAutoFixChange = async (autoFix: boolean) => {
+    try {
+      await api.updateUpgradeConfig({ autoFix });
+      const newStatus = await api.getUpgradeStatus();
+      setStatus(newStatus.status);
+    } catch (err) {
+      console.error('Failed to update autofix mode:', err);
+    }
+  };
+
   const togglePause = async () => {
     if (!status) return;
     const newPaused = !status.paused;
@@ -373,6 +383,18 @@ export default function SelfUpgrade() {
             </select>
           </div>
 
+          {/* Auto-Fix Mode Dropdown */}
+          <div className="flex items-center gap-2 px-2.5 py-1 bg-gray-900/60 border border-white/5 rounded-lg" title="ตั้งค่าโหมดการทำงานเมื่อระบบแสกนเจอคำแนะนำ">
+            <Sparkles className="w-3 h-3 text-purple-400" />
+            <select 
+              className="bg-transparent text-[10px] text-gray-300 outline-none cursor-pointer"
+              value={status.dryRun ? 'false' : 'true'}
+              onChange={(e) => handleAutoFixChange(e.target.value === 'true')}
+            >
+              <option value="false" className="bg-gray-900">เสนอแผน (Propose)</option>
+              <option value="true" className="bg-gray-900">แก้ไขอัตโนมัติ (Auto-Fix)</option>
+            </select>
+          </div>
 
         </div>
       </div>
