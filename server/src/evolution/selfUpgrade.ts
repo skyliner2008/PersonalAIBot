@@ -26,6 +26,10 @@ const execPromise = util.promisify(exec);
 
 const log = createLogger('SelfUpgrade');
 
+function getUpgradeModel(): string {
+  return getSetting('ai_task_code_generation_model') || getSetting('ai_task_agent_model') || getSetting('ai_model') || 'gemini-2.0-flash';
+}
+
 // ── Configuration ──
 let IDLE_THRESHOLD_MS = 5 * 60 * 1000;      // 5 นาที (อิงจากการโต้ตอบแชท)
 let CHECK_INTERVAL_MS = 5 * 60 * 1000;      // ตรวจทุก 5 นาที (default)
@@ -893,12 +897,13 @@ Return [] if no real runtime bugs found. Be conservative — false negatives are
 Code:
 ${content}`;
 
-      const response = await aiChat('chat', [{ role: 'user', content: prompt }], { model: 'gemini-2.0-flash' });
+      const modelName = getUpgradeModel();
+      const response = await aiChat('chat', [{ role: 'user', content: prompt }], { model: modelName });
       llmCalls++;
 
       // Track usage
       if (response.usage) {
-        trackUpgradeTokens('gemini-2.0-flash', response.usage.promptTokens || 0, response.usage.completionTokens || 0);
+        trackUpgradeTokens(modelName, response.usage.promptTokens || 0, response.usage.completionTokens || 0);
       }
 
       // Better JSON extraction logic to ignore markdown and unparsed trailing text
@@ -921,7 +926,7 @@ ${content}`;
             suggested_fix: issue.suggested_fix || null,
             priority: issue.priority || 'medium',
             status: 'pending',
-            model_used: 'gemini-2.0-flash',
+            model_used: modelName,
             confidence: issue.confidence || 0.8
           });
           if (result.isNew) llmFindings++;
@@ -1270,8 +1275,9 @@ Return JSON (no markdown):
 Max 6 steps. More = too complex = shouldProceed: false.`;
 
   try {
+    const modelName = getUpgradeModel();
     const response = await aiChat('chat', [{ role: 'user', content: planPrompt }], {
-      model: 'gemini-2.0-flash',
+      model: modelName,
       maxTokens: 1500,
     });
 
@@ -1908,7 +1914,7 @@ ${originalContent}
         try {
           const inTokens = Math.floor(prompt.length / 3.5);
           const outTokens = Math.floor((result.result?.length || 0) / 3.5);
-          const agentModel = getSetting('ai_task_code_generation_model') || getSetting('ai_task_agent_model') || getSetting('ai_model') || 'gemini-2.0-flash';
+          const agentModel = getUpgradeModel();
           trackUpgradeTokens(agentModel, inTokens, outTokens);
         } catch (e) { log.warn(`Token tracking estimation failed: ${String(e)}`); }
 
@@ -2185,7 +2191,8 @@ Return purely JSON array. Do not wrap in markdown \`\`\`json. Return [] if no st
 Files context:
 ${combinedContent}`;
 
-    const response = await aiChat('chat', [{ role: 'user', content: prompt }], { model: 'gemini-2.0-flash' });
+    const modelName = getUpgradeModel();
+    const response = await aiChat('chat', [{ role: 'user', content: prompt }], { model: modelName });
     const match = response.text.match(/\\[[\\s\\S]*\\]/);
     if (match) {
       const issues = JSON.parse(match[0]);
@@ -2198,7 +2205,7 @@ ${combinedContent}`;
           suggested_fix: issue.suggested_fix || null,
           priority: 'medium',
           status: 'pending',
-          model_used: 'gemini-2.0-flash',
+          model_used: modelName,
           confidence: 0.7
         });
         if (result.isNew) toolProposals++;
