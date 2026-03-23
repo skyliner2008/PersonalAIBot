@@ -3,11 +3,11 @@ setlocal enabledelayedexpansion
 chcp 65001 >nul 2>nul
 
 :: ============================================================
-::   PersonalAIBotV2 — One-File Standalone Installer (Windows)
+::   PersonalAIBotV2 -- One-File Standalone Installer (Windows)
 ::
 ::   Usage: Download ONLY this file, double-click, done.
-::   It will: Install Git/Node/Python/Build Tools → Clone repo
-::            → npm install → build → generate .env → launch
+::   It will: Install Git/Node/Python/Build Tools -> Clone repo
+::            -> npm install -> build -> generate .env -> launch
 ::
 ::   Target: Fresh Windows 10/11 with NOTHING pre-installed.
 :: ============================================================
@@ -27,21 +27,21 @@ set "PS_INFO=Write-Host '  [INFO]' -ForegroundColor Cyan -NoNewline; Write-Host"
 set "PS_DL=Write-Host '  [DOWNLOAD]' -ForegroundColor Magenta -NoNewline; Write-Host"
 
 :: ============================================================
-:: Banner
+:: Banner (Simplified ASCII for compatibility)
 :: ============================================================
 echo.
-powershell -NoProfile -Command "Write-Host '  ╔══════════════════════════════════════════════════════════╗' -ForegroundColor Cyan"
-powershell -NoProfile -Command "Write-Host '  ║                                                          ║' -ForegroundColor Cyan"
-powershell -NoProfile -Command "Write-Host '  ║   PersonalAIBotV2 — One-Click Installer                  ║' -ForegroundColor Cyan"
-powershell -NoProfile -Command "Write-Host '  ║                                                          ║' -ForegroundColor Cyan"
-powershell -NoProfile -Command "Write-Host '  ║   This single file will:                                 ║' -ForegroundColor Cyan"
-powershell -NoProfile -Command "Write-Host '  ║     1. Install Git, Node.js, Python, C++ Build Tools     ║' -ForegroundColor Cyan"
-powershell -NoProfile -Command "Write-Host '  ║     2. Download the latest project from GitHub            ║' -ForegroundColor Cyan"
-powershell -NoProfile -Command "Write-Host '  ║     3. Install dependencies and build everything          ║' -ForegroundColor Cyan"
-powershell -NoProfile -Command "Write-Host '  ║     4. Auto-generate secure configuration                 ║' -ForegroundColor Cyan"
-powershell -NoProfile -Command "Write-Host '  ║     5. Launch the system                                  ║' -ForegroundColor Cyan"
-powershell -NoProfile -Command "Write-Host '  ║                                                          ║' -ForegroundColor Cyan"
-powershell -NoProfile -Command "Write-Host '  ╚══════════════════════════════════════════════════════════╝' -ForegroundColor Cyan"
+powershell -NoProfile -Command "Write-Host '  +----------------------------------------------------------+' -ForegroundColor Cyan"
+powershell -NoProfile -Command "Write-Host '  |                                                          |' -ForegroundColor Cyan"
+powershell -NoProfile -Command "Write-Host '  |   PersonalAIBotV2 -- One-Click Installer                  |' -ForegroundColor Cyan"
+powershell -NoProfile -Command "Write-Host '  |                                                          |' -ForegroundColor Cyan"
+powershell -NoProfile -Command "Write-Host '  |   This single file will:                                 |' -ForegroundColor Cyan"
+powershell -NoProfile -Command "Write-Host '  |     1. Install Git, Node.js, Python, C++ Build Tools     |' -ForegroundColor Cyan"
+powershell -NoProfile -Command "Write-Host '  |     2. Download the latest project from GitHub            |' -ForegroundColor Cyan"
+powershell -NoProfile -Command "Write-Host '  |     3. Install dependencies and build everything          |' -ForegroundColor Cyan"
+powershell -NoProfile -Command "Write-Host '  |     4. Auto-generate secure configuration                 |' -ForegroundColor Cyan"
+powershell -NoProfile -Command "Write-Host '  |     5. Launch the system                                  |' -ForegroundColor Cyan"
+powershell -NoProfile -Command "Write-Host '  |                                                          |' -ForegroundColor Cyan"
+powershell -NoProfile -Command "Write-Host '  +----------------------------------------------------------+' -ForegroundColor Cyan"
 echo.
 
 :: ============================================================
@@ -81,7 +81,7 @@ if !errorlevel! neq 0 (
         powershell -NoProfile -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://github.com/git-for-windows/git/releases/download/v2.47.1.windows.2/Git-2.47.1.2-64-bit.exe' -OutFile '%TEMP%\git-install.exe' -UseBasicParsing"
         if exist "%TEMP%\git-install.exe" (
             powershell -NoProfile -Command "%PS_INFO% ' Installing Git silently...'"
-            "%TEMP%\git-install.exe" /VERYSILENT /NORESTART /NOCANCEL /SP- /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS /COMPONENTS="icons,ext\reg\shellhere,assoc,assoc_sh"
+            "%TEMP%\git-install.exe" /VERYSILENT /NORESTART /NOCANCEL /SP- /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS /COMPONENTS=\"icons,ext\reg\shellhere,assoc,assoc_sh\"
             del "%TEMP%\git-install.exe" 2>nul
             set "PATH=!PATH!;C:\Program Files\Git\cmd"
         )
@@ -156,15 +156,15 @@ set /a STEP+=1
 echo.
 powershell -NoProfile -Command "Write-Host '[!STEP!/!TOTAL_STEPS!] Checking Python ^& C++ Build Tools...' -ForegroundColor White"
 
-:: Python — check it actually works (Windows has a fake 'python' alias that opens MS Store)
+:: Python -- check it actually works (Windows has a fake 'python' alias that opens MS Store)
 set "PYTHON_OK=0"
 where python >nul 2>nul
 if !errorlevel! equ 0 (
     for /f "tokens=*" %%v in ('python --version 2^>^&1') do set "PY_VER=%%v"
-    echo !PY_VER! | findstr /i "Python 3\." >nul 2>nul
+    echo !PY_VER! | findstr /i \"Python 3\.\" >nul 2>nul
     if !errorlevel! equ 0 (
-        set "PYTHON_OK=1"
-        powershell -NoProfile -Command "%PS_OK% ' !PY_VER!'"
+        set \"PYTHON_OK=1\"
+        powershell -NoProfile -Command \"%PS_OK% ' !PY_VER!'\"
     )
 )
 if !PYTHON_OK! equ 0 (
@@ -196,13 +196,13 @@ if !HAS_BUILD_TOOLS! equ 0 (
     powershell -NoProfile -Command "%PS_DL% ' C++ Build Tools not found. Installing (this may take 5-10 min)...'"
     where winget >nul 2>nul
     if !errorlevel! equ 0 (
-        winget install --id Microsoft.VisualStudio.2022.BuildTools --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended" --accept-package-agreements --accept-source-agreements >nul 2>nul
+        winget install --id Microsoft.VisualStudio.2022.BuildTools --override \"--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended\" --accept-package-agreements --accept-source-agreements >nul 2>nul
     ) else (
         powershell -NoProfile -Command "%PS_INFO% ' Downloading VS Build Tools installer...'"
         powershell -NoProfile -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://aka.ms/vs/17/release/vs_buildtools.exe' -OutFile '%TEMP%\vs_buildtools.exe' -UseBasicParsing"
         if exist "%TEMP%\vs_buildtools.exe" (
-            "%TEMP%\vs_buildtools.exe" --wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended
-            del "%TEMP%\vs_buildtools.exe" 2>nul
+            \"%TEMP%\vs_buildtools.exe\" --wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended
+            del \"%TEMP%\vs_buildtools.exe\" 2>nul
         )
     )
     set "NEED_RESTART=1"
@@ -235,7 +235,7 @@ if exist "%INSTALLER_DIR%server\package.json" (
     goto :project_ready
 )
 
-:: Case 2: Project subfolder exists — pull latest
+:: Case 2: Project subfolder exists -- pull latest
 if exist "!PROJECT_DIR!\server\package.json" (
     powershell -NoProfile -Command "%PS_INFO% ' Project folder exists. Pulling latest changes...'"
     cd /d "!PROJECT_DIR!"
@@ -274,12 +274,10 @@ if exist "server\.env" (
     powershell -NoProfile -Command "%PS_OK% ' server\.env exists (keeping existing config)'"
 
     :: Patch missing/placeholder security keys
-    :: We use a whitelist of keys to ensure they are present and secure.
-    :: SOCKET_AUTH_TOKEN is now included.
-    node -e "const crypto=require('crypto'),fs=require('fs'),p='server/.env';let c=fs.readFileSync(p,'utf-8');const keys={ENCRYPTION_KEY:64,JWT_SECRET:64,CRED_SECRET:64,SOCKET_AUTH_TOKEN:64};let changed=false;for(const[k,len]of Object.entries(keys)){const re=new RegExp('^'+k+'\\s*=\\s*(.*)$','m');const m=c.match(re);if(m===null||m[1].length<16||m[1].includes('change-me')||m[1].includes('your-')){const v=crypto.randomBytes(len/2).toString('hex');if(m){c=c.replace(re,k+'='+v)}else{c+='\n'+k+'='+v}changed=true;console.log('  [PATCHED] '+k)}}if(changed)fs.writeFileSync(p,c,'utf-8');else console.log('  [OK] All security keys present')"
+    node -e "const crypto=require('crypto'),fs=require('fs'),p='server/.env';let c=fs.readFileSync(p,'utf-8');const keys={ENCRYPTION_KEY:64,JWT_SECRET:64,CRED_SECRET:64,SOCKET_AUTH_TOKEN:64};let changed=false;for(const[k,len]of Object.entries(keys)){const re=new RegExp('^'+k+'\\s*=\\s*(.*)$','m');const m=c.match(re);if(m===null||m[1].length<16||m[1].includes('change-me')||m[1].includes('your-')){const v=crypto.randomBytes(len/2).toString('hex');if(m){c=c.replace(re,k+'='+v)}else{c+='\\n'+k+'='+v}changed=true;console.log('  [PATCHED] '+k)}}if(changed)fs.writeFileSync(p,c,'utf-8');else console.log('  [OK] All security keys present')"
 ) else (
     powershell -NoProfile -Command "%PS_INFO% ' Creating server\.env with auto-generated secure keys...'"
-    node -e "const crypto=require('crypto');const g=()=>crypto.randomBytes(32).toString('hex');const env=['# PersonalAIBotV2 Server Configuration','# Auto-generated by install.bat on '+new Date().toISOString().split('T')[0],'','PORT=3000','NODE_ENV=development','LOG_LEVEL=info','HTTP_CONSOLE_MODE=errors','','# Security Keys (auto-generated)','ENCRYPTION_KEY='+g(),'JWT_SECRET='+g(),'CRED_SECRET='+g(),'SOCKET_AUTH_TOKEN='+g(),'','HEADLESS=false','SLOW_MO=0','','# API keys and bot tokens are stored in the database.','# Configure them via Dashboard after launch: http://localhost:3000'].join('\n');require('fs').writeFileSync('server/.env',env);console.log('  [CREATED] server\.env with secure keys')"
+    node -e "const crypto=require('crypto');const g=()=>crypto.randomBytes(32).toString('hex');const env=['# PersonalAIBotV2 Server Configuration','# Auto-generated by install.bat on '+new Date().toISOString().split('T')[0],'','PORT=3000','NODE_ENV=development','LOG_LEVEL=info','HTTP_CONSOLE_MODE=errors','','# Security Keys (auto-generated)','ENCRYPTION_KEY='+g(),'JWT_SECRET='+g(),'CRED_SECRET='+g(),'SOCKET_AUTH_TOKEN='+g(),'','HEADLESS=false','SLOW_MO=0','','# API keys and bot tokens are stored in the database.','# Configure them via Dashboard after launch: http://localhost:3000'].join('\\n');require('fs').writeFileSync('server/.env',env);console.log('  [CREATED] server\.env with secure keys')"
 )
 
 :: Dashboard .env
@@ -377,8 +375,8 @@ cd ..\server
 
 call npm run init-folders 2>nul
 if !errorlevel! neq 0 (
-    if not exist "..\data" mkdir "..\data"
-    if not exist "..\uploads" mkdir "..\uploads"
+    if not exist \"..\\data\" mkdir \"..\\data\"
+    if not exist \"..\\uploads\" mkdir \"..\\uploads\"
 )
 powershell -NoProfile -Command "%PS_OK% ' Ready'"
 cd ..
@@ -388,17 +386,17 @@ cd ..
 :: ============================================================
 echo.
 powershell -NoProfile -Command "Write-Host '' "
-powershell -NoProfile -Command "Write-Host '  ╔══════════════════════════════════════════════════════════╗' -ForegroundColor Green"
-powershell -NoProfile -Command "Write-Host '  ║                                                          ║' -ForegroundColor Green"
-powershell -NoProfile -Command "Write-Host '  ║          INSTALLATION COMPLETE!                          ║' -ForegroundColor Green"
-powershell -NoProfile -Command "Write-Host '  ║                                                          ║' -ForegroundColor Green"
-powershell -NoProfile -Command "Write-Host '  ╚══════════════════════════════════════════════════════════╝' -ForegroundColor Green"
+powershell -NoProfile -Command "Write-Host '  +----------------------------------------------------------+' -ForegroundColor Green"
+powershell -NoProfile -Command "Write-Host '  |                                                          |' -ForegroundColor Green"
+powershell -NoProfile -Command "Write-Host '  |          INSTALLATION COMPLETE!                          |' -ForegroundColor Green"
+powershell -NoProfile -Command "Write-Host '  |                                                          |' -ForegroundColor Green"
+powershell -NoProfile -Command "Write-Host '  +----------------------------------------------------------+' -ForegroundColor Green"
 echo.
 powershell -NoProfile -Command "Write-Host '  How to use:' -ForegroundColor White"
 powershell -NoProfile -Command "Write-Host '  1. Run start.bat in the %REPO_NAME% folder' -ForegroundColor Cyan"
 powershell -NoProfile -Command "Write-Host '  2. Open http://localhost:3000 in your browser' -ForegroundColor Cyan"
 powershell -NoProfile -Command "Write-Host '  3. Go to Dashboard Settings to add your API keys' -ForegroundColor Cyan"
-powershell -NoProfile -Command "Write-Host '     (Gemini, OpenAI, etc. — all via Dashboard, not .env)' -ForegroundColor Gray"
+powershell -NoProfile -Command "Write-Host '     (Gemini, OpenAI, etc. -- all via Dashboard, not .env)' -ForegroundColor Gray"
 echo.
 
 if !NEED_RESTART! equ 1 (
@@ -412,12 +410,12 @@ powershell -NoProfile -Command "Write-Host '  Security keys have been auto-gener
 powershell -NoProfile -Command "Write-Host '  Project location: !PROJECT_DIR!' -ForegroundColor Gray"
 echo.
 
-set /p "LAUNCH=  Launch the system now? (Y/n): "
-if /I "!LAUNCH!" neq "n" (
+set /p \"LAUNCH=  Launch the system now? (Y/n): \"
+if /I \"!LAUNCH!\" neq \"n\" (
     echo.
-    powershell -NoProfile -Command "Write-Host '  Starting PersonalAIBotV2...' -ForegroundColor Green"
+    powershell -NoProfile -Command \"Write-Host '  Starting PersonalAIBotV2...' -ForegroundColor Green\"
     echo.
-    if exist "start.bat" (
+    if exist \"start.bat\" (
         call start.bat
     ) else (
         cd server
