@@ -16,7 +16,7 @@
       "fallbacks": [
         {
           "provider": "gemini",
-          "modelName": "gemini-3-pro-preview"
+          "modelName": "gemini-3.1-pro-preview"
         },
         {
           "provider": "gemini",
@@ -50,7 +50,7 @@
     "thinking": {
       "active": {
         "provider": "gemini",
-        "modelName": "gemini-3-flash-preview"
+        "modelName": "gemini-3.1-pro-preview"
       },
       "fallbacks": [
         {
@@ -93,7 +93,7 @@
     "system": {
       "active": {
         "provider": "gemini",
-        "modelName": "gemini-3-flash-preview"
+        "modelName": "gemini-3.1-pro-preview"
       },
       "fallbacks": [
         {

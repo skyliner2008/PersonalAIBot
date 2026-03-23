@@ -28,15 +28,17 @@ const API_VERSIONS = ['v1beta', 'v1'] as const;
  * requires "gemini-3.1-pro-preview" (preview suffix).
  */
 const MODEL_ALIAS_MAP: Record<string, string> = {
-  // New Generation (2026 Models)
+  // New Generation (March 2026 Models)
+  'gemini-3.1-pro': 'gemini-3.1-pro-preview',
   'gemini-3-pro': 'gemini-3-pro-preview',
+  'gemini-3.1-flash': 'gemini-3-pro-preview', // 3.1 Flash uses Pro preview ID currently
   'gemini-3-flash': 'gemini-3-flash-preview',
   'gemini-2.5-flash': 'gemini-2.5-flash',
   'gemini-2.5-flash-lite': 'gemini-2.5-flash-lite',
   
   // Legacy Aliases
-  'gemini-2.0-flash-lite': 'gemini-2.5-flash-lite', // Auto-upgrade for new users
-  'gemini-2.0-flash': 'gemini-2.5-flash',           // Auto-upgrade for new users
+  'gemini-2.0-flash-lite': 'gemini-2.5-flash-lite', 
+  'gemini-2.0-flash': 'gemini-2.5-flash',           
   'gemini-1.5-flash': 'gemini-1.5-flash',
   'gemini-1.5-pro': 'gemini-1.5-pro',
 };
