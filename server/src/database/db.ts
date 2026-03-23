@@ -429,7 +429,18 @@ export function getCredential(key: string): string | null {
   if (!raw) return null;
   if (raw.startsWith('aes:')) {
     try { return aesDecrypt(raw.slice(4)); }
-    catch (e) { console.warn('[DB] AES decrypt failed for key:', key, String(e)); return null; }
+    catch (e) {
+      // CRED_SECRET/salt changed → this value is unrecoverable
+      // Auto-purge the corrupt entry so user can re-enter via Dashboard
+      console.warn(`[DB] AES decrypt failed for key: ${key} — purging corrupt value. Please re-enter via Dashboard.`);
+      try { deleteSetting(key); } catch (_) { /* best-effort */ }
+      // Also clean up api_keys reference if this is a provider key
+      if (key.startsWith('provider_key_')) {
+        const providerId = key.replace('provider_key_', '');
+        try { runSql(getDb(), 'DELETE FROM api_keys WHERE provider_id = ?', [providerId]); } catch (_) { /* best-effort */ }
+      }
+      return null;
+    }
   }
   // Backward compat: migrate old XOR obfuscated values
   if (raw.startsWith('obf:')) {
@@ -439,6 +450,49 @@ export function getCredential(key: string): string | null {
     return plaintext;
   }
   return raw; // plaintext fallback
+}
+
+/**
+ * Startup credential integrity check.
+ * Attempts to decrypt all provider keys. Corrupt entries (wrong CRED_SECRET/salt)
+ * are auto-purged so the rest of the system sees "no key" instead of crashing.
+ * Returns { ok: string[], purged: string[] } for logging.
+ */
+export function checkCredentialIntegrity(): { ok: string[]; purged: string[] } {
+  const ok: string[] = [];
+  const purged: string[] = [];
+  try {
+    const rows = allRows<{ key: string; value: string }>(
+      getDb(),
+      "SELECT key, value FROM settings WHERE key LIKE 'provider_key_%'"
+    );
+    for (const row of rows) {
+      if (row.value.startsWith('aes:')) {
+        try {
+          aesDecrypt(row.value.slice(4));
+          ok.push(row.key);
+        } catch {
+          // Corrupt — purge it
+          const providerId = row.key.replace('provider_key_', '');
+          try { deleteSetting(row.key); } catch (_) {}
+          try { runSql(getDb(), 'DELETE FROM api_keys WHERE provider_id = ?', [providerId]); } catch (_) {}
+          purged.push(row.key);
+        }
+      } else {
+        ok.push(row.key); // plaintext or obf — will be handled on read
+      }
+    }
+  } catch (e) {
+    console.warn('[DB] Credential integrity check failed:', String(e));
+  }
+  if (purged.length > 0) {
+    console.warn(`⚠️  [DB] Purged ${purged.length} corrupt credential(s): ${purged.join(', ')}`);
+    console.warn('💡 CRED_SECRET or .cred-salt may have changed. Please re-enter API keys via Dashboard.');
+  }
+  if (ok.length > 0) {
+    console.log(`✅ [DB] ${ok.length} credential(s) verified OK`);
+  }
+  return { ok, purged };
 }
 
 // -- Activity Logs --

@@ -9,7 +9,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import { config } from './config.js';
-import { initDb, addLog, upsertConversation, getCredential } from './database/db.js';
+import { initDb, addLog, upsertConversation, getCredential, checkCredentialIntegrity } from './database/db.js';
 import { ensureBotTables } from './bot_agents/registries/botRegistry.js';
 import { setupSocketHandlers, attachSocketAuth } from './api/socketHandlers.js';
 import { setSocketIO } from './utils/socketBroadcast.js';
@@ -441,7 +441,13 @@ async function main() {
   ensureGoalTables();
   ensureQueueTable();
   await initSelfReflection();
-  
+
+  // --- Credential integrity check (purge entries encrypted with old CRED_SECRET) ---
+  const credCheck = checkCredentialIntegrity();
+  if (credCheck.purged.length > 0) {
+    startupInfo(`[Credentials] ⚠️ Purged ${credCheck.purged.length} unreadable key(s) — re-enter via Dashboard`);
+  }
+
   const geminiKey = getCredential('provider_key_gemini') || getCredential('GEMINI_API_KEY') || process.env.GEMINI_API_KEY;
   if (geminiKey) {
     initEmbeddingProvider(geminiKey);

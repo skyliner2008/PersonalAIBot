@@ -605,6 +605,7 @@ export function startBots(app: express.Express) {
 
     if (!getAiAgent()) {
         console.error("[BotManager] Missing LLM provider keys. Telegram/LINE bots cannot start.");
+        console.error("[BotManager] 💡 กรุณาเพิ่ม API Key (เช่น OpenRouter, Gemini) ผ่าน Dashboard > Settings");
     }
 
     // All bot credentials are stored in DB — no .env migration needed
