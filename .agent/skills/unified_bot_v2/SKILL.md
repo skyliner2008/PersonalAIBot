@@ -292,7 +292,8 @@ The autonomous code modification engine. Scans the codebase for bugs/improvement
 **v2.1 Core Schema Integration**:
 - Official schema now includes all 7 evolution and second-brain tables (`upgrade_proposals`, `codebase_map`, etc.) in the main `schema.sql`.
 - **Initialization Resilience**: Tables are created during server boot via `initDb()` migrations, preventing UI errors for new users.
-- **Simplified Settings**: Default Disabled state for new installs (Check-Interval only configuration).
+- **Seeding shared knowledge**: Use `npx tsx server/src/database/export_seed.ts` to update `seed_brain.sql` with current codebase intelligence.
+- **Auto-Initialization**: Fresh installs automatically load `seed_brain.sql` to skip initial learning phases.
 
 #### 11-Phase Implementation Pipeline
 

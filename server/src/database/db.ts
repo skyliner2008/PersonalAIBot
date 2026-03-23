@@ -341,6 +341,24 @@ export async function initDb(): Promise<SqliteDatabase> {
   ensureIndexes(db);
   seedDefaultData(db);
 
+  // --- Second Brain Seeding ---
+  // If it's a fresh install (no learning entries), load the pre-trained seed if available
+  try {
+    const journalCount = db.prepare("SELECT count(*) as c FROM learning_journal").get() as { c: number };
+    if (journalCount && journalCount.c === 0) {
+      const seedPath = path.join(__dirname, 'seed_brain.sql');
+      if (fs.existsSync(seedPath)) {
+        logger.info('Found Second Brain seed data, initializing knowledge...');
+        const seedSql = fs.readFileSync(seedPath, 'utf-8');
+        db.exec(seedSql);
+        const newCount = db.prepare("SELECT count(*) as c FROM learning_journal").get() as { c: number };
+        logger.info(`Second Brain seeding complete (${newCount.c} learning entries imported)`);
+      }
+    }
+  } catch (e) {
+    logger.warn('Failed to auto-seed Second Brain:', String(e));
+  }
+
   if (STARTUP_COMPACT) {
     logger.info('SQLite ready');
   } else {
