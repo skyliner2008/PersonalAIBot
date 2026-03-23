@@ -1366,28 +1366,21 @@ async function verifyEsbuildSyntax(modifiedFiles: string[], proposalId: number):
       const ext = path.extname(filePath).toLowerCase();
       const loader = ext === '.tsx' ? 'tsx' : ext === '.jsx' ? 'jsx' : 'ts';
       const basename = path.basename(filePath);
-      // Use a temp script file + stdin pipe to avoid ENAMETOOLONG on large files.
-      // Previous approach embedded base64 in `node -e "..."` which exceeded OS command line limits
-      // for files > ~50KB (e.g. adminTools.ts, socketHandlers.ts).
-      const content = fs.readFileSync(filePath, 'utf-8');
+      // Use a temp script file that reads the target file from disk.
+      // This avoids ENAMETOOLONG and pipe buffer limits entirely.
       const scriptFile = path.resolve(filePath, '..', `__esbuild_check_${proposalId}.cjs`);
       const script = `const esbuild=require('esbuild');
-let chunks=[];
-process.stdin.on('data',c=>chunks.push(c));
-process.stdin.on('end',()=>{
-  const code=Buffer.concat(chunks).toString('utf-8');
-  esbuild.transform(code,{loader:'${loader}',sourcefile:'${basename}'})
-    .then(()=>process.exit(0))
-    .catch(e=>{console.error(e.errors?e.errors.map(x=>x.text).join('\\n'):e.message);process.exit(1)});
-});`;
+const fs=require('fs');
+const content=fs.readFileSync('${basename}', 'utf-8');
+esbuild.transform(content,{loader:'${loader}',sourcefile:'${basename}'})
+  .then(()=>process.exit(0))
+  .catch(e=>{console.error(e.errors?e.errors.map(x=>x.text).join('\\n'):e.message);process.exit(1)});
+`;
       fs.writeFileSync(scriptFile, script, 'utf-8');
       try {
         const { execFile } = await import('child_process');
-        const { promisify } = await import('util');
-        const execFileAsync = promisify(execFile);
-        // Pipe file content via stdin to avoid command line length limits
         await new Promise<void>((resolve, reject) => {
-          const child = execFile('node', [scriptFile], {
+          execFile('node', [scriptFile], {
             cwd: path.resolve(filePath, '..'),
             timeout: 15000,
             maxBuffer: 10 * 1024 * 1024,
@@ -1395,8 +1388,6 @@ process.stdin.on('end',()=>{
             if (err) reject({ stderr: stderr || stdout || err.message, message: stderr || stdout || err.message });
             else resolve();
           });
-          child.stdin?.write(content);
-          child.stdin?.end();
         });
       } finally {
         try { fs.unlinkSync(scriptFile); } catch { /* cleanup best effort */ }
@@ -1521,8 +1512,8 @@ async function createImplementationPlan(
   learningContext: string,
   codebaseContext: string
 ): Promise<ImplementationPlan> {
-  const planPrompt = `You are a GATEKEEPER deciding whether a code change proposal is safe to auto-implement.
-Your job: REJECT risky proposals and APPROVE only safe ones. When in doubt, REJECT.
+  const planPrompt = `You are a CODE ARCHITECT deciding how to safely implement a code change proposal.
+Your job: Create a robust, safe implementation plan. Do NOT reject proposals just because they are incomplete (e.g., missing imports) — instead, ADD the missing steps to your plan!
 
 Proposal: ${proposal.title}
 Description: ${proposal.description}
@@ -1539,19 +1530,19 @@ Target file first 100 lines:
 ${originalContent.split('\n').slice(0, 100).join('\n')}
 \`\`\`
 
-AUTO-REJECT if ANY of these apply:
-- Proposal changes an interface, type, or exported function signature
-- Proposal adds imports for packages not visible in the file
-- Proposal description is vague (e.g., "optimize", "improve", "refactor" without specifics)
-- Suggested fix references methods/properties that might not exist on the type
-- Change would affect > 20 files
-- The "bug" described is actually correct existing behavior
+AUTO-REJECT ONLY if ANY of these fundamentally block implementation:
+- Proposal description is too vague to understand even with context
+- Change requires editing > 20 files
+- The "bug" described is actually correct existing behavior and changing it breaks core logic
 - The fix is already implemented in the code (redundant)
+
+If the proposal is missing imports or has minor flaws, FIX IT in your plan steps. 
+If the learning journal warns against a similar past failure, figure out a DIFFERENT, SAFER approach rather than giving up.
 
 Return JSON (no markdown):
 {"shouldProceed":true/false,"reason":"Why reject or why it's safe","riskAssessment":"What could go wrong","filesToEdit":["files"],"steps":["Step 1: ...","Step 2: ..."]}
 
-Max 6 steps. More = too complex = shouldProceed: false.`;
+Max 6 steps.`;
 
   try {
     const modelName = getImplementModel();
@@ -2172,7 +2163,8 @@ D. NO SIGNATURE CHANGES: Do NOT change function parameter count, parameter types
 E. NO SPLICING CODE: Never insert code INSIDE an existing function call, string literal, or expression. Place new code on its own line.
 F. VERIFY BEFORE EDIT: Always call \`read_file_content\` to get the CURRENT file content before editing. Never edit from memory.
 G. MINIMAL CHANGE: Change the fewest lines possible. If the fix requires > 30 lines of change, reply "SKIP: too complex".
-H. PRESERVE CONTEXT: When using \`replace_code_block\`, include 2-3 unchanged lines before and after the change to ensure correct placement.`;
+H. PRESERVE CONTEXT: When using \`replace_code_block\`, include 2-3 unchanged lines before and after the change to ensure correct placement.
+I. MUST USE TOOLS: You MUST actually modify the file. Do not just explain the fix. You will fail if you reply with descriptions but no file-editing tool usage.`;
 
   const prompt = isMultiFile
     ? `You are a senior Software Engineer AI performing a SURGICAL code fix across multiple files.${traumaContext}
@@ -2186,13 +2178,13 @@ MULTI-FILE SPECIFIC RULES:
 1. If changing an exported symbol, you MUST update ALL callers in ALL files.
 2. Edit the PRIMARY file first, then each dependent file.
 3. If it requires editing > 5 files, reply "SKIP: too many files affected".
-4. EXACT MATCHING IS REQUIRED for \`replace_code_block\`. The \`TargetContent\` must exactly match the existing source.
-5. PRESERVE BRACES/BRACKETS. Ensure your replaced code block maintains balanced \`{\`, \`}\`, \`(\`, \`)\` relative to what you target. DO NOT accidentally delete closing braces '}'.
+4. YOU MUST ACTUALLY MODIFY THE FILES USING TOOLS. Do not just explain the fix.
+5. PRESERVE BRACES/BRACKETS. DO NOT accidentally delete closing braces '}'.
 
 WORKFLOW:
 1. <think> block: Plan exactly what changes in each file.
 2. \`read_file_content\` on EVERY file you will edit.
-3. \`replace_code_block\` for each change (surgical, minimal).
+3. Use file editing tools (e.g. \`multi_replace_file_content\` or \`replace_code_block\`) for each change.
 4. VERIFY: Count brackets in your edits. Check no duplicate declarations.
 5. If the file DOES NOT need changes (it is already safe), you MUST reply "SKIP: [reason]".
 6. Otherwise, reply "DONE".
@@ -2216,13 +2208,13 @@ SINGLE-FILE SPECIFIC RULES:
 1. Do NOT change any exported function signatures, types, or interfaces.
 2. Do NOT add new exports.
 3. Do NOT remove or rename existing exports.
-4. EXACT MATCHING IS REQUIRED for \`replace_code_block\`. The \`TargetContent\` must exactly match the existing source.
-5. PRESERVE BRACES/BRACKETS. Ensure your replaced code block maintains balanced \`{\`, \`}\`, \`(\`, \`)\` relative to what you target. DO NOT accidentally delete closing braces '}'.
+4. YOU MUST ACTUALLY MODIFY THE FILE USING TOOLS. Do not just explain the fix.
+5. PRESERVE BRACES/BRACKETS. DO NOT accidentally delete closing braces '}'.
 
 WORKFLOW:
 1. <think> block: Is this change safe? What exactly will I change?
 2. \`read_file_content\` on "${fullPath}" to get current state.
-3. \`replace_code_block\` with minimal surgical change.
+3. Use file editing tools (e.g. \`multi_replace_file_content\` or \`replace_code_block\`) to apply the fix.
 4. VERIFY: Count brackets. Check no duplicates. Check all variables are defined.
 5. If the file DOES NOT need changes (it is already safe), you MUST reply "SKIP: [reason]".
 6. Otherwise, reply "DONE".

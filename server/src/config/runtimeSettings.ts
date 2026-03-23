@@ -96,7 +96,8 @@ function parseEnvBoolean(key: string, fallback: boolean): boolean {
 }
 
 export function getChatReplyDelayMs(): number {
-  return parseIntegerSetting('chat_reply_delay', config.minReplyDelay, 0, 120_000);
+  const fallbackDelay = typeof config.minReplyDelay === 'number' ? config.minReplyDelay : 5000;
+  return parseIntegerSetting('chat_reply_delay', fallbackDelay, 0, 120_000);
 }
 
 export function getCommentReplyDelayMs(): number {
@@ -104,7 +105,8 @@ export function getCommentReplyDelayMs(): number {
 }
 
 export function getBrowserHeadless(): boolean {
-  return parseBooleanSetting('browser_headless', config.headless);
+  const fallbackHeadless = typeof config.headless === 'boolean' ? config.headless : false;
+  return parseBooleanSetting('browser_headless', fallbackHeadless);
 }
 
 export function getMaxMemoryMessages(): number {

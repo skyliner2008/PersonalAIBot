@@ -129,11 +129,15 @@ export const closePlanDeclaration: FunctionDeclaration = {
 async function closePlanToolForChat(chatId: string): Promise<string> {
   if (!chatId) return 'Error: Missing chat context';
 
-  const success = closeActivePlan(chatId, 'paused');
-  if (success) {
-    return 'Active plan closed.';
+  try {
+    const success = closeActivePlan(chatId, 'paused');
+    if (success) {
+      return 'Active plan closed.';
+    }
+    return 'No active plan found.';
+  } catch (error) {
+    return `Error: Failed to close plan due to an internal issue.`;
   }
-  return 'No active plan found.';
 }
 
 // ============================================================
