@@ -226,6 +226,7 @@ if exist "%INSTALLER_DIR%server\package.json" (
     set "PROJECT_DIR=%INSTALLER_DIR%"
     powershell -NoProfile -Command "%PS_INFO% ' Running from within project folder. Checking for updates...'"
     cd /d "!PROJECT_DIR!"
+    call git reset --hard HEAD >nul 2>nul
     call git pull --ff-only 2>nul
     if !errorlevel! equ 0 (
         powershell -NoProfile -Command "%PS_OK% ' System is up to date'"
@@ -239,6 +240,7 @@ if exist "%INSTALLER_DIR%server\package.json" (
 if exist "!PROJECT_DIR!\server\package.json" (
     powershell -NoProfile -Command "%PS_INFO% ' Project folder exists. Pulling latest changes...'"
     cd /d "!PROJECT_DIR!"
+    call git reset --hard HEAD >nul 2>nul
     call git pull --ff-only 2>nul
     if !errorlevel! equ 0 (
         powershell -NoProfile -Command "%PS_OK% ' Updated to latest version'"
