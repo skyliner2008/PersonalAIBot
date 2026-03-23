@@ -16,11 +16,11 @@
       "fallbacks": [
         {
           "provider": "gemini",
-          "modelName": "gemini-1.5-pro"
+          "modelName": "gemini-2.5-flash"
         },
         {
           "provider": "gemini",
-          "modelName": "gemini-1.5-flash"
+          "modelName": "gemini-2.0-flash"
         }
       ]
     },
@@ -43,7 +43,7 @@
     "web": {
       "active": {
         "provider": "gemini",
-        "modelName": "gemini-1.5-flash"
+        "modelName": "gemini-2.5-flash"
       },
       "fallbacks": []
     },
