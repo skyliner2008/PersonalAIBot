@@ -269,59 +269,74 @@ export class Agent {
       // Apply to all task types if tool count is high (> 10)
       if (activeTools.length > 10) {
         try {
-          const routerPrompt = `You are a high-speed tool selector.
-User Goal: "${cleanMessage}"
-Task Type: ${taskType}
+          const routerPrompt = `You are a tool filter. Your ONLY job is to select up to 5 tool names that might be needed to answer the user request.
+
+User Request: "${cleanMessage}"
 Available Tools: ${activeTools.map(t => t.name).join(', ')}
 
-Rules:
-1. Return ONLY a JSON array of strings (e.g., ["tool1", "tool2"]).
-2. Max 5 tools.
-3. Return [] if no special tool is needed.
-4. DO NOT explain. DO NOT use <think> tags. DO NOT use markdown.
-5. JUST THE RAW JSON ARRAY.`;
+Strict Rules:
+1. Output ONLY a JSON array of strings, for example: ["read_file", "write_file"]
+2. NEVER call the tools yourself.
+3. NEVER use <think> or markdown.
+4. If no specific tool is needed, return [].
+5. RESPONSE MUST START WITH '[' AND END WITH ']'`;
 
           const supportConfig = configManager.resolveModelConfig(TaskType.SYSTEM, ctx?.botId).config;
           const p = createAgentRuntimeProvider(supportConfig.active.provider);
           if (p) {
-            const routerRes = await p.generateResponse(supportConfig.active.modelName, 'You are a tool selector. Output only raw JSON.', [{ role: 'user', parts: [{ text: routerPrompt }] }]);
+            const routerRes = await p.generateResponse(supportConfig.active.modelName, 'Output only a JSON array of strings.', [{ role: 'user', parts: [{ text: routerPrompt }] }]);
             let text = routerRes.text || '';
             
             if (text) {
-              // 1. Remove <think> blocks if any
-              text = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
-              // 2. Remove markdown code blocks
-              text = text.replace(/```(?:json)?([\s\S]*?)```/gi, '$1').trim();
+              // Pre-process: Clean the response
+              text = text.replace(/<think>[\s\S]*?<\/think>/gi, '');
+              text = text.replace(/```(?:json)?([\s\S]*?)```/gi, '$1');
+              text = text.trim();
               
-              // 3. More permissive Regex (supports newlines and diverse spacing)
-              const matches = text.match(/\[\s*".*?"\s*(?:,\s*".*?"\s*)*\]/gs) || 
-                              text.match(/\[[\s\S]*?\]/gs); // Fallback to any brackets if specific fails
+              let selected: string[] = [];
               
-              if (matches && matches.length > 0) {
-                  for (let jsonStr of matches) {
-                      // Normalize single quotes to double quotes for JSON.parse
-                      if (jsonStr.includes("'") && !jsonStr.includes('"')) {
-                        jsonStr = jsonStr.replace(/'/g, '"');
+              // Try standard parsing
+              const matches = text.match(/\[\s*".*?"\s*(?:,\s*".*?"\s*)*\]/gs) || text.match(/\[[\s\S]*?\]/gs);
+              
+              if (matches) {
+                for (let jsonStr of matches) {
+                   try {
+                     // Cleanup single quotes and other garbage inside brackets if it looks like malformed JSON
+                     if (jsonStr.includes("'") && !jsonStr.includes('"')) jsonStr = jsonStr.replace(/'/g, '"');
+                     const parsed = JSON.parse(jsonStr);
+                     if (Array.isArray(parsed)) {
+                       selected = parsed.filter(s => typeof s === 'string');
+                       if (selected.length > 0) break;
+                     }
+                   } catch {}
+                }
+              }
+              
+              // Fallback: More aggressive extraction if JSON.parse failed to produce results
+              if (selected.length === 0) {
+                 const bracketContentMatches = text.match(/\[([\s\S]*?)\]/g);
+                 if (bracketContentMatches) {
+                   for (const content of bracketContentMatches) {
+                      // Find all double or single quoted strings
+                      const strings = content.match(/(?:"|')([^"']+)(?:"|')/g);
+                      if (strings) {
+                        selected = strings.map(s => s.replace(/["']/g, '').trim());
+                        if (selected.length > 0) break;
                       }
-                      
-                      try {
-                        const selected = JSON.parse(jsonStr);
-                        if (Array.isArray(selected)) {
-                            // Essential tools list
-                            const essential = [
-                              'memory_save', 'search_knowledge', 'replace_code_block', 'run_command', 'read_file', 'system_terminal',
-                              'read_file_content', 'write_file_content', 'search_codebase', 'ast_replace_function', 'ast_add_import', 
-                              'find_references', 'ast_rename', 'list_files', 'get_current_time', 'system_info', 'view_file', 'multi_replace_file_content'
-                            ];
-                            const validatedTools = selected.filter(s => typeof s === 'string' && activeTools.some(t => t.name === s));
-                            activeTools = activeTools.filter(t => t.name && (validatedTools.includes(t.name) || essential.includes(t.name)));
-                            console.log(`[DynamicRouter] Optimized to ${activeTools.length} tools:`, activeTools.map(t=>t.name));
-                            break;
-                        }
-                      } catch (e) {}
-                  }
+                   }
+                 }
+              }
+
+              if (selected.length > 0) {
+                const essential = [
+                  'memory_save', 'search_knowledge', 'replace_code_block', 'run_command', 'read_file', 'system_terminal',
+                  'read_file_content', 'write_file_content', 'search_codebase', 'ast_replace_function', 'ast_add_import', 
+                  'find_references', 'ast_rename', 'list_files', 'get_current_time', 'system_info', 'view_file', 'multi_replace_file_content', 'notify_user'
+                ];
+                activeTools = activeTools.filter(t => t.name && (selected.includes(t.name) || essential.includes(t.name)));
+                console.log(`[DynamicRouter] Handled ${selected.length} selections. Active tools: ${activeTools.length}`);
               } else {
-                console.warn('[DynamicRouter] No valid JSON found. Raw response length:', text.length);
+                console.warn('[DynamicRouter] Could not find tool names in response. Raw snippet:', text.substring(0, 100));
               }
             }
           }
