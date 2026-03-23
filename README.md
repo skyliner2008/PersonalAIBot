@@ -24,7 +24,7 @@
 - **จำทุกการสนทนาตลอดชาติ** ด้วย 4-Layer Memory + Vector Embeddings
 - **แก้โค้ดตัวเองได้** พร้อมระบบ rollback ป้องกันการพัง (ปิดเป็นค่าเริ่มต้นเพื่อความปลอดภัย)
 - **Zero-Config Voice Experience**: ระบบสำรองการโทรด้วยเสียง (Automatic STT Fallback) ช่วยให้ใช้งานคำสั่งเสียงได้แม้ไม่มีคีย์ Gemini
-- **Gemini 2.0 Optimized**: รองรับ Gemini 2.0 Flash/Pro เต็มรูปแบบ พร้อมระบบ Model Routing ที่เสถียรสำหรับผู้ใช้ Paid Tier 1
+- **Gemini 2.x/3.x Optimized**: รองรับ Gemini 2.5 Flash/Pro และ Gemini 3.1 Pro เต็มรูปแบบ พร้อมระบบ Model Routing ที่เสถียรสำหรับผู้ใช้ Paid Tier 1
 - **Automate Facebook** ตอบแชท/คอมเมนต์/โพสต์อัตโนมัติ
 
 ---
@@ -41,7 +41,7 @@
 | **Frontend** | React + Vite | 19 / 6.0 |
 | **Styling** | TailwindCSS | 3.4 |
 | **Terminal UI** | xterm.js | 6.0 |
-| **AI Primary** | Google Gemini | gemini-2.0-flash / 2.5-flash |
+| **AI Primary** | Google Gemini | gemini-2.0-flash / 2.5-flash / 3.1-pro |
 | **AI Secondary** | OpenAI | SDK 6.25 |
 | **AI CLI** | Gemini CLI, Codex CLI, Claude CLI | - |
 | **Browser Automation** | Playwright (Chromium) | 1.49 |

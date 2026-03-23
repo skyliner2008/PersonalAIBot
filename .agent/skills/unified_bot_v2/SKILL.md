@@ -100,7 +100,7 @@ This is the heart of the system — an **Autonomous AI Agent** with ReAct-style 
 
 ### Failover Chain
 
-Intra-provider (Gemini): `gemini-2.5-flash → gemini-2.5-flash-lite → gemini-2.0-flash → gemini-2.0-flash-lite → gemini-1.5-flash`
+Intra-provider (Gemini): `gemini-3.1-pro-preview → gemini-2.5-flash → gemini-2.5-flash-lite → gemini-2.0-flash → gemini-2.0-flash-lite → gemini-1.5-flash`
 
 Cross-provider: cycles through `Agent.FALLBACK_CHAIN` (openai, openrouter, minimax)
 
@@ -418,14 +418,15 @@ Cannot be auto-upgraded but ARE mapped in Second Brain: `index.ts`, `config.ts`,
 | `verifyUpgrade()` | TSC baseline comparison |
 | `captureBaselineErrors()` | Cache pre-existing compile errors |
 
-### 18.14 Automatic Voice Call Fallback (2026-03-24)
+### 18.14 Automatic Voice Call Fallback & Sync (2026-03-24)
 
 - **Resilient Voice Architecture** (`dashboard/src/pages/JarvisCall.tsx`):
   - Augmented `offVoiceError` listener to detect **Gemini API key missing** errors.
-  - Implemented automatic failover from `live` (multimodal) to `stt` (browser-based Speech-to-Text) transport.
-  - This ensures that users with only free/OpenRouter keys can still use voice commands seamlessly without manual configuration.
+  - Implemented automatic failover from `live` to `stt` transport.
+  - **Synchronization Fix**: Added strict blocking of Browser STT during active Gemini Live (multimodal) audio sessions to prevent "Mixed Voice" duplication.
+  - **Cold Start Protection**: Added `stopAllVoiceIO()` call before starting new sessions to ensure a clean slate.
 - **Backend STT Stability** (`server/src/api/socketHandlers.ts`):
-  - Verified that the `stt` transport path remains independent of Gemini API keys, relying strictly on browser-native recognition.
+  - Verified that the `stt` transport path remains independent of Gemini API keys.
 
 Outcome:
 - The system now provides a "Zero-Config Voice Experience" where Jarvis can be commanded by voice even on the most basic API tier.

@@ -281,6 +281,11 @@ export function JarvisCall() {
         if (isTtsSpeakingRef.current) return;
         if ('speechSynthesis' in window && window.speechSynthesis.speaking) return;
         if (Date.now() < suppressSttUntilRef.current) return;
+        
+        // CRITICAL: Block STT if we are in Live Voice mode (Gemini handles its own audio)
+        if (voiceTransportRef.current === 'live') {
+          return;
+        }
 
         let finalTranscript = '';
         for (let i = event.resultIndex; i < event.results.length; i += 1) {
@@ -401,6 +406,8 @@ export function JarvisCall() {
 
   const startMic = useCallback(async () => {
     if (mediaProcessorRef.current) return;
+    // CRITICAL: Always stop Browser STT when starting live voice mic capture
+    stopSpeechRecognition();
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
@@ -968,6 +975,9 @@ export function JarvisCall() {
       setIsVoiceLoading(true);
       setConnectionState('connecting');
       pushLog('system', 'กำลังเชื่อมต่อ Jarvis Live Call...');
+
+      // Ensure a clean slate: stop any existing STT or Mic IO before starting new session
+      stopAllVoiceIO();
 
       const micReady = await ensureMicPermission(requestedTransport);
       if (!micReady) {
