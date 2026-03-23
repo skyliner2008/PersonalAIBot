@@ -314,13 +314,6 @@ export default function SelfUpgrade() {
     { label: '1D', value: 24 * 60 * 60 * 1000 },
   ];
 
-  const IDLE_THRESHOLDS = [
-    { label: 'รอ 1M', value: 60 * 1000 },
-    { label: 'รอ 5M', value: 5 * 60 * 1000 },
-    { label: 'รอ 10M', value: 10 * 60 * 1000 },
-    { label: 'รอ 30M', value: 30 * 60 * 1000 },
-    { label: 'รอ 1H', value: 60 * 60 * 1000 },
-  ];
 
   return (
     <div className="p-4 md:p-6 space-y-4 animate-in fade-in duration-700">
@@ -381,20 +374,6 @@ export default function SelfUpgrade() {
             </select>
           </div>
 
-          {/* Idle Threshold Dropdown */}
-          <div className="flex items-center gap-2 px-2.5 py-1 bg-gray-900/60 border border-white/5 rounded-lg" title="ตั้งค่าเวลาที่จะต้องรอให้บอทว่างงาน (Idle) ก่อนเริ่มอัปเกรด">
-            <Clock className="w-3 h-3 text-gray-500" />
-            <select 
-              className="bg-transparent text-[10px] text-gray-300 outline-none cursor-pointer"
-              // API returns idleThresholdMinutes or we compute it if missing. backend uses minutes for tracking but updates use MS.
-              value={status.idleThresholdMinutes ? status.idleThresholdMinutes * 60 * 1000 : 5 * 60 * 1000}
-              onChange={(e) => handleIdleChange(Number(e.target.value))}
-            >
-              {IDLE_THRESHOLDS.map(opt => (
-                <option key={opt.value} value={opt.value} className="bg-gray-900">{opt.label}</option>
-              ))}
-            </select>
-          </div>
 
           {/* Auto-Fix Mode Dropdown */}
           <div className="flex items-center gap-2 px-2.5 py-1 bg-gray-900/60 border border-white/5 rounded-lg" title="ตั้งค่าโหมดการทำงานเมื่อระบบแสกนเจอคำแนะนำ">
@@ -425,8 +404,8 @@ export default function SelfUpgrade() {
             label="เวลาที่หยุดนิ่ง (Idle)" 
             value={`${status.idleMinutes} นาที`}
             icon={Zap}
-            subValue={status.isIdle ? 'เงื่อนไขครบถ้วน ✅' : `ต้องการ ${status.idleThresholdMinutes || 5} นาที`}
-            color={status.isIdle ? 'text-blue-400' : 'text-gray-400'}
+            subValue="ระบบพร้อมทำงานอัตโนมัติ"
+            color="text-blue-400"
           />
           <div className="bg-gray-900/40 border border-white/5 rounded-lg px-3 py-2 backdrop-blur-sm relative overflow-hidden group flex flex-col justify-center">
             <div className="flex justify-between items-start mb-1">

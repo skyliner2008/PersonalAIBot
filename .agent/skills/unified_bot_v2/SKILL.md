@@ -287,7 +287,7 @@ Planning algorithm:
 
 **File**: `server/src/evolution/selfUpgrade.ts` (~2800 lines)
 
-The autonomous code modification engine. Scans the codebase for bugs/improvements, proposes fixes, and implements them with multi-layer safety gates. Features a **Graph-Enhanced Second Brain** that gives the AI deep understanding of the codebase architecture before making changes.
+The autonomous code modification engine. Scans the codebase for bugs/improvements, proposes fixes, and implements them with multi-layer safety gates. Features a **Graph-Enhanced Second Brain** that gives the AI deep understanding of the codebase architecture before making changes. **New in v2.1: Default Disabled state and Simplified Settings (Check-Interval only).**
 
 #### 11-Phase Implementation Pipeline
 
@@ -939,3 +939,16 @@ Outcome:
 
 Outcome:
 - Fresh installs and OpenRouter-only users can now utilize **Semantic Memory** (Long-term Facts) without strictly requiring a Gemini API Key.
+
+### 18.13 Self-Upgrade Simplification & Default Disabled (2026-03-24)
+
+- **Default Disabled State** (`db.ts` & `index.ts`):
+  - Added seeding for `evolution_enabled = '0'` and `subconscious_enabled = '0'`.
+  - Now requires explicit user activation (Pink Toggle in Dashboard) to prevent accidental token consumption on fresh installs.
+- **Simplified Configuration** (`SelfUpgrade.tsx` & `selfUpgrade.ts`):
+  - Removed "Idle Threshold" setting from UI to reduce complexity.
+  - Standardized on a 1-minute internal idle threshold, focusing user control strictly on the **Scanning Interval** (Check Every).
+  - Updated `startSelfUpgrade` to be `async` for reliable DB-backed initialization.
+
+Outcome:
+- The system is now safer for new users and significantly easier to configure, while remaining fully performant and autonomous.

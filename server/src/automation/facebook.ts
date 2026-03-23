@@ -71,7 +71,7 @@ export async function isLoggedIn(): Promise<boolean> {
     return true;
   } catch (e) {
     log.error('Login check error', { error: String(e) });
-    addLog('facebook', 'Login check failed', String(e), 'error');
+    await addLog('facebook', 'Login check failed', String(e), 'error');
     return false;
   }
 }

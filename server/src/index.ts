@@ -9,7 +9,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import { config } from './config.js';
-import { initDb, addLog, upsertConversation, getCredential, checkCredentialIntegrity } from './database/db.js';
+import { initDb, addLog, upsertConversation, getCredential, getSetting, checkCredentialIntegrity } from './database/db.js';
 import { ensureBotTables } from './bot_agents/registries/botRegistry.js';
 import { setupSocketHandlers, attachSocketAuth } from './api/socketHandlers.js';
 import { setSocketIO } from './utils/socketBroadcast.js';
@@ -666,13 +666,26 @@ async function main() {
     });
     startupInfo('[Swarm] Coordinator initialized and ready for task delegation');
 
-    // Start Proactive Idle Loop using a standalone System Agent instance
-    startIdleLoop(systemAgent);
-    startSubconsciousSleepJob();
+    // Background Task Management (Self-Evolution & Subconscious)
+    const evolutionEnabled = getSetting('evolution_enabled') === '1' || process.env.EVOLUTION_ENABLED === '1';
+    const subconsciousEnabled = getSetting('subconscious_enabled') === '1' || process.env.SUBCONSCIOUS_ENABLED === '1';
 
-    // Start Self-Upgrade System (scans codebase when idle 30min)
-    startSelfUpgrade(path.resolve(process.cwd(), 'src'));
-    startupInfo('[SelfUpgrade] Autonomous upgrade system initialized (30min idle threshold, dry-run mode)');
+    if (evolutionEnabled) {
+      // Start Proactive Idle Loop using a standalone System Agent instance
+      startIdleLoop(systemAgent);
+      // Start Self-Upgrade System (scans codebase when idle)
+      startSelfUpgrade(path.resolve(process.cwd(), 'src'));
+      startupInfo('[SelfEvolution] Autonomous evolution system initialized');
+    } else {
+      startupInfo('[SelfEvolution] Autonomous evolution system is DISABLED (default)');
+    }
+
+    if (subconsciousEnabled) {
+      startSubconsciousSleepJob();
+      startupInfo('[Subconscious] Subconscious sleep job initialized');
+    } else {
+      startupInfo('[Subconscious] Subconscious sleep job is DISABLED (default)');
+    }
 
   } catch (err) {
     console.error('[BotManager] Failed to start agents:', err);

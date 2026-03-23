@@ -257,6 +257,24 @@ function seedDefaultData(dbInstance: SqliteDatabase): void {
       'casual-thai'
     );
   }
+
+  // --- Start Default Settings Seeding ---
+  const settingsCount = getRow<{ c: number }>(dbInstance, 'SELECT COUNT(*) as c FROM settings');
+  if (settingsCount && settingsCount.c === 0) {
+    const defaultSettings = [
+      ['evolution_enabled', '0'],
+      ['subconscious_enabled', '0'],
+      ['upgrade_idle_threshold', '1'], // 1 minute default (for "concurrent" mode)
+      ['upgrade_check_interval', '1800000'], // 30 minutes
+      ['upgrade_auto_fix', 'false'],
+      ['upgrade_paused', 'true']
+    ];
+
+    const stmt = dbInstance.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
+    for (const [key, val] of defaultSettings) {
+      stmt.run(key, val);
+    }
+  }
 }
 
 export async function initDb(): Promise<SqliteDatabase> {

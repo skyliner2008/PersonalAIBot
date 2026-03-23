@@ -37,13 +37,28 @@ function getScanModel(): string {
 }
 
 // ── Configuration ──
-let IDLE_THRESHOLD_MS = 5 * 60 * 1000;      // 5 นาที (อิงจากการโต้ตอบแชท)
-let CHECK_INTERVAL_MS = 5 * 60 * 1000;      // ตรวจทุก 5 นาที (default)
+let IDLE_THRESHOLD_MS = 1 * 60 * 1000;      // 1 นาที default (อิงจากการโต้ตอบแชท)
+let CHECK_INTERVAL_MS = 30 * 60 * 1000;     // 30 นาที default
 const SCAN_BATCH_SIZE = 3;                      // อ่านทีละ 3 ไฟล์
 const MAX_FILE_SIZE_BYTES = 100 * 1024;         // ข้ามไฟล์ > 100KB
 const ANALYSIS_DELAY_MS = 2000;                 // delay ระหว่างไฟล์
 const MAX_LLM_CALLS_PER_CYCLE = 5;              // จำกัด LLM call ต่อรอบ
 let DRY_RUN = false;                            // true = เสนอเท่านั้น, false = แก้ไขอัตโนมัติ
+
+function refreshConfig() {
+  try {
+    const idleMin = parseInt(getSetting('upgrade_idle_threshold') || '1', 10);
+    IDLE_THRESHOLD_MS = idleMin * 60 * 1000;
+    
+    const intervalMs = parseInt(getSetting('upgrade_check_interval') || '1800000', 10);
+    CHECK_INTERVAL_MS = intervalMs;
+    
+    DRY_RUN = getSetting('upgrade_auto_fix') !== 'true';
+    _paused = getSetting('upgrade_paused') === 'true';
+  } catch (err) {
+    log.error('Failed to refresh config from DB', { error: err });
+  }
+}
 
 // ── Upgrade Lock File — ป้องกัน tsx watch restart ระหว่าง upgrade ──
 const UPGRADE_LOCK_PATH = path.resolve(process.cwd(), '../data/upgrade_in_progress.lock');
@@ -338,6 +353,7 @@ function getOsIdleTimeMs(): number {
 
 /** Check if system has been idle long enough */
 function isSystemIdle(): boolean {
+  refreshConfig(); // Refresh before checking
   return getOsIdleTimeMs() >= IDLE_THRESHOLD_MS;
 }
 
@@ -2845,34 +2861,28 @@ async function runUpgradeCycle(rootDir: string, forceStart: boolean = false): Pr
  * Start the self-upgrade background loop
  * @param rootDir - Project root to scan (e.g. path to server/src)
  */
-export function startSelfUpgrade(rootDir: string): void {
+export async function startSelfUpgrade(rootDir: string): Promise<void> {
   if (upgradeInterval) {
     log.warn('Self-upgrade already running');
     return;
   }
 
   ensureUpgradeTable();
-
   _currentRootDir = rootDir;
 
   // Load persisted configuration
-  const savedIdle = import('../database/db.js').then(db => db.getSetting('upgrade_idle_threshold_ms'));
-  const savedInterval = import('../database/db.js').then(db => db.getSetting('upgrade_scan_interval_ms'));
+  refreshConfig();
+  
+  log.info(`Self-Upgrade System initialized (Interval: ${Math.round(CHECK_INTERVAL_MS/60000)}m, Idle: ${Math.round(IDLE_THRESHOLD_MS/60000)}m, Dry-Run: ${DRY_RUN})`);
 
-  Promise.all([savedIdle, savedInterval]).then(async ([idle, interval]) => {
-    if (idle) IDLE_THRESHOLD_MS = parseInt(idle);
-    if (interval) CHECK_INTERVAL_MS = parseInt(interval);
-    
-    log.info(`Self-Upgrade System initialized (idle threshold: ${IDLE_THRESHOLD_MS / 60000}min, check every ${CHECK_INTERVAL_MS / 60000}min, dry_run: ${DRY_RUN})`);
+  // Initial activity stamp
+  lastUserActivity = Date.now();
 
-    // Initial activity stamp
-    lastUserActivity = Date.now();
-
-    upgradeInterval = setInterval(() => {
-      runUpgradeCycle(rootDir, false).catch(err => {
-        log.error('Upgrade cycle error', { error: String(err) });
-      });
-    }, CHECK_INTERVAL_MS);
+  upgradeInterval = setInterval(() => {
+    runUpgradeCycle(rootDir, false).catch(err => {
+      log.error('Upgrade cycle error', { error: String(err) });
+    });
+  }, CHECK_INTERVAL_MS);
 
     // --- Persistent State Restoration ---
     try {
@@ -2918,7 +2928,6 @@ export function startSelfUpgrade(rootDir: string): void {
     } catch (err: any) {
       log.warn(`[SelfUpgrade] Failed to restore state from DB: ${err.message}`);
     }
-  });
 }
 
 /** Stop the self-upgrade loop */
