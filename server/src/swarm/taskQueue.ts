@@ -3,13 +3,9 @@
  * Enables bots to delegate subtasks to specialist agents across platforms
  */
 
-/**
- * Task status indicates where the task is in its lifecycle
- */
 import { createLogger } from '../utils/logger';
 
 const logger = createLogger('SwarmQueue');
-// Test comment to verify replace_code_block works
 
 export type TaskStatus = 'queued' | 'processing' | 'completed' | 'failed';
 
@@ -143,9 +139,14 @@ export class TaskQueue {
   private processingTasks: Set<string> = new Set();
   private taskIdCounter = 0;
 
-  // Tracking for stats
-  private completedTasks: SwarmTask[] = [];
-  private failedTasks: SwarmTask[] = [];
+  // Tracking for stats (Lifetime totals)
+  private totalCompletedCount = 0;
+  private totalFailedCount = 0;
+  private totalProcessingTimeMs = 0;
+
+  // Recent task history for UI (Limited to prevent memory leaks)
+  private recentHistory: SwarmTask[] = [];
+  private readonly MAX_HISTORY = 100;
 
   // Callbacks for task lifecycle events
   private callbacks: Map<string, TaskCallback[]> = new Map();
@@ -211,7 +212,7 @@ export class TaskQueue {
 
     for (const cb of [...taskCallbacks, ...globalCbs]) {
       try { await cb(task); } catch (err) {
-                logger.error(`[TaskQueue] Callback error for task ${task.id}:`, err);
+        logger.error(`[TaskQueue] Callback error for task ${task.id}:`, err);
       }
     }
     this.callbacks.delete(task.id);
@@ -227,7 +228,7 @@ export class TaskQueue {
     const callbacks = this.globalCallbacks[event];
     for (const cb of callbacks) {
       try { await cb(task); } catch (err) {
-        console.error(`[TaskQueue] Global callback error (${event}) for task ${task.id}:`, err);
+        logger.error(`[TaskQueue] Global callback error (${event}) for task ${task.id}:`, err);
       }
     }
   }
@@ -355,7 +356,7 @@ export class TaskQueue {
   async startProcessing(taskId: string): Promise<boolean> {
     const task = this.tasks.get(taskId);
     if (!task) {
-      console.warn(`[TaskQueue] Task not found: ${taskId}`);
+      logger.warn(`[TaskQueue] Task not found: ${taskId}`);
       return false;
     }
 
@@ -376,7 +377,7 @@ export class TaskQueue {
   async complete(taskId: string, result: string): Promise<void> {
     const task = this.tasks.get(taskId);
     if (!task) {
-      console.warn(`[TaskQueue] Task not found: ${taskId}`);
+      logger.warn(`[TaskQueue] Task not found: ${taskId}`);
       return;
     }
 
@@ -389,7 +390,15 @@ export class TaskQueue {
     task.result = result;
     task.completedAt = new Date();
     this.processingTasks.delete(taskId);
-    this.completedTasks.push(task);
+    
+    // Update lifetime stats
+    this.totalCompletedCount++;
+    if (task.startedAt) {
+        this.totalProcessingTimeMs += (task.completedAt.getTime() - task.startedAt.getTime());
+    }
+
+    // Add to recent history
+    this.addToHistory(task);
 
     queueInfo(`[TaskQueue] Completed task: ${taskId} in ${task.completedAt.getTime() - task.createdAt.getTime()}ms`);
 
@@ -404,7 +413,7 @@ export class TaskQueue {
   async fail(taskId: string, error: string): Promise<boolean> {
     const task = this.tasks.get(taskId);
     if (!task) {
-      console.warn(`[TaskQueue] Task not found: ${taskId}`);
+      logger.warn(`[TaskQueue] Task not found: ${taskId}`);
       return false;
     }
 
@@ -424,7 +433,7 @@ export class TaskQueue {
       task.retryCount = retryCount;
       task.retryAfter = Date.now() + backoffMs;
       task.error = error; // Keep last error for debugging
-      console.warn(`[TaskQueue] Task ${taskId} retry ${retryCount}/${maxRetries} in ${backoffMs}ms — ${error}`);
+      logger.warn(`[TaskQueue] Task ${taskId} retry ${retryCount}/${maxRetries} in ${backoffMs}ms — ${error}`);
       await this.fireGlobalCallbacks('onQueued', task);
       return true;
     }
@@ -434,9 +443,11 @@ export class TaskQueue {
     task.error = error;
     task.retryCount = retryCount - 1; // Record actual retries done
     task.completedAt = new Date();
-    this.failedTasks.push(task);
+    
+    this.totalFailedCount++;
+    this.addToHistory(task);
 
-    console.error(`[TaskQueue] Failed task: ${taskId} (after ${task.retryCount} retries) — ${error}`);
+    logger.error(`[TaskQueue] Failed task: ${taskId} (after ${task.retryCount} retries) — ${error}`);
 
     // Fire failure callbacks
     await this.fireCallbacks(task);
@@ -462,7 +473,10 @@ export class TaskQueue {
     task.error = `Aborted: ${reason}`;
     task.completedAt = new Date();
     this.processingTasks.delete(taskId);
-    this.failedTasks.push(task);
+    
+    this.totalFailedCount++;
+    this.addToHistory(task);
+    
     queueInfo(`[TaskQueue] Aborted processing task: ${taskId} — ${reason}`);
     await this.fireCallbacks(task);
     return true;
@@ -488,7 +502,9 @@ export class TaskQueue {
     task.status = 'failed';
     task.error = `Cancelled: ${reason}`;
     task.completedAt = new Date();
-    this.failedTasks.push(task);
+    
+    this.totalFailedCount++;
+    this.addToHistory(task);
 
     queueInfo(`[TaskQueue] Cancelled task: ${taskId} — ${reason}`);
 
@@ -512,7 +528,7 @@ export class TaskQueue {
   ): Promise<boolean> {
     const task = this.tasks.get(taskId);
     if (!task) {
-      console.warn(`[TaskQueue] Task not found: ${taskId}`);
+      logger.warn(`[TaskQueue] Task not found: ${taskId}`);
       return false;
     }
 
@@ -521,8 +537,9 @@ export class TaskQueue {
     }
 
     this.processingTasks.delete(taskId);
-    this.completedTasks = this.completedTasks.filter((item) => item.id !== taskId);
-    this.failedTasks = this.failedTasks.filter((item) => item.id !== taskId);
+    // Remove from history if requeued to avoid duplicate entries with old state
+    this.recentHistory = this.recentHistory.filter(h => h.id !== taskId);
+    
     if (updates) {
       Object.assign(task, updates);
     }
@@ -545,8 +562,11 @@ export class TaskQueue {
         task.status = 'failed';
         task.error = reason;
         task.completedAt = new Date();
-        this.failedTasks.push(task);
-        console.warn(`[TaskQueue] Cascade-failed dependent task: ${id}`);
+        
+        this.totalFailedCount++;
+        this.addToHistory(task);
+        
+        logger.warn(`[TaskQueue] Cascade-failed dependent task: ${id}`);
         await this.fireCallbacks(task);
         // Recursively cascade
         await this.cascadeFailDependents(id, reason);
@@ -592,7 +612,12 @@ export class TaskQueue {
     specialist?: string;
     limit?: number;
   }): Promise<SwarmTask[]> {
-    let result = Array.from(this.tasks.values());
+    // Merge current tasks and recent history for complete visibility
+    const allTaskMap = new Map<string, SwarmTask>();
+    this.recentHistory.forEach(t => allTaskMap.set(t.id, t));
+    this.tasks.forEach(t => allTaskMap.set(t.id, t));
+    
+    let result = Array.from(allTaskMap.values());
 
     if (filter?.status) {
       result = result.filter(t => t.status === filter.status);
@@ -618,7 +643,6 @@ export class TaskQueue {
    */
   cleanup(): void {
     const now = Date.now();
-    const idsToRemove: Set<string> = new Set();
     let removedCount = 0;
 
     for (const [id, task] of this.tasks.entries()) {
@@ -627,20 +651,21 @@ export class TaskQueue {
         task.completedAt &&
         now - task.completedAt.getTime() > this.ARCHIVAL_AGE_MS
       ) {
-        idsToRemove.add(id);
+        this.tasks.delete(id);
         removedCount++;
       }
     }
 
     if (removedCount > 0) {
-      // Remove from the main tasks map
-      idsToRemove.forEach(id => this.tasks.delete(id));
+      queueInfo(`[TaskQueue] Cleaned up ${removedCount} old tasks from memory map`);
+    }
+  }
 
-      // Remove from completedTasks and failedTasks arrays
-      this.completedTasks = this.completedTasks.filter(task => !idsToRemove.has(task.id));
-      this.failedTasks = this.failedTasks.filter(task => !idsToRemove.has(task.id));
-
-      queueInfo(`[TaskQueue] Cleaned up ${removedCount} old tasks`);
+  private addToHistory(task: SwarmTask): void {
+    // Add to start of array for quick access to most recent
+    this.recentHistory.unshift({ ...task });
+    if (this.recentHistory.length > this.MAX_HISTORY) {
+      this.recentHistory = this.recentHistory.slice(0, this.MAX_HISTORY);
     }
   }
 
@@ -651,16 +676,12 @@ export class TaskQueue {
     const tasks = Array.from(this.tasks.values());
     const queued = tasks.filter(t => t.status === 'queued').length;
     const processing = tasks.filter(t => t.status === 'processing').length;
-    const completed = this.completedTasks.length;
-    const failed = this.failedTasks.length;
+    const completed = this.totalCompletedCount;
+    const failed = this.totalFailedCount;
 
     let avgProcessingTimeMs: number | undefined;
-    if (this.completedTasks.length > 0) {
-      const totalTime = this.completedTasks.reduce((sum, t) => {
-        if (!t.completedAt) return sum;
-        return sum + (t.completedAt.getTime() - t.createdAt.getTime());
-      }, 0);
-      avgProcessingTimeMs = Math.round(totalTime / this.completedTasks.length);
+    if (this.totalCompletedCount > 0) {
+      avgProcessingTimeMs = Math.round(this.totalProcessingTimeMs / this.totalCompletedCount);
     }
 
     return {
@@ -703,9 +724,11 @@ export class TaskQueue {
   clear(): void {
     this.tasks.clear();
     this.processingTasks.clear();
-    this.completedTasks = [];
-    this.failedTasks = [];
-    queueInfo('[TaskQueue] All tasks cleared');
+    this.recentHistory = [];
+    this.totalCompletedCount = 0;
+    this.totalFailedCount = 0;
+    this.totalProcessingTimeMs = 0;
+    queueInfo('[TaskQueue] All tasks and history cleared');
   }
 
   /**
@@ -719,5 +742,3 @@ export class TaskQueue {
 }
 
 export default TaskQueue;
-
-
