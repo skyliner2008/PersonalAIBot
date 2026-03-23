@@ -4,7 +4,7 @@
  */
 
 import type { AIProvider, AIResponse } from './baseProvider.js';
-import type { ToolCall } from '../types.js';
+import type { ToolCall, FunctionDeclaration } from '../types.js';
 
 export class AnthropicProvider implements AIProvider {
   private apiKey: string;
@@ -113,7 +113,16 @@ export class AnthropicProvider implements AIProvider {
       throw new Error(`Anthropic API error: ${response.status} ${error}`);
     }
 
-    const data = (await response.json()) as any;
+    const responseClone = response.clone();
+    let data: any;
+    try {
+      data = await response.json();
+    } catch (jsonError: any) {
+      const errorText = await responseClone.text();
+      throw new Error(
+        `Anthropic API JSON parse error: ${jsonError.message}. Response: ${errorText.substring(0, 500)}`
+      );
+    }
 
     // Extract text content
     let text = '';

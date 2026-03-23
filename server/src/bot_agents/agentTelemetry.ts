@@ -75,7 +75,10 @@ const processingQueues: Map<string, Promise<string>> = new Map();
 
 export function enqueueForUser(chatId: string, task: () => Promise<string>): Promise<string> {
   const prev = processingQueues.get(chatId) ?? Promise.resolve('');
-  const next = prev.catch(() => { }).then(task);
+  const next = prev.catch(() => { /* swallow prev error to ensure task runs */ }).then(task).catch(e => {
+    log.error(`Task for user ${chatId} failed:`, e);
+    return '';
+  });
   processingQueues.set(chatId, next);
   next.finally(() => {
     if (processingQueues.get(chatId) === next) processingQueues.delete(chatId);

@@ -93,7 +93,7 @@ export class SwarmBatchManager {
       ...batch,
       taskIds: batch.taskIds ? [...batch.taskIds] : [],
       assignments: batch.assignments ? batch.assignments.map((assignment) => ({ ...assignment })) : [],
-      progress: { ...batch.progress },
+      progress: batch.progress ? { ...batch.progress } : { total: 0, queued: 0, processing: 0, completed: 0, failed: 0 },
       metadata: batch.metadata ? { ...batch.metadata } : undefined,
     };
   }

@@ -105,27 +105,31 @@ export function getManagedSetting(key: string): string | null {
 export function setManagedSetting(key: string, value: string): void {
   const normalizedValue = String(value ?? '');
 
-  if (!isSecretSettingKey(key)) {
-    setSetting(key, normalizedValue);
-    return;
-  }
+  try {
+    if (!isSecretSettingKey(key)) {
+      setSetting(key, normalizedValue);
+      return;
+    }
 
-  if (isMaskedSecretValue(normalizedValue)) {
-    return;
-  }
+    if (isMaskedSecretValue(normalizedValue)) {
+      return;
+    }
 
-  const canonicalKey = getCanonicalSettingKey(key);
-  if (!normalizedValue) {
-    deleteSetting(canonicalKey);
+    const canonicalKey = getCanonicalSettingKey(key);
+    if (!normalizedValue) {
+      deleteSetting(canonicalKey);
+      if (canonicalKey !== key) {
+        deleteSetting(key);
+      }
+      return;
+    }
+
+    setCredential(canonicalKey, normalizedValue);
     if (canonicalKey !== key) {
       deleteSetting(key);
     }
-    return;
-  }
-
-  setCredential(canonicalKey, normalizedValue);
-  if (canonicalKey !== key) {
-    deleteSetting(key);
+  } catch (e) {
+    console.error('Failed to set managed setting:', key, e);
   }
 }
 

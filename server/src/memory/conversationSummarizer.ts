@@ -10,6 +10,7 @@ import { createLogger } from '../utils/logger.js';
 const log = createLogger('Summarizer');
 
 const activeSummarizations = new Map<string, Promise<void>>();
+// Test change
 
 // Threshold: summarize when new messages exceed this count since last summary
 export const SUMMARY_THRESHOLD = 20;
@@ -101,9 +102,9 @@ export async function maybeSummarize(chatId: string): Promise<void> {
 
         const summary = await summarizeProvider(prompt);
         if (summary && summary.length > 5) {
-            const totalMsgs = db.prepare('SELECT COUNT(*) as c FROM messages WHERE conversation_id = ?').get(chatId) as { c: number };
+            const totalMsgs = db.prepare('SELECT COUNT(*) as c FROM messages WHERE conversation_id = ?').get(chatId) as { c: number } | undefined;
             db.prepare('UPDATE conversations SET summary = ?, summary_msg_count = ? WHERE id = ?')
-                .run(summary, totalMsgs.c, chatId);
+                .run(summary, totalMsgs?.c || 0, chatId);
             log.info('Summarized conversation', { chatId, length: summary.length });
         } else {
             log.warn(`Summarization returned empty/short result for ${chatId}`);

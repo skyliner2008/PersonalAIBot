@@ -76,6 +76,7 @@ const STATUS_THEMES: Record<string, string> = {
   rejected: 'bg-rose-500/10 text-rose-400 border-rose-500/20',
   implemented: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
   implementing: 'bg-fuchsia-500/10 text-fuchsia-400 border-fuchsia-500/20',
+  review_diff: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20',
   skipped: 'bg-gray-500/10 text-gray-400 border-gray-500/20',
 };
 
@@ -89,8 +90,8 @@ export default function SelfUpgrade() {
   const [scanning, setScanning] = useState(false);
   const [implementingId, setImplementingId] = useState<number | null>(null);
 
-  const [diffData, setDiffData] = useState<{ before: string; after: string } | null>(null);
-  const [showDiffModal, setShowDiffModal] = useState<{ id: number; title: string; filePath: string } | null>(null);
+  const [diffData, setDiffData] = useState<{ before: string; after: string; preview?: string } | null>(null);
+  const [showDiffModal, setShowDiffModal] = useState<{ id: number; title: string; filePath: string; status: string } | null>(null);
   const [diffLoading, setDiffLoading] = useState(false);
   const [diffViewMode, setDiffViewMode] = useState<'split' | 'unified'>('split');
   
@@ -244,14 +245,36 @@ export default function SelfUpgrade() {
     }
   };
 
+  const approveDiffAction = async (id: number) => {
+    try {
+      await api.approveUpgradeDiff(id);
+      setShowDiffModal(null);
+      fetchData();
+    } catch (err: any) {
+      alert(`Failed to approve diff: ${err.message}`);
+    }
+  };
+
+  const rejectDiffAction = async (id: number) => {
+    const reason = prompt('ระบุเหตุผลที่ปฏิเสธ (ทิ้งว่างได้):', '');
+    if (reason === null) return; // cancelled
+    try {
+      await api.rejectUpgradeDiff(id, reason || 'Human rejected diff from Dashboard');
+      setShowDiffModal(null);
+      fetchData();
+    } catch (err: any) {
+      alert(`Failed to reject diff: ${err.message}`);
+    }
+  };
+
   const viewDiff = async (p: Proposal) => {
-    setShowDiffModal({ id: p.id, title: p.title, filePath: p.file_path });
+    setShowDiffModal({ id: p.id, title: p.title, filePath: p.file_path, status: p.status });
     setDiffLoading(true);
     setDiffData(null);
     try {
       const res = await api.getUpgradeProposalDiff(p.id);
       if (res && res.ok) {
-        setDiffData({ before: res.before, after: res.after });
+        setDiffData({ before: res.before, after: res.after, preview: res.diff_preview });
       }
     } catch (e: any) {
       console.error(e);
@@ -615,12 +638,12 @@ export default function SelfUpgrade() {
                             spin={p.status === 'implementing' || implementingId === p.id}
                           />
                         )}
-                        {p.status === 'implemented' && (
+                        {(p.status === 'implemented' || p.status === 'review_diff') && (
                           <ActionButton 
                             onClick={() => viewDiff(p)} 
                             icon={Eye} 
                             color="text-cyan-400 bg-cyan-500/10 hover:bg-cyan-500/20" 
-                            title="ดูการเปลี่ยนแปลงโค้ด (Diff)"
+                            title={p.status === 'review_diff' ? "ตรวจพิจารณา Diff" : "ดูการเปลี่ยนแปลงโค้ด (Diff)"}
                           />
                         )}
                         {p.status === 'rejected' && p.description.includes('.log') && (
@@ -752,6 +775,16 @@ export default function SelfUpgrade() {
                 <span className="text-xs text-gray-500 font-mono mt-1">{showDiffModal.filePath}</span>
               </div>
               <div className="flex items-center gap-4">
+                 {showDiffModal.status === 'review_diff' && (
+                   <div className="flex items-center gap-2 border-r border-white/10 pr-4 mr-1">
+                     <button onClick={() => approveDiffAction(showDiffModal.id)} className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg font-bold text-xs shadow-lg shadow-emerald-500/20 transition-all">
+                       <CheckCircle2 className="w-4 h-4" /> Approve
+                     </button>
+                     <button onClick={() => rejectDiffAction(showDiffModal.id)} className="flex items-center gap-1.5 bg-rose-600/80 hover:bg-rose-500 text-white px-3 py-1.5 rounded-lg font-bold text-xs shadow-lg shadow-rose-500/20 transition-all">
+                       <XCircle className="w-4 h-4" /> Reject
+                     </button>
+                   </div>
+                 )}
                  <button onClick={() => setDiffViewMode(m => m === 'split' ? 'unified' : 'split')} className="text-xs bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg border border-white/5 transition-colors font-bold text-gray-300">
                     {diffViewMode === 'split' ? 'Unified View' : 'Split View'}
                  </button>
@@ -793,11 +826,11 @@ export default function SelfUpgrade() {
                  ) : (
                    <div className="flex flex-col h-full bg-black/40 border border-white/10 rounded-xl overflow-hidden min-h-0">
                      <div className="shrink-0 bg-white/5 text-gray-300 text-[10px] font-bold py-2 px-3 border-b border-white/10 uppercase tracking-widest">
-                       Unified View (After)
+                       {diffData.preview ? 'Unified Diff Preview (Patch)' : 'Unified View (After)'}
                      </div>
                      <div className="flex-1 overflow-auto min-h-0">
                        <pre className="p-4 text-[11px] font-mono text-gray-300 w-max min-w-full">
-                          {diffData.after}
+                          {diffData.preview || diffData.after}
                        </pre>
                      </div>
                    </div>

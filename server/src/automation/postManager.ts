@@ -37,12 +37,16 @@ function updatePostStatus(
 ): void {
   const { content, error, errorStack, attempt } = options;
 
-  if (content) {
-    dbRun('UPDATE scheduled_posts SET content = ?, status = ? WHERE id = ?', [content, status, id]);
-  } else if (errorStack) {
-    dbRun('UPDATE scheduled_posts SET status = ?, error_message = ? WHERE id = ?', [status, errorStack.substring(0, 1000), id]);
-  } else {
-    dbRun('UPDATE scheduled_posts SET status = ? WHERE id = ?', [status, id]);
+  try {
+    if (content) {
+      dbRun('UPDATE scheduled_posts SET content = ?, status = ? WHERE id = ?', [content, status, id]);
+    } else if (errorStack) {
+      dbRun('UPDATE scheduled_posts SET status = ?, error_message = ? WHERE id = ?', [status, errorStack?.substring(0, 1000) || null, id]);
+    } else {
+      dbRun('UPDATE scheduled_posts SET status = ? WHERE id = ?', [status, id]);
+    }
+  } catch (e) {
+    addLog('post', 'Failed to update post status', `ID: ${id}, Status: ${status}. Error: ${e instanceof Error ? e.message : String(e)}`, 'error');
   }
 
   io.emit('post:status', {
@@ -151,13 +155,21 @@ export async function processPendingPosts(io: SocketServer): Promise<void> {
 
     // 2. Post ready content
     const readyPosts = dbAll(
-      `SELECT id, content, target, target_id FROM scheduled_posts WHERE status = ? AND scheduled_at <= ?`,
+      `SELECT * FROM scheduled_posts WHERE status = ? AND scheduled_at <= ?`,
       [POST_STATUS_READY, now]
     ) as any[];
 
     if (readyPosts.length > 0) notifyUserActivity();
 
     for (const post of readyPosts) {
+      // Explicitly check for null content to prevent crashes in createPost
+      if (post.content === null || post.content === undefined) {
+        const errorMsg = 'Post content is missing (NULL) despite being ready for publishing.';
+        updatePostStatus(io, post.id, POST_STATUS_FAILED, { error: errorMsg, errorStack: errorMsg });
+        addLog('post', 'Post content missing', `Post ${post.id}: ${errorMsg}`, 'warning');
+        continue;
+      }
+
       let attempts = 0;
       const maxAttempts = 2;
       while (attempts < maxAttempts) {

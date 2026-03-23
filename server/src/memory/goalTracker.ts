@@ -41,26 +41,31 @@ export interface SubGoal {
 
 // ── Database Setup ────────────────────────────────────────
 export function ensureGoalTables(): void {
-  const db = getDb();
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS goals (
-      id TEXT PRIMARY KEY,
-      chat_id TEXT NOT NULL,
-      title TEXT NOT NULL,
-      description TEXT DEFAULT '',
-      status TEXT DEFAULT 'active',
-      priority INTEGER DEFAULT 3,
-      progress INTEGER DEFAULT 0,
-      sub_goals TEXT DEFAULT '[]',
-      metadata TEXT DEFAULT '{}',
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now')),
-      completed_at TEXT
-    );
-    CREATE INDEX IF NOT EXISTS idx_goals_chat_id ON goals(chat_id);
-    CREATE INDEX IF NOT EXISTS idx_goals_status ON goals(status);
-  `);
-  log.info('Goal tables ready');
+  try {
+    const db = getDb();
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS goals (
+        id TEXT PRIMARY KEY,
+        chat_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT DEFAULT '',
+        status TEXT DEFAULT 'active',
+        priority INTEGER DEFAULT 3,
+        progress INTEGER DEFAULT 0,
+        sub_goals TEXT DEFAULT '[]',
+        metadata TEXT DEFAULT '{}',
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')),
+        completed_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_goals_chat_id ON goals(chat_id);
+      CREATE INDEX IF NOT EXISTS idx_goals_status ON goals(status);
+    `);
+    log.info('Goal tables ready');
+  } catch (error: any) {
+    log.error(`Failed to ensure goal tables: ${error.message}`, { error });
+    throw new Error(`Database initialization failed for goals: ${error.message}`);
+  }
 }
 
 // ── CRUD Operations ───────────────────────────────────────

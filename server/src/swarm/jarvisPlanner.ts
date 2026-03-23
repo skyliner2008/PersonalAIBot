@@ -718,11 +718,7 @@ function buildAssignedStageA(
   return assigned;
 }
 
-function minimumCompletedDependencies(count: number): number {
-  if (count <= 1) return 1;
-  if (count === 2) return 1;
-  return Math.max(2, Math.ceil(count * 0.6));
-}
+const minimumCompletedDependencies = (total: number): number => Math.max(1, Math.ceil(total * 0.6));
 
 function parseExplicitLaneDirective(objective: string): ExplicitLaneDirective | null {
   const trimmed = objective.trim();

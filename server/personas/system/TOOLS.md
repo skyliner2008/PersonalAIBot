@@ -61,3 +61,7 @@ read_google_doc
 create_cron_job
 list_cron_jobs
 delete_cron_job
+ast_replace_function
+ast_add_import
+find_references
+ast_rename

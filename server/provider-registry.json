@@ -70,7 +70,7 @@
       "category": "llm",
       "type": "openai-compatible",
       "baseUrl": "https://api.openai.com/v1",
-      "defaultModel": "gpt-5.2-codex",
+      "defaultModel": "gpt-4o",
       "models": [
         "babbage-002",
         "chatgpt-image-latest",
@@ -892,10 +892,12 @@
   "fallbackOrder": {
     "llm": [
       "gemini",
-      "minimax",
+      "openrouter",
       "openai",
+      "anthropic",
       "groq",
-      "deepseek"
+      "deepseek",
+      "minimax"
     ],
     "embedding": [
       "gemini-embedding",

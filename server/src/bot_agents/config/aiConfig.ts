@@ -22,56 +22,67 @@ export interface MultiModelConfig {
 /**
  * Default model routing — สามารถ override ผ่าน Dashboard ได้
  */
+/**
+ * Default model routing — สามารถ override ผ่าน Dashboard ได้
+ * NOTE: These are initial defaults. ConfigManager.resolveModelConfig()
+ * dynamically falls back to any enabled provider if the active one is unavailable.
+ * OpenRouter with "auto" model is included as a universal fallback.
+ */
 export const modelRouting: Record<TaskType, MultiModelConfig> = {
-  [TaskType.GENERAL]: { 
-    active: { provider: 'gemini', modelName: 'gemini-2.0-flash' },
+  [TaskType.GENERAL]: {
+    active: { provider: 'gemini', modelName: 'gemini-2.5-flash' },
     fallbacks: [
-      { provider: 'gemini', modelName: 'gemini-2.5-flash' },
+      { provider: 'openrouter', modelName: 'auto' },
       { provider: 'openai', modelName: 'gpt-4o-mini' }
     ]
   },
-  [TaskType.COMPLEX]: { 
+  [TaskType.COMPLEX]: {
     active: { provider: 'gemini', modelName: 'gemini-2.5-flash' },
     fallbacks: [
-      { provider: 'openai', modelName: 'gpt-4o' },
-      { provider: 'gemini', modelName: 'gemini-2.0-flash' }
+      { provider: 'openrouter', modelName: 'auto' },
+      { provider: 'openai', modelName: 'gpt-4o' }
     ]
   },
-  [TaskType.VISION]: { 
+  [TaskType.VISION]: {
+    active: { provider: 'gemini', modelName: 'gemini-2.5-flash' },
+    fallbacks: [
+      { provider: 'openrouter', modelName: 'auto' },
+      { provider: 'openai', modelName: 'gpt-4o' }
+    ]
+  },
+  [TaskType.WEB_BROWSER]: {
+    active: { provider: 'gemini', modelName: 'gemini-2.5-flash' },
+    fallbacks: [
+      { provider: 'openrouter', modelName: 'auto' },
+      { provider: 'openai', modelName: 'gpt-4o-mini' }
+    ]
+  },
+  [TaskType.THINKING]: {
+    active: { provider: 'gemini', modelName: 'gemini-2.5-flash' },
+    fallbacks: [
+      { provider: 'openrouter', modelName: 'auto' },
+      { provider: 'openai', modelName: 'gpt-4o' }
+    ]
+  },
+  [TaskType.CODE]: {
+    active: { provider: 'gemini', modelName: 'gemini-2.5-flash' },
+    fallbacks: [
+      { provider: 'openrouter', modelName: 'auto' },
+      { provider: 'openai', modelName: 'gpt-4o' }
+    ]
+  },
+  [TaskType.DATA]: {
+    active: { provider: 'gemini', modelName: 'gemini-2.5-flash' },
+    fallbacks: [
+      { provider: 'openrouter', modelName: 'auto' },
+      { provider: 'openai', modelName: 'gpt-4o' }
+    ]
+  },
+  [TaskType.SYSTEM]: {
     active: { provider: 'gemini', modelName: 'gemini-2.0-flash' },
     fallbacks: [
+      { provider: 'openrouter', modelName: 'auto' },
       { provider: 'gemini', modelName: 'gemini-2.5-flash' }
-    ]
-  },
-  [TaskType.WEB_BROWSER]: { 
-    active: { provider: 'gemini', modelName: 'gemini-2.0-flash' },
-    fallbacks: [
-      { provider: 'gemini', modelName: 'gemini-2.5-flash' },
-      { provider: 'openai', modelName: 'gpt-4o-mini' }
-    ]
-  },
-  [TaskType.THINKING]: { 
-    active: { provider: 'gemini', modelName: 'gemini-2.5-flash' },
-    fallbacks: [
-      { provider: 'openai', modelName: 'gpt-4o' }
-    ]
-  },
-  [TaskType.CODE]: { 
-    active: { provider: 'gemini', modelName: 'gemini-2.5-flash' },
-    fallbacks: [
-      { provider: 'openai', modelName: 'gpt-4o' }
-    ]
-  },
-  [TaskType.DATA]: { 
-    active: { provider: 'gemini', modelName: 'gemini-2.5-flash' },
-    fallbacks: [
-      { provider: 'openai', modelName: 'gpt-4o' }
-    ]
-  },
-  [TaskType.SYSTEM]: { 
-    active: { provider: 'gemini', modelName: 'gemini-2.0-flash-lite' },
-    fallbacks: [
-      { provider: 'gemini', modelName: 'gemini-2.0-flash' }
     ]
   },
 };

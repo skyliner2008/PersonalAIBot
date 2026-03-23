@@ -67,11 +67,13 @@ export class SSEWriter {
   }
 
   sendToolResult(toolName: string, result: string, success: boolean, durationMs: number): void {
-    this.send({ type: 'tool_result', data: { tool: toolName, result: result.substring(0, 500), success, durationMs } });
+    const safeResult = String(result);
+    this.send({ type: 'tool_result', data: { tool: toolName, result: safeResult.substring(0, 500), success, durationMs } });
   }
 
   sendThinking(thought: string): void {
-    this.send({ type: 'thinking', data: { thought: thought.substring(0, 200) } });
+    const safeThought = String(thought);
+    this.send({ type: 'thinking', data: { thought: safeThought.substring(0, 200) } });
   }
 
   sendStatus(message: string): void {

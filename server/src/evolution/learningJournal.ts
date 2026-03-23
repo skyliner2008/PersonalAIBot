@@ -60,7 +60,7 @@ export function addLearning(
 
         // Index in vector store asynchronously (non-blocking)
         setImmediate(() => {
-            indexLearningInVectorStore(Number(newId), insight).catch(err => {
+            indexLearningInVectorStore(newId, insight).catch(err => {
                 log.warn('Async learning indexing failed', { error: String(err) });
             });
         });

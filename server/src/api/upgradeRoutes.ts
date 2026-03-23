@@ -13,6 +13,8 @@ import {
   getUpgradeStatus,
   toggleContinuousScan,
   notifyUserActivity,
+  approveDiff,
+  rejectDiff
 } from '../evolution/selfUpgrade.js';
 import type { ProposalStatus, ProposalType } from '../evolution/selfUpgrade.js';
 import { asyncHandler } from '../utils/errorHandler.js';
@@ -104,15 +106,69 @@ router.get('/proposals/:id/diff', asyncHandler(async (req, res) => {
   }
 
   const historyDir = path.resolve(process.cwd(), '../data/upgrade_history');
-  const beforeFile = path.join(historyDir, `proposal_${id}_before.txt`);
+  
+  // Also try to get the unified diff preview from DB
+  let diffPreview = '';
+  try {
+    const { getDb } = await import('../database/db.js');
+    const db = getDb();
+    const row = db.prepare('SELECT diff_preview FROM upgrade_proposals WHERE id = ?').get(id) as { diff_preview?: string } | undefined;
+    if (row?.diff_preview) {
+      diffPreview = row.diff_preview;
+    }
+  } catch (err) { /* ignore */ }
+
+  const beforeFile = path.join(historyDir, `proposal_${id}_before.txt`); // Single file legacy (or first file)
   const afterFile = path.join(historyDir, `proposal_${id}_after.txt`);
   
-  if (fs.existsSync(beforeFile) && fs.existsSync(afterFile)) {
+  // If unified diff exists, we prioritize returning it
+  if (diffPreview) {
+    let beforeContent = '';
+    let afterContent = '';
+    if (fs.existsSync(beforeFile) && fs.existsSync(afterFile)) {
+       beforeContent = fs.readFileSync(beforeFile, 'utf-8');
+       afterContent = fs.readFileSync(afterFile, 'utf-8');
+    }
+    res.json({ ok: true, before: beforeContent, after: afterContent, diff_preview: diffPreview });
+  } else if (fs.existsSync(beforeFile) && fs.existsSync(afterFile)) {
     const beforeContent = fs.readFileSync(beforeFile, 'utf-8');
     const afterContent = fs.readFileSync(afterFile, 'utf-8');
     res.json({ ok: true, before: beforeContent, after: afterContent });
   } else {
     res.status(404).json({ ok: false, error: 'Diff not found for this proposal' });
+  }
+}));
+
+// POST /api/upgrade/proposals/:id/approve-diff — อนุมัติการแก้โค้ดจาก diff_preview
+router.post('/proposals/:id/approve-diff', asyncHandler(async (req, res) => {
+  const id = parseInt(String(req.params.id));
+  if (!id) {
+    res.status(400).json({ ok: false, error: 'Missing id' });
+    return;
+  }
+
+  const success = approveDiff(id);
+  if (success) {
+    res.json({ ok: true, id, message: `Proposal #${id} approved and applied.` });
+  } else {
+    res.status(400).json({ ok: false, error: 'Failed to approve diff. Might not be in review_diff status or missing JSON state.' });
+  }
+}));
+
+// POST /api/upgrade/proposals/:id/reject-diff — ปฏิเสธการแก้โค้ดจาก diff_preview
+router.post('/proposals/:id/reject-diff', asyncHandler(async (req, res) => {
+  const id = parseInt(String(req.params.id));
+  const { reason } = req.body as { reason?: string };
+  if (!id) {
+    res.status(400).json({ ok: false, error: 'Missing id' });
+    return;
+  }
+
+  const success = rejectDiff(id, reason);
+  if (success) {
+    res.json({ ok: true, id, message: `Proposal #${id} diff rejected.` });
+  } else {
+    res.status(400).json({ ok: false, error: 'Failed to reject diff.' });
   }
 }));
 

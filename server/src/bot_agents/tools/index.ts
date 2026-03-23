@@ -11,7 +11,7 @@ import {
   clipboardRead, clipboardReadDeclaration,
   clipboardWrite, clipboardWriteDeclaration,
 } from './os.js';
-import { listFiles, listFilesDeclaration, readFileContent, readFileContentDeclaration, writeFileContent, writeFileContentDeclaration, deleteFile, deleteFileDeclaration, replaceCodeBlock, replaceCodeBlockDeclaration, searchCodebase, searchCodebaseDeclaration } from './file.js';
+import { listFiles, listFilesDeclaration, readFileContent, readFileContentDeclaration, writeFileContent, writeFileContentDeclaration, deleteFile, deleteFileDeclaration, replaceCodeBlock, replaceCodeBlockDeclaration, searchCodebase, searchCodebaseDeclaration, astReplaceFunction, astReplaceFunctionDeclaration, astAddImport, astAddImportDeclaration, findReferences, findReferencesDeclaration, astRename, astRenameDeclaration } from './file.js';
 import { browserNavigate, browserNavigateDeclaration, browserClick, browserClickDeclaration, browserType, browserTypeDeclaration, browserClose, browserCloseDeclaration } from './browser.js';
 import { webSearch, webSearchDeclaration, readWebpage, readWebpageDeclaration, mouseClick, mouseClickDeclaration, keyboardType, keyboardTypeDeclaration } from './limitless.js';
 import { systemToolDeclarations, getSystemToolHandlers, type SystemToolContext } from './system.js';
@@ -182,6 +182,10 @@ export const tools = [
   // Surgical Edit & Search Tools
   replaceCodeBlockDeclaration,
   searchCodebaseDeclaration,
+  astReplaceFunctionDeclaration,
+  astAddImportDeclaration,
+  findReferencesDeclaration,
+  astRenameDeclaration,
   // Browser Tools
   browserNavigateDeclaration,
   browserClickDeclaration,
@@ -245,6 +249,10 @@ export const getFunctionHandlers = (ctx: BotContext, sysCtx?: SystemToolContext)
     // Surgical Edit & Search
     replace_code_block: replaceCodeBlock,
     search_codebase: searchCodebase,
+    ast_replace_function: astReplaceFunction,
+    ast_add_import: astAddImport,
+    find_references: findReferences,
+    ast_rename: astRename,
     // Browser
     browser_navigate: browserNavigate,
     browser_click: browserClick,

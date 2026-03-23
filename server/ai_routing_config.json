@@ -4,7 +4,7 @@
     "general": {
       "active": {
         "provider": "gemini",
-        "modelName": "gemini-2.0-flash"
+        "modelName": "gemini-2.5-flash"
       },
       "fallbacks": []
     },
@@ -45,15 +45,15 @@
     },
     "data": {
       "active": {
-        "provider": "gemini",
-        "modelName": "gemini-2.5-flash"
+        "provider": "minimax",
+        "modelName": "MiniMax-M2.7"
       },
       "fallbacks": []
     },
     "system": {
       "active": {
-        "provider": "gemini",
-        "modelName": "gemini-2.5-flash"
+        "provider": "minimax",
+        "modelName": "MiniMax-M2.7"
       },
       "fallbacks": []
     }
@@ -65,7 +65,7 @@
         "general": {
           "active": {
             "provider": "gemini",
-            "modelName": "gemini-2.0-flash"
+            "modelName": "gemini-2.5-flash"
           },
           "fallbacks": []
         },

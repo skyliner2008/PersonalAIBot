@@ -253,11 +253,17 @@ export async function login(email?: string, password?: string): Promise<boolean>
  * Navigate to a specific Facebook page.
  */
 export async function navigateTo(url: string, page?: Page): Promise<Page> {
-  const p = page || await getMainPage();
-  await navigateWithRetry(p, url);
-  await humanDelay(2000, 4000);
-  await dismissPopups(p);
-  return p;
+  try {
+    const p = page || await getMainPage();
+    await navigateWithRetry(p, url);
+    await humanDelay(2000, 4000);
+    await dismissPopups(p);
+    return p;
+  } catch (e) {
+    log.error('Navigation error in navigateTo', { url, error: String(e) });
+    await addLog('facebook', 'Navigation failed', String(e), 'error');
+    throw e;
+  }
 }
 
 /**

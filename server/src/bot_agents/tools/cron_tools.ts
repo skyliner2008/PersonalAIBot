@@ -86,9 +86,9 @@ export function createCronHandlers(context: any) {
         }
 
         const id = uuidv4();
-        const botId = context.botId || 'default';
-        const chatId = context.session_id || 'unknown';
-        const platform = context.platform || 'web'; // web, line, telegram
+        const botId = safeContext.botId || 'default';
+        const chatId = safeContext.session_id || 'unknown';
+        const platform = safeContext.platform || 'web'; // web, line, telegram
 
         dbRun(`
           INSERT INTO cron_jobs (id, name, cron_expression, prompt, bot_id, chat_id, platform, is_active)
@@ -113,7 +113,7 @@ ID อ้างอิง: ${id}`;
 
     list_cron_jobs: async () => {
       try {
-        const chatId = context.session_id || 'unknown';
+        const chatId = safeContext.session_id || 'unknown';
         const jobs = dbAll(
           'SELECT id, name, cron_expression, prompt, is_active FROM cron_jobs WHERE chat_id = ? ORDER BY created_at DESC',
           [chatId]
@@ -143,7 +143,7 @@ ID อ้างอิง: ${id}`;
         if (typeof job_id !== 'string' || !job_id.trim()) {
           return `ล้มเหลว: 'job_id' ต้องเป็นข้อความที่ไม่ว่างเปล่า`;
         }
-        const chatId = context.session_id || 'unknown';
+        const chatId = safeContext.session_id || 'unknown';
         
         // Ensure user only deletes their own jobs
         const existing = dbGet('SELECT id FROM cron_jobs WHERE id = ? AND chat_id = ?', [job_id, chatId]);

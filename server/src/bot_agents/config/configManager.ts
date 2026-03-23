@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { TaskType, ModelConfig, MultiModelConfig, modelRouting as defaultMultiConfig, getBestModelForTask } from './aiConfig.js';
-import { 
+import {
   getProvider,
   getEnabledProviders,
   getProvidersByCategory
@@ -13,6 +13,24 @@ import { createLogger } from '../../utils/logger.js';
 const logger = createLogger('ConfigManager');
 const CONFIG_PATH = path.join(process.cwd(), 'ai_routing_config.json');
 
+// ============================================================
+// Stale Model Migration — maps deprecated/non-existent model names
+// to their current valid equivalents. Updated whenever models are
+// retired or renamed. Format: 'old-model-name' → 'new-model-name'
+// ============================================================
+const STALE_MODEL_MAP: Record<string, string> = {
+  // Gemini models mapping (removed preview-to-stale redirects to allow actual use)
+
+  // OpenAI models that don't exist yet / were placeholders
+  'gpt-5.2-codex': 'gpt-4o',
+  'gpt-5.1-codex': 'gpt-4o',
+  'gpt-5-codex': 'gpt-4o',
+
+  // Legacy Gemini aliases
+  'gemini-pro': 'gemini-1.5-pro',
+  'gemini-flash': 'gemini-2.0-flash',
+};
+
 // Cost-optimized model routing:
 // - **Database Persistence**: ย้ายการเก็บสถานะ เปิด/ปิด ไปไว้ในฐานข้อมูล (Database) แทนไฟล์ JSON ทำให้ค่าที่ท่านตั้งไว้จะไม่หายไปแม้อัปเดตระบบหรือรันไฟล์ install ครับ
 // - **Smart Model Resolution**: ปรับปรุง Gemini Live ให้ตรวจสอบความสามารถของโมเดลก่อนเชื่อมต่อ หากโมเดลที่ท่านเลือกไม่รองรับระบบเสียง ระบบจะสลับไปใช้โมเดลที่เหมาะสมที่สุด (เช่น `native-audio-preview`) ให้โดยอัตโนมัติ
@@ -21,15 +39,17 @@ const CONFIG_PATH = path.join(process.cwd(), 'ai_routing_config.json');
 // - **Settings Persist**: ทดสอบรัน `install.bat` แล้ว ค่าเปิด/ปิด Gemini/OpenRouter ยังอยู่ครบถ้วนครับ
 // - **Live Connection Fix**: Gemini Live สามารถเชื่อมต่อได้สำเร็จแล้วโดยไม่ติดขัดเรื่องโมเดลไม่รองรับ (No more 1008 error)
 // - **Git Sync**: พุชงานทั้งหมดขึ้น main เรียบร้อยแล้ว (Hash: `7613cade`)
+// Legacy defaultConfig (single-model) — only used for backwards-compat migration.
+// Actual routing uses defaultMultiConfig from aiConfig.ts which includes fallbacks.
 const defaultConfig: Record<TaskType, ModelConfig> = {
-  [TaskType.GENERAL]:     { provider: 'gemini', modelName: 'gemini-2.0-flash-lite' },
+  [TaskType.GENERAL]:     { provider: 'gemini', modelName: 'gemini-2.5-flash' },
   [TaskType.COMPLEX]:     { provider: 'gemini', modelName: 'gemini-2.5-flash' },
-  [TaskType.VISION]:      { provider: 'gemini', modelName: 'gemini-2.0-flash' },
-  [TaskType.WEB_BROWSER]: { provider: 'gemini', modelName: 'gemini-2.0-flash' },
+  [TaskType.VISION]:      { provider: 'gemini', modelName: 'gemini-2.5-flash' },
+  [TaskType.WEB_BROWSER]: { provider: 'gemini', modelName: 'gemini-2.5-flash' },
   [TaskType.THINKING]:    { provider: 'gemini', modelName: 'gemini-2.5-flash' },
   [TaskType.CODE]:        { provider: 'gemini', modelName: 'gemini-2.5-flash' },
   [TaskType.DATA]:        { provider: 'gemini', modelName: 'gemini-2.5-flash' },
-  [TaskType.SYSTEM]:      { provider: 'gemini', modelName: 'gemini-2.0-flash-lite' },
+  [TaskType.SYSTEM]:      { provider: 'gemini', modelName: 'gemini-2.0-flash' },
 };
 
 export interface BotRoutingConfig {
@@ -53,7 +73,8 @@ export class ConfigManager {
   private loadConfig(): SystemRoutingConfig {
     try {
       if (fs.existsSync(CONFIG_PATH)) {
-        const raw = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+        const rawText = fs.readFileSync(CONFIG_PATH, 'utf8');
+        const raw = JSON.parse(rawText);
         const isNewFormat = raw && typeof raw === 'object' && 'routes' in raw;
         const configRoutesCandidate = isNewFormat ? raw.routes : raw;
         const configRoutes = (configRoutesCandidate && typeof configRoutesCandidate === 'object') ? configRoutesCandidate : {};
@@ -66,7 +87,7 @@ export class ConfigManager {
               const bCfg = botCfg as any;
               const validatedBotRoutes = { ...defaultMultiConfig };
               const inputBotRoutes = (bCfg.routes && typeof bCfg.routes === 'object') ? bCfg.routes : {};
-              
+
               for (const key of Object.values(TaskType)) {
                 const normalized = this.normalizeMultiModelConfig((inputBotRoutes as any)[key]);
                 if (normalized) {
@@ -90,19 +111,44 @@ export class ConfigManager {
             validated[key] = normalized;
           }
         }
-        return { autoRouting, routes: validated, botOverrides };
+
+        const result: SystemRoutingConfig = { autoRouting, routes: validated, botOverrides };
+
+        // Migration: detect if the persisted config differs after normalization
+        // (stale model names were replaced). If so, re-save with migrated values.
+        const migratedText = JSON.stringify(result, null, 2);
+        const oldNormalized = JSON.stringify({ autoRouting, routes: validated, botOverrides }, null, 2);
+        if (this.detectStaleMigration(rawText, result)) {
+          logger.info('[Migration] Persisted config had stale model names — re-saving with migrated values');
+          this.saveConfig(result);
+        }
+
+        return result;
       }
     } catch (err) {
       logger.error('Failed to load config, using defaults:', err);
     }
     // Save defaults if config doesn't exist or is invalid
-    const def: SystemRoutingConfig = { 
-      autoRouting: true, 
+    const def: SystemRoutingConfig = {
+      autoRouting: true,
       routes: { ...defaultMultiConfig },
       botOverrides: {}
     };
     this.saveConfig(def);
     return def;
+  }
+
+  /**
+   * Detect if the raw persisted config JSON contains any stale model names
+   * that would have been migrated during normalization.
+   */
+  private detectStaleMigration(rawText: string, _config: SystemRoutingConfig): boolean {
+    for (const staleModel of Object.keys(STALE_MODEL_MAP)) {
+      if (rawText.includes(staleModel)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   public getConfig(): SystemRoutingConfig {
@@ -303,10 +349,17 @@ export class ConfigManager {
     }
 
     const provider = String((value as any).provider || '').trim();
-    const modelName = String((value as any).modelName || '').trim();
+    let modelName = String((value as any).modelName || '').trim();
 
     if (!provider || !getAgentCompatibleProvider(provider)) {
       return null;
+    }
+
+    // Migrate stale/deprecated model names to current valid equivalents
+    if (modelName && STALE_MODEL_MAP[modelName]) {
+      const oldName = modelName;
+      modelName = STALE_MODEL_MAP[modelName];
+      logger.info(`[Migration] Model "${oldName}" → "${modelName}" (stale model replaced)`);
     }
 
     const resolvedModel = modelName || getAgentProviderDefaultModel(provider);

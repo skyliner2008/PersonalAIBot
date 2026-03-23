@@ -68,10 +68,12 @@ class SimpleVectorIndex {
         const data = JSON.parse(fs.readFileSync(this.indexPath, 'utf-8'));
         this.index.vectors = data.vectors || [];
         this.index.ids = data.ids || [];
-        if (data.documents) {
+        if (Array.isArray(data.documents)) {
           for (const doc of data.documents) {
             this.index.documents.set(doc.id, doc);
           }
+        } else if (data.documents) {
+          log.warn('Vector index metadata "documents" is not an array, skipping load.', { type: typeof data.documents });
         }
         log.info(`Loaded vector index: ${this.index.ids.length} vectors`);
       }

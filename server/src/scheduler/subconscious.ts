@@ -248,7 +248,7 @@ async function consolidateGraphRAG(): Promise<number> {
         extracted++;
       } catch (err: any) {
         // ✅ FIX: ไม่ให้ error ตัวเดียวหยุดทั้ง loop
-        log.error(`GraphRAG extraction failed for ${conv.id}`, { error: err.message });
+        log.error('Subconscious failed to extract graph knowledge', { error: err.message, chatId: conv.id });
       }
 
       await new Promise(res => setTimeout(res, API_DELAY_MS));

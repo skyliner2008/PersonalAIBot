@@ -24,21 +24,27 @@ const API_VERSIONS = ['v1beta', 'v1'] as const;
 
 /**
  * Alias map for common short names → actual API model names.
- * Users may configure "gemini-3.1-pro" in settings but the API
- * requires "gemini-3.1-pro-preview" (preview suffix).
+ * When users configure a short name, this map resolves it to
+ * the canonical API identifier. Only include aliases that differ
+ * from their resolved name — passthrough entries are optional.
  */
 const MODEL_ALIAS_MAP: Record<string, string> = {
-  // New Generation (March 2026 Models)
-  'gemini-3.1-pro': 'gemini-3.1-pro-preview',
-  'gemini-3-pro': 'gemini-3-pro-preview',
-  'gemini-3.1-flash': 'gemini-3-pro-preview', // 3.1 Flash uses Pro preview ID currently
-  'gemini-3-flash': 'gemini-3-flash-preview',
-  'gemini-2.5-flash': 'gemini-2.5-flash',
+  // Current Generation (2025-2026 Models) — verified against Gemini API
+  // Gemini 3 Series (Latest 2026)
+  'gemini-3-flash-preview': 'gemini-3-flash-preview',
+  'gemini-3.1-flash-lite': 'gemini-3.1-flash-lite',
+
+  // Gemini 2.5 Series (Previews)
+  'gemini-2.5-flash': 'gemini-2.5-flash', 
   'gemini-2.5-flash-lite': 'gemini-2.5-flash-lite',
+  'gemini-2.5-pro': 'gemini-2.5-pro',
+
+  // Gemini 2.0 Series (Stable)
+  'gemini-2-flash': 'gemini-2.0-flash',
+  'gemini-2.0-flash': 'gemini-2.0-flash',
+  'gemini-2.0-flash-lite': 'gemini-2.0-flash-lite',
   
   // Legacy Aliases
-  'gemini-2.0-flash-lite': 'gemini-2.5-flash-lite', 
-  'gemini-2.0-flash': 'gemini-2.5-flash',           
   'gemini-1.5-flash': 'gemini-1.5-flash',
   'gemini-1.5-pro': 'gemini-1.5-pro',
 };
@@ -148,12 +154,14 @@ export class GeminiProvider implements AIProvider {
         toolsConfig.push({ googleSearch: {} });
       }
 
-      const requestPayload = {
+      // SDK v1.x (including v1beta) expects systemInstruction and tools at the top level
+      // of the request object, not inside the generationConfig (config).
+      const requestPayload: any = {
         model: modelName,
         contents,
+        systemInstruction,
+        tools: toolsConfig.length > 0 ? toolsConfig : undefined,
         config: {
-          systemInstruction,
-          tools: toolsConfig.length > 0 ? toolsConfig : undefined,
           temperature: 0.7,
           maxOutputTokens: 16384,
         }
@@ -201,7 +209,7 @@ export class GeminiProvider implements AIProvider {
           };
           
           try {
-            response = await this.aiFallback!.models.generateContent(v1Payload);
+            response = await this.aiFallback!.models.generateContent(v1Payload); // aiFallback guaranteed non-null: assigned above or pre-existing
           } catch (v1Err: any) {
             // If v1 STILL fails with INVALID_ARGUMENT, it might be due to remaining fields
             logger.error(`v1 retry also failed for ${modelName}:`, v1Err);
@@ -368,9 +376,12 @@ export class GeminiProvider implements AIProvider {
         }
       }
 
-      const uniqueSorted = Array.from(new Set(allModels)).sort();
-      if (uniqueSorted.length > 0) {
-        return uniqueSorted;
+      // Include predefined aliases to ensure they are available in UI (even if not listed by API)
+      const aliasModels = Object.keys(MODEL_ALIAS_MAP);
+      const combinedModels = Array.from(new Set([...allModels, ...aliasModels])).sort();
+
+      if (combinedModels.length > 0) {
+        return combinedModels;
       }
 
       throw new Error('No models returned from API');
@@ -390,9 +401,9 @@ export class GeminiProvider implements AIProvider {
       }
       // Fallback list for LLM mode if the API call entirely fails
       return [
+        'gemini-2.5-flash',
         'gemini-2.0-flash',
-        'gemini-2.0-flash-lite-preview-02-05',
-        'gemini-1.5-pro',
+        'gemini-2.0-flash-lite',
         'gemini-1.5-flash'
       ];
     }

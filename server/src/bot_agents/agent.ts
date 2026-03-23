@@ -266,7 +266,8 @@ export class Agent {
       const useGoogleSearch = enabledToolNames.includes('google_search') && taskType !== TaskType.CODE;
 
       // --- DYNAMIC TOOL ROUTING (Token Optimization) ---
-      if (activeTools.length > 5) {
+      // Apply to all task types if tool count is high (> 10)
+      if (activeTools.length > 10) {
         try {
           const routerPrompt = `You are a tool selector. User said: "${cleanMessage}". Available tools: ${activeTools.map(t => t.name).join(', ')}. Return ONLY a JSON array of max 5 tool names needed. Return [] if none needed. Do NOT use markdown code blocks, just the JSON array.`;
           const supportConfig = configManager.resolveModelConfig(TaskType.SYSTEM, ctx?.botId).config;
@@ -274,16 +275,37 @@ export class Agent {
           if (p) {
             const routerRes = await p.generateResponse(supportConfig.active.modelName, 'You are a tool selector.', [{ role: 'user', parts: [{ text: routerPrompt }] }]);
             if (routerRes.text) {
-             const match = routerRes.text.match(/\[.*?\]/s);
-             if (match) {
-                 const selected = JSON.parse(match[0]);
-                 if (Array.isArray(selected)) {
-                     // Always keep some core self-reflection tools if they were enabled
-                     const essential = ['memory_save', 'search_knowledge', 'replace_code_block', 'run_command', 'read_file', 'system_terminal'];
-                     activeTools = activeTools.filter(t => t.name && (selected.includes(t.name) || essential.includes(t.name)));
-                     console.log(`[DynamicRouter] Tools reduced to ${activeTools.length}:`, activeTools.map(t=>t.name));
-                 }
-             }
+              // Robust extraction: find all occurrences of something that looks like a JSON array of strings
+              const matches = routerRes.text.match(/\[\s*".*?"\s*(?:,\s*".*?"\s*)*\]/gs);
+              if (matches && matches.length > 0) {
+                  // Try to find the first one that is actually valid JSON
+                  for (let jsonStr of matches) {
+                      // Resilience: Handle common LLM formatting errors (single quotes)
+                      if (jsonStr.includes("'") && !jsonStr.includes('"')) {
+                        jsonStr = jsonStr.replace(/'/g, '"');
+                      }
+                      
+                      try {
+                        const selected = JSON.parse(jsonStr);
+                        if (Array.isArray(selected)) {
+                            // Always keep essential tools — include AST tools and critical system tools
+                            const essential = [
+                              'memory_save', 'search_knowledge', 'replace_code_block', 'run_command', 'read_file', 'system_terminal',
+                              'read_file_content', 'write_file_content', 'search_codebase', 'ast_replace_function', 'ast_add_import', 
+                              'find_references', 'ast_rename', 'list_files', 'get_current_time', 'system_info', 'view_file', 'multi_replace_file_content'
+                            ];
+                            const validatedTools = selected.filter(s => typeof s === 'string' && activeTools.some(t => t.name === s));
+                            activeTools = activeTools.filter(t => t.name && (validatedTools.includes(t.name) || essential.includes(t.name)));
+                            console.log(`[DynamicRouter] Tools successfully reduced to ${activeTools.length}:`, activeTools.map(t=>t.name));
+                            break; // Success!
+                        }
+                      } catch (jsonErr) {
+                        // try next match
+                      }
+                  }
+              } else {
+                  console.warn('[DynamicRouter] No valid JSON array found in response:', routerRes.text);
+              }
             }
           }
         } catch (e) {

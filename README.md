@@ -1,6 +1,11 @@
 <div align="center">
   <h1>🤖 PersonalAIBotV2</h1>
   <p><strong>Advanced Agentic AI Platform with Multi-Agent Swarm Orchestration, 4-Layer Memory, and Autonomous Self-Evolution</strong></p>
+  <p>
+    - **Gemini 3 Unlock**: ปลดล็อกการเลือกใช้รุ่น `gemini-3-flash-preview` และ `gemini-3.1` อย่างถาวร โดยการแก้ปัญหา Alias Persistence และลบเงื่อนไขการดีดกลับ (Stale Model Map) เพื่อให้ใช้งานรุ่นพรีเมียมล่าสุดได้จริง 🔓🛰️
+    - **DynamicRouter Resilience**: เพิ่มระบบป้องกัน SyntaxError ใน `agent.ts` โดยใช้ Regex แบบเจาะจงเฉพาะ Tool List และระบบ Multi-match retry เพื่อให้การประมวลผล JSON นิ่งและเสถียรที่สุด 🧩🚀
+    - **Evolution Engine Updated**: ปรับปรุงระบบ Self-Upgrade ให้จดจำเครื่องมือสำคัญ (AST Tools) เสมอ ป้องกันการลบเครื่องมือที่จำเป็นในการซ่อมแซมตัวเอง 🧠🛠️
+  </p>
 
   <p>
     <img src="https://img.shields.io/badge/TypeScript-5.7-007ACC?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
@@ -22,6 +27,7 @@
 - รับคำสั่งผ่าน **LINE, Telegram, Web Dashboard และ Terminal**
 - วิเคราะห์ intent และ route งานซับซ้อนไปยัง **Swarm of AI Agents**
 - **จำทุกการสนทนาตลอดชาติ** ด้วย 4-Layer Memory + Vector Embeddings
+- **AST-Aware Code Refactoring (v2.1)**: ระบบแก้ไขโค้ดที่เข้าใจโครงสร้างภาษา (AST) อย่างแม่นยำ รองรับการเปลี่ยนชื่อตัวแปรแบบ Global (`ast_rename`), การแทนที่ฟังก์ชัน (`ast_replace_function`), และการจัดการ Import อัตโนมัติ (`ast_add_import`)
 - **แก้โค้ดตัวเองได้ (v2.1)** พร้อมระบบ rollback ป้องกันการพัง และระบบ **Resilient Batch Implementation** ที่ทำงานต่อเนื่องข้ามการรีสตาร์ท (ปิดเป็นค่าเริ่มต้นเพื่อความปลอดภัย)
 - **Zero-Config Voice Experience**: ระบบสำรองการโทรด้วยเสียง (Automatic STT Fallback) พร้อมระบบล้าง URL Autostart ป้องกันการโทรเองซ้ำซ้อน
 - **Gemini 2.x/3.x Optimized**: รองรับ Gemini 2.5 Flash/Pro และ Gemini 3.1 Pro เต็มรูปแบบ พร้อมระบบ Model Routing ที่เสถียรสำหรับผู้ใช้ Paid Tier 1
@@ -332,7 +338,7 @@ terminal:list     → List active sessions
 
 | หมวด | Tools |
 |------|-------|
-| **OS & File** | `run_command`, `run_python`, `read_file_content`, `replace_code_block`, `search_codebase` |
+| **OS & File** | `run_command`, `run_python`, `read_file_content`, `replace_code_block`, `search_codebase`, `ast_replace_function`, `ast_add_import`, `find_references`, `ast_rename` |
 | **Browser** | `mouse_click`, `keyboard_type`, `screenshot_desktop`, `fetch_url` |
 | **Web** | `google_search`, `extract_table` |
 | **Media** | `generate_image`, `generate_speech`, `generate_video` (Provider Agnostic) |

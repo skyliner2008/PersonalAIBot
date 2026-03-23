@@ -9,8 +9,12 @@
 // 5. ใช้ dynamic model switching ตาม task
 
 import { getDb, addLog, trackUpgradeTokens, getSetting, upsertCodebaseNode, searchCodebaseMapByDependencies } from '../database/db.js';
+import * as diff from 'diff';
 import { createLogger } from '../utils/logger.js';
 import { logEvolution, addLearning } from './learningJournal.js';
+import { generateTestForChange, runGeneratedTest } from './testGenerator.js';
+import { refactorManager } from './refactorManager.js';
+import { Node } from 'ts-morph';
 import { aiChat } from '../ai/aiRouter.js';
 import { getSwarmCoordinator } from '../swarm/swarmCoordinator.js';
 import { getRootAdminIdentity } from '../system/rootAdmin.js';
@@ -28,12 +32,14 @@ const log = createLogger('SelfUpgrade');
 
 function getImplementModel(): string {
   // Use premium Code or Agent Model for actual patching/implementation
-  return getSetting('ai_task_code_generation_model') || getSetting('ai_task_agent_model') || getSetting('ai_model') || 'gemini-2.0-flash';
+  // Fallback is empty string — provider runtime resolves to the first enabled provider's default
+  return getSetting('ai_task_code_generation_model') || getSetting('ai_task_agent_model') || getSetting('ai_model') || '';
 }
 
 function getScanModel(): string {
   // Use fast, cheaper model for bulk context scanning
-  return getSetting('ai_task_system_model') || getSetting('ai_task_data_model') || getSetting('ai_model') || 'gemini-2.0-flash';
+  // Fallback is empty string — provider runtime resolves to the first enabled provider's default
+  return getSetting('ai_task_system_model') || getSetting('ai_task_data_model') || getSetting('ai_model') || '';
 }
 
 // ── Configuration ──
@@ -226,7 +232,7 @@ let _currentRootDir = '';
 
 // ── Proposal Types ──
 export type ProposalType = 'bug' | 'feature' | 'optimization' | 'refactor' | 'tool' | 'security';
-export type ProposalStatus = 'pending' | 'approved' | 'rejected' | 'implemented' | 'implementing';
+export type ProposalStatus = 'pending' | 'approved' | 'rejected' | 'implemented' | 'implementing' | 'review_diff';
 export type ProposalPriority = 'low' | 'medium' | 'high' | 'critical';
 
 export interface UpgradeProposal {
@@ -614,6 +620,16 @@ export function insertProposal(proposal: Omit<UpgradeProposal, 'id' | 'created_a
     ).get(normalizedPath) as { count: number };
     if (fileRejectCount && fileRejectCount.count >= 5) {
       log.debug(`Skipped proposal — file ${normalizedPath} has ${fileRejectCount.count} recent rejections`);
+      return { id: 0, isNew: false };
+    }
+
+    // Skip if a similar fix was already implemented for the same file recently
+    // (prevents "fix already implemented" planning rejections)
+    const recentlyImplemented = db.prepare(
+      `SELECT id FROM upgrade_proposals WHERE file_path = ? AND status = 'implemented' AND title = ? AND created_at > datetime('now', '-14 days') LIMIT 1`
+    ).get(normalizedPath, proposal.title);
+    if (recentlyImplemented) {
+      log.debug(`Skipped proposal — same fix already implemented for ${normalizedPath}`);
       return { id: 0, isNew: false };
     }
 
@@ -1179,13 +1195,31 @@ async function updateCodeEmbeddings(rootDir: string): Promise<number> {
 
 // ── Auto Implementation Helpers ──
 
-/** Helper to save file diffs for history */
-function saveUpgradeDiff(id: number, original: string, modified: string): void {
+/** Helper to save file diffs for history and generate unified diffs for preview */
+function saveUpgradeDiff(id: number, filePath: string, original: string, modified: string): void {
   try {
     const historyDir = path.resolve(process.cwd(), '../data/upgrade_history');
     if (!fs.existsSync(historyDir)) fs.mkdirSync(historyDir, { recursive: true });
-    fs.writeFileSync(path.join(historyDir, `proposal_${id}_before.txt`), original, 'utf-8');
-    fs.writeFileSync(path.join(historyDir, `proposal_${id}_after.txt`), modified, 'utf-8');
+    
+    // Extract base filename for the backup
+    const baseName = path.basename(filePath);
+    fs.writeFileSync(path.join(historyDir, `proposal_${id}_before_${baseName}.txt`), original, 'utf-8');
+    fs.writeFileSync(path.join(historyDir, `proposal_${id}_after_${baseName}.txt`), modified, 'utf-8');
+
+    // Generate unified diff
+    const patch = diff.createPatch(filePath, original, modified, 'Original', 'Modified', { context: 3 });
+    
+    // Save to database
+    const db = getDb();
+    db.prepare(`
+      UPDATE upgrade_proposals 
+      SET diff_preview = CASE 
+        WHEN diff_preview IS NULL THEN ? 
+        ELSE diff_preview || '\n\n' || ? 
+      END
+      WHERE id = ?
+    `).run(patch, patch, id);
+    
   } catch (e: any) {
     log.error(`[SelfUpgrade] Failed to save code diffs for #${id}: ${e.message}`);
   }
@@ -1665,94 +1699,67 @@ async function analyzeImpact(rootDir: string, targetFilePath: string, proposalDe
   };
 
   try {
-    const content = fs.readFileSync(fullPath, 'utf-8');
-
-    // 1. Extract all exported symbols from the target file
-    const exportPatterns = [
-      /export\s+(?:async\s+)?function\s+(\w+)/g,      // export function foo
-      /export\s+(?:const|let|var)\s+(\w+)/g,           // export const foo
-      /export\s+(?:interface|type|enum|class)\s+(\w+)/g, // export interface Foo
-      /export\s+\{\s*([^}]+)\}/g,                      // export { foo, bar }
-    ];
-
-    for (const pattern of exportPatterns) {
-      let match;
-      while ((match = pattern.exec(content)) !== null) {
-        const symbols = match[1].split(',').map(s => s.trim().split(' as ')[0].trim());
-        report.exportedSymbols.push(...symbols.filter(s => s.length > 0));
-      }
-    }
-
-    // Deduplicate
-    report.exportedSymbols = [...new Set(report.exportedSymbols)];
-
-    if (report.exportedSymbols.length === 0) {
-      report.riskLevel = 'safe';
-      report.analysis = `File "${targetFilePath}" exports no public symbols — safe to modify in isolation.`;
+    // 1. Initialize and load project
+    await refactorManager.initialize();
+    
+    // 2. Get exports using AST
+    const sourceFile = (refactorManager as any).project.getSourceFile(fullPath);
+    if (!sourceFile) {
+      report.analysis = "Could not load file into AST project.";
       return report;
     }
 
-    // 2. Search codebase for files that import FROM the target file
-    const targetModuleName = targetFilePath
-      .replace(/\\/g, '/')
-      .replace(/\.(ts|tsx|js|jsx)$/, '')
-      .replace(/^src\//, '');
-
-    // Build search patterns for import statements
-    const searchPatterns = [
-      targetModuleName,
-      path.basename(targetFilePath).replace(/\.(ts|tsx|js|jsx)$/, ''),
-    ];
-
-    const srcDir = rootDir;
-    const allFiles = await buildFileIndex(rootDir);
-
-    for (const file of allFiles) {
-      if (path.resolve(file) === path.resolve(fullPath)) continue; // skip self
-
-      try {
-        const fileContent = fs.readFileSync(file, 'utf-8');
-        const relFile = path.relative(rootDir, file).replace(/\\/g, '/');
-
-        // Check if this file imports from the target
-        const importMatch = searchPatterns.some(pattern =>
-          fileContent.includes(pattern)
-        );
-
-        if (importMatch) {
-          // Find which specific symbols are used
-          const usedSymbols = report.exportedSymbols.filter(sym => {
-            const symRegex = new RegExp(`\\b${sym}\\b`);
-            return symRegex.test(fileContent);
-          });
-
-          if (usedSymbols.length > 0) {
-            report.callerFiles.set(relFile, usedSymbols);
+    const exportDeclarations = sourceFile.getExportedDeclarations();
+    for (const [name, declarations] of exportDeclarations) {
+      report.exportedSymbols.push(name);
+      
+      // 3. Find external references for each exported symbol
+      for (const decl of declarations) {
+        if (Node.isFunctionDeclaration(decl) || Node.isVariableDeclaration(decl) || Node.isClassDeclaration(decl) || Node.isInterfaceDeclaration(decl)) {
+          const refs = decl.findReferences();
+          for (const refSym of refs) {
+            for (const ref of refSym.getReferences()) {
+              const refFile = ref.getSourceFile();
+              if (refFile.getFilePath() === sourceFile.getFilePath()) continue; // skip self
+              
+              const relPath = path.relative(process.cwd(), refFile.getFilePath()).replace(/\\/g, '/');
+              const existing = report.callerFiles.get(relPath) || [];
+              if (!existing.includes(name)) {
+                existing.push(name);
+                report.callerFiles.set(relPath, existing);
+              }
+            }
           }
         }
-      } catch { /* skip unreadable */ }
+      }
     }
 
-    // 3. Determine affected files — files that likely need changes too
+    report.exportedSymbols = [...new Set(report.exportedSymbols)];
+
+    // 4. Determine affected files
     report.affectedFiles = [...report.callerFiles.keys()];
 
-    // 4. Assess risk level
+    // 5. Assess risk level
     if (report.affectedFiles.length === 0) {
       report.riskLevel = 'safe';
-      report.analysis = `File "${targetFilePath}" exports ${report.exportedSymbols.length} symbols but none are used externally — safe to modify.`;
+      if (report.exportedSymbols.length === 0) {
+        report.analysis = `File "${targetFilePath}" exports no public symbols — safe to modify in isolation.`;
+      } else {
+        report.analysis = `File "${targetFilePath}" exports ${report.exportedSymbols.length} symbols but none are used externally.`;
+      }
     } else if (report.affectedFiles.length <= 3) {
       report.riskLevel = 'moderate';
-      report.analysis = `File "${targetFilePath}" is imported by ${report.affectedFiles.length} files. Symbols used: ${[...report.callerFiles.entries()].map(([f, syms]) => `${f} uses [${syms.join(', ')}]`).join('; ')}. Changes to exported interfaces/functions MUST be synchronized across these files.`;
+      report.analysis = `File "${targetFilePath}" is imported by ${report.affectedFiles.length} files. Symbols used: ${[...report.callerFiles.entries()].map(([f, syms]) => `${f} uses [${syms.join(', ')}]`).join('; ')}. Changes to exported APIs MUST be synchronized.`;
     } else {
       report.riskLevel = 'high';
-      report.analysis = `File "${targetFilePath}" is a widely-imported module (${report.affectedFiles.length} dependents). HIGH RISK — changes to exported APIs will cascade across: ${report.affectedFiles.slice(0, 8).join(', ')}${report.affectedFiles.length > 8 ? ` and ${report.affectedFiles.length - 8} more` : ''}. Requires careful multi-file coordination.`;
+      report.analysis = `File "${targetFilePath}" is a widely-imported module (${report.affectedFiles.length} dependents). HIGH RISK — changes to exported APIs will cascade across: ${report.affectedFiles.slice(0, 8).join(', ')}${report.affectedFiles.length > 8 ? ` and ${report.affectedFiles.length - 8} more` : ''}.`;
     }
 
-    log.info(`Impact analysis for "${targetFilePath}": risk=${report.riskLevel}, ${report.affectedFiles.length} affected files, ${report.exportedSymbols.length} exported symbols`);
+    log.info(`Impact analysis (AST) for "${targetFilePath}": risk=${report.riskLevel}, ${report.affectedFiles.length} affected files`);
   } catch (err: any) {
-    log.warn(`Impact analysis failed for "${targetFilePath}": ${err.message}`);
+    log.warn(`Impact analysis (AST) failed for "${targetFilePath}": ${err.message}`);
     report.riskLevel = 'moderate';
-    report.analysis = `Impact analysis could not be completed — proceed with caution.`;
+    report.analysis = `Impact analysis could not be completed accurately — proceed with caution. Error: ${err.message}`;
   }
 
   return report;
@@ -1766,9 +1773,12 @@ function serializeImpactReport(report: ImpactReport): { affected_files: string; 
   };
 }
 
-/** Helper to select best specialists */
+/** Helper to select best specialists for code implementation.
+ *  NOTE: Only include specialists that can EDIT files, not review-only ones.
+ *  'reviewer' was removed because it doesn't have file-editing tools and caused
+ *  46% of rejections ("completed the task but did not modify any target file"). */
 function getSortedImplementationSpecialists(swarmCoordinator: any): string[] {
-  const implementationSpecialists = ['coder', 'reviewer'];
+  const implementationSpecialists = ['coder', 'tester', 'general'];
   const availableSpecs = swarmCoordinator.getAvailableSpecialists();
   const runtimeHealth = swarmCoordinator.getSpecialistRuntimeHealth();
 
@@ -2176,13 +2186,16 @@ ${commonSafetyRules}
 
 MULTI-FILE SPECIFIC RULES:
 1. If changing an exported symbol, you MUST update ALL callers in ALL files.
-2. Edit the PRIMARY file first, then each dependent file.
-3. If it requires editing > 5 files, reply "SKIP: too many files affected".
-4. YOU MUST ACTUALLY MODIFY THE FILES USING TOOLS. Do not just explain the fix.
-5. PRESERVE BRACES/BRACKETS. DO NOT accidentally delete closing braces '}'.
+2. Use \`find_references\` to see who uses the symbol before changing it.
+3. For function/method changes, prefer \`ast_replace_function\` for precise surgery.
+4. For renames, use \`ast_rename\` to update all files automatically.
+5. Edit the PRIMARY file first, then each dependent file.
+6. If it requires editing > 5 files, reply "SKIP: too many files affected".
+7. YOU MUST ACTUALLY MODIFY THE FILES USING TOOLS. Do not just explain the fix.
+8. PRESERVE BRACES/BRACKETS. DO NOT accidentally delete closing braces '}'.
 
 WORKFLOW:
-1. <think> block: Plan exactly what changes in each file.
+1. <think> block: Plan exactly what changes in each file. Use \`find_references\` if needed.
 2. \`read_file_content\` on EVERY file you will edit.
 3. Use file editing tools (e.g. \`multi_replace_file_content\` or \`replace_code_block\`) for each change.
 4. VERIFY: Count brackets in your edits. Check no duplicate declarations.
@@ -2208,13 +2221,15 @@ SINGLE-FILE SPECIFIC RULES:
 1. Do NOT change any exported function signatures, types, or interfaces.
 2. Do NOT add new exports.
 3. Do NOT remove or rename existing exports.
-4. YOU MUST ACTUALLY MODIFY THE FILE USING TOOLS. Do not just explain the fix.
-5. PRESERVE BRACES/BRACKETS. DO NOT accidentally delete closing braces '}'.
+4. Prefer \`ast_replace_function\` for precise function surgery.
+5. YOU MUST ACTUALLY MODIFY THE FILE USING TOOLS. Do not just explain the fix.
+6. PRESERVE BRACES/BRACKETS. DO NOT accidentally delete closing braces '}'.
 
 WORKFLOW:
 1. <think> block: Is this change safe? What exactly will I change?
 2. \`read_file_content\` on "${fullPath}" to get current state.
-3. Use file editing tools (e.g. \`multi_replace_file_content\` or \`replace_code_block\`) to apply the fix.
+3. Use AST tools (\`ast_replace_function\`, \`ast_add_import\`) for precise surgery.
+4. Use standard editing tools (\`multi_replace_file_content\` or \`replace_code_block\`) as fallback.
 4. VERIFY: Count brackets. Check no duplicates. Check all variables are defined.
 5. If the file DOES NOT need changes (it is already safe), you MUST reply "SKIP: [reason]".
 6. Otherwise, reply "DONE".
@@ -2401,19 +2416,25 @@ ${originalContent}
             }
 
             if (longestBlock.trim().length > 0) {
-              if (longestBlock.length < originalContent.length * 0.4) {
-                throw new Error(`${specialistName} generated a truncated response.`);
+              if (longestBlock.length < originalContent.length * 0.2) {
+                throw new Error(`${specialistName} generated a truncated response (${longestBlock.length} chars vs ${originalContent.length} original).`);
               }
               log.info(`Applying extracted code block to ${fileName}...`);
               fs.writeFileSync(fullPath, longestBlock, 'utf-8');
-              saveUpgradeDiff(id, originalContent, longestBlock);
+              saveUpgradeDiff(id, fullPath, originalContent, longestBlock);
               primaryModified = true;
               
-              // Mark as implemented EARLY (extraction fallback)
+              // Mark as review_diff EARLY (extraction fallback)
               try {
-                updateProposalStatus(id, 'implemented');
+                // Save diffs and rollback
+                fs.writeFileSync(path.join(path.resolve(process.cwd(), '../data/upgrade_history'), `proposal_${id}_approved.json`), JSON.stringify([{ fullPath, content: longestBlock }]), 'utf-8');
+                rollbackAll();
+                updateProposalStatus(id, 'review_diff');
+                console.log(`\x1b[33m  └─ 👁️ Pending Review — code block extracted, rolled back awaiting approval\x1b[0m`);
+                releaseUpgradeLock();
+                return true;
               } catch (statusErr: any) {
-                log.error(`[SelfUpgrade] Failed to mark proposal #${id} as implemented early (extraction): ${statusErr.message}`);
+                log.error(`[SelfUpgrade] Failed to mark proposal #${id} as review_diff (extraction): ${statusErr.message}`);
               }
             }
           }
@@ -2428,122 +2449,302 @@ ${originalContent}
           phaseLog('🤖 Implement', `${totalModified} file(s) modified by ${specialistName}`);
 
           // Save diffs for all modified files
+          const finalState: Array<{ fullPath: string; content: string }> = [];
           for (const target of allTargetFiles) {
             try {
               const currentContent = fs.readFileSync(target.fullPath, 'utf-8');
+              finalState.push({ fullPath: target.fullPath, content: currentContent });
               if (currentContent !== target.backup) {
-                saveUpgradeDiff(id, target.backup, currentContent);
+                saveUpgradeDiff(id, target.fullPath, target.backup, currentContent);
               }
             } catch { /* skip */ }
           }
 
-          // ── Quick Structural Check (fast, catches bracket/duplicate issues) ──
-          phaseLog('🔍 Structure Check', 'validating brackets and declarations...');
-          const structErrors: string[] = [];
-          for (const target of allTargetFiles) {
-            const check = quickStructuralCheck(target.fullPath);
-            if (!check.ok) structErrors.push(...check.errors);
+          // ═══════════════════════════════════════════════════════════════
+          // ── MULTI-TURN SELF-CORRECTION LOOP (max 3 attempts) ──
+          // If gatekeeper checks fail, inject the error back into AI
+          // and ask it to fix the issue, instead of immediately rejecting.
+          // ═══════════════════════════════════════════════════════════════
+          const MAX_CORRECTION_ATTEMPTS = 3;
+          let gatekeeperPassed = false;
+          let lastGatekeeperError = '';
+
+          for (let correctionAttempt = 1; correctionAttempt <= MAX_CORRECTION_ATTEMPTS; correctionAttempt++) {
+            if (correctionAttempt > 1) {
+              phaseLog('🔄 Self-Correction', `Attempt ${correctionAttempt}/${MAX_CORRECTION_ATTEMPTS} — asking AI to fix: ${lastGatekeeperError.substring(0, 80)}...`);
+
+              // Build correction prompt with the error details
+              const correctionPrompt = `You are fixing a COMPILATION ERROR that YOUR PREVIOUS EDIT caused.
+
+[🚨 ERROR FROM PREVIOUS ATTEMPT #${correctionAttempt - 1}]:
+${lastGatekeeperError.substring(0, 1500)}
+
+[ORIGINAL PROPOSAL]: ${proposal.title}
+[FILE]: ${fullPath}
+
+Your previous edit caused the above error. You MUST:
+1. Read the file using \`read_file_content\` to see the current state.
+2. Identify exactly what went wrong in your previous edit.
+3. Fix the error surgically using file editing tools.
+4. Do NOT re-introduce the original bug — only fix the compilation error.
+5. Reply "DONE" when fixed, or "SKIP: [reason]" if unfixable.
+
+${commonSafetyRules}`;
+
+              // Delegate correction task to the SAME specialist
+              try {
+                const correctionTaskId = await swarmCoordinator.delegateTask(
+                  {
+                    platform: 'system' as any,
+                    botId: rootAdmin.botId,
+                    botName: rootAdmin.botName,
+                    replyWithFile: async () => 'Not supported in autonomous mode'
+                  },
+                  'code_generation',
+                  { message: correctionPrompt, context: `Self-Upgrade Self-Correction — Attempt ${correctionAttempt}` },
+                  {
+                    toSpecialist: specialistName,
+                    priority: 5,
+                    timeout: 180000, // 3 min for corrections
+                    fromChatId: 'jarvis_self_upgrade',
+                    metadata: { proposalId: proposal.id, correctionAttempt }
+                  }
+                );
+
+                const correctionResult = await swarmCoordinator.waitForTaskResult(correctionTaskId, 180000);
+                if (correctionResult?.status !== 'completed' || correctionResult?.error) {
+                  phaseLog('🔄 Self-Correction', `Attempt ${correctionAttempt} failed — ${(correctionResult?.error || 'unknown').substring(0, 80)}`);
+                  // If correction itself fails, try next attempt
+                  continue;
+                }
+
+                // Check if AI skipped
+                const corrText = String(correctionResult.result || '').trim();
+                if (/^SKIP\s*:/i.test(corrText)) {
+                  phaseLog('🔄 Self-Correction', `AI skipped correction: ${corrText.substring(0, 80)}`);
+                  break; // Don't retry if AI says it can't fix
+                }
+
+                phaseLog('🔄 Self-Correction', `AI applied correction, re-running gatekeeper checks...`);
+              } catch (corrErr: any) {
+                phaseLog('🔄 Self-Correction', `Correction delegation error: ${(corrErr.message || '').substring(0, 80)}`);
+                continue;
+              }
+            }
+
+            // ── Run all gatekeeper checks ──
+            let checkFailed = false;
+            let checkError = '';
+
+            // 1. Quick Structural Check
+            phaseLog('🔍 Structure Check', `validating brackets and declarations... ${correctionAttempt > 1 ? `(attempt ${correctionAttempt})` : ''}`);
+            const structErrors: string[] = [];
+            for (const target of allTargetFiles) {
+              const check = quickStructuralCheck(target.fullPath);
+              if (!check.ok) structErrors.push(...check.errors);
+            }
+            if (structErrors.length > 0) {
+              checkError = `Structural validation failed: ${structErrors.join('; ')}`;
+              phaseLog('🔍 Structure Check', `FAILED — ${structErrors.length} issue(s)`);
+              checkFailed = true;
+            } else {
+              phaseLog('🔍 Structure Check', 'PASSED — brackets balanced, no duplicates');
+            }
+
+            // 2. TSC Verification (only if structure passed)
+            if (!checkFailed) {
+              phaseLog('🔨 TSC Check', `running TypeScript compiler... ${correctionAttempt > 1 ? `(attempt ${correctionAttempt})` : ''}`);
+              try {
+                await verifyUpgrade(rootDir, id);
+                phaseLog('🔨 TSC Check', 'PASSED — no new compile errors');
+              } catch (tscErr: any) {
+                checkError = typeof tscErr.stdout === 'string' ? tscErr.stdout : tscErr.message;
+                phaseLog('🔨 TSC Check', 'FAILED — new compile errors detected');
+                checkFailed = true;
+              }
+            }
+
+            // 3. esbuild Syntax Check (only if TSC passed)
+            if (!checkFailed) {
+              phaseLog('🔧 esbuild Check', `validating syntax... ${correctionAttempt > 1 ? `(attempt ${correctionAttempt})` : ''}`);
+              try {
+                const modifiedPaths = allTargetFiles.map(t => t.fullPath);
+                await verifyEsbuildSyntax(modifiedPaths, id);
+                phaseLog('🔧 esbuild Check', 'PASSED — all files parse cleanly');
+              } catch (esbuildErr: any) {
+                checkError = typeof esbuildErr.stdout === 'string' ? esbuildErr.stdout : esbuildErr.message;
+                phaseLog('🔧 esbuild Check', 'FAILED — syntax error detected');
+                checkFailed = true;
+              }
+            }
+
+            // 4. Phase 10.5: Test Generation & Execution (only if esbuild passed)
+            if (!checkFailed && proposal.type !== 'tool') { // Skip tests for tool declarations
+              phaseLog('🧪 Test Gen', `generating and running unit tests... ${correctionAttempt > 1 ? `(attempt ${correctionAttempt})` : ''}`);
+              try {
+                // We use the primary target file for test generation
+                const primaryTarget = allTargetFiles[0];
+                const originalCode = primaryTarget.backup;
+                const modifiedCode = fs.readFileSync(primaryTarget.fullPath, 'utf-8');
+                
+                // 4.1 Generate Test
+                phaseLog('🧪 Test Gen', 'AI is writing vitest specs...');
+                const testCode = await generateTestForChange(
+                  originalCode, 
+                  modifiedCode, 
+                  primaryTarget.fullPath, 
+                  proposal.description,
+                  specialistName
+                );
+                
+                // 4.2 Run Test
+                phaseLog('🧪 Test Run', 'executing generated tests...');
+                const testResult = await runGeneratedTest(testCode, proposal.id as number);
+                
+                if (!testResult.success) {
+                  checkError = `Unit tests failed:\n\n${testResult.log}\n\n[Test Code]:\n${testCode}`;
+                  phaseLog('🧪 Test Run', 'FAILED — some tests did not pass');
+                  checkFailed = true;
+                } else {
+                  phaseLog('🧪 Test Run', 'PASSED — all generated tests green 🟢');
+                }
+              } catch (testGenErr: any) {
+                // If test generation fails, we don't necessarily fail the proposal,
+                // but for Senior Expert level, let's treat it as a hard failure.
+                checkError = `Failed to generate or run tests: ${testGenErr.message}`;
+                phaseLog('🧪 Test Gen', 'ERROR — could not create tests');
+                checkFailed = true;
+              }
+            }
+
+            if (!checkFailed) {
+              gatekeeperPassed = true;
+              break; // All checks passed!
+            }
+
+            // Store error for next correction attempt
+            lastGatekeeperError = checkError;
+
+            if (correctionAttempt < MAX_CORRECTION_ATTEMPTS) {
+              // Rollback files before correction attempt
+              phaseLog('🔄 Self-Correction', `Rolling back for correction attempt ${correctionAttempt + 1}...`);
+              rollbackAll();
+            }
           }
-          if (structErrors.length > 0) {
-            phaseLog('🔍 Structure Check', `FAILED — ${structErrors.length} issue(s)`);
-            const errDetail = structErrors.join('; ');
 
-            const logDir = path.resolve(process.cwd(), '../data/upgrade_logs');
-            if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
-            fs.writeFileSync(path.join(logDir, `proposal_${proposal.id}_rejected.log`), errDetail, 'utf-8');
-
-            rollbackAll();
-            console.log(`\x1b[31m  └─ ❌ Structure Check Failed — ${totalModified} file(s) rolled back \x1b[90m(${elapsed()})\x1b[0m`);
-            throw new Error(`Structural validation failed: ${errDetail}`);
-          }
-          phaseLog('🔍 Structure Check', 'PASSED — brackets balanced, no duplicates');
-
-          // ── TSC Verification ──
-          phaseLog('🔨 TSC Check', 'running TypeScript compiler...');
-          try {
-            await verifyUpgrade(rootDir, id);
-            phaseLog('🔨 TSC Check', 'PASSED — no new compile errors');
-          } catch (tscErr: any) {
-            const errMsg = typeof tscErr.stdout === 'string' ? tscErr.stdout : tscErr.message;
-            phaseLog('🔨 TSC Check', 'FAILED — new compile errors detected');
-
-            // Write compiler error to log file
+          // If all correction attempts exhausted, reject
+          if (!gatekeeperPassed) {
             const logDir = path.resolve(process.cwd(), '../data/upgrade_logs');
             if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
             const logFilePath = path.join(logDir, `proposal_${proposal.id}_rejected.log`);
-            fs.writeFileSync(logFilePath, errMsg, 'utf-8');
-
-            // Rollback ALL files (not just primary)
-            rollbackAll();
-            console.log(`\x1b[31m  └─ ❌ TSC Failed — ${totalModified} file(s) rolled back \x1b[90m(${elapsed()})\x1b[0m`);
-            throw new Error(`Compiler rejected the fix (${totalModified} file(s) rolled back). See log: data/upgrade_logs/proposal_${proposal.id}_rejected.log`);
-          }
-
-          // ── esbuild Syntax Check — catch syntax errors TSC misses ──
-          phaseLog('🔧 esbuild Check', 'validating syntax for modified files...');
-          try {
-            const modifiedPaths = allTargetFiles.map(t => t.fullPath);
-            await verifyEsbuildSyntax(modifiedPaths, id);
-            phaseLog('🔧 esbuild Check', 'PASSED — all files parse cleanly');
-          } catch (esbuildErr: any) {
-            const errMsg = typeof esbuildErr.stdout === 'string' ? esbuildErr.stdout : esbuildErr.message;
-            phaseLog('🔧 esbuild Check', 'FAILED — syntax error detected');
-
-            const logDir = path.resolve(process.cwd(), '../data/upgrade_logs');
-            if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
-            const logFilePath = path.join(logDir, `proposal_${proposal.id}_rejected.log`);
-            fs.writeFileSync(logFilePath, errMsg, 'utf-8');
+            fs.writeFileSync(logFilePath, lastGatekeeperError, 'utf-8');
 
             rollbackAll();
-            console.log(`\x1b[31m  └─ ❌ esbuild Failed — ${totalModified} file(s) rolled back \x1b[90m(${elapsed()})\x1b[0m`);
-            throw new Error(`esbuild syntax check rejected the fix (${totalModified} file(s) rolled back). See log: data/upgrade_logs/proposal_${proposal.id}_rejected.log`);
+            console.log(`\x1b[31m  └─ ❌ Gatekeeper Failed after ${MAX_CORRECTION_ATTEMPTS} attempts — ${totalModified} file(s) rolled back \x1b[90m(${elapsed()})\x1b[0m`);
+            throw new Error(`Gatekeeper rejected after ${MAX_CORRECTION_ATTEMPTS} self-correction attempts (${totalModified} file(s) rolled back). See log: data/upgrade_logs/proposal_${proposal.id}_rejected.log`);
           }
 
-          // ── Runtime Boot Test — ลองบูท server จริงดูว่าไม่พัง ──
-          phaseLog('🚀 Boot Test', 'spawning test server...');
-          try {
-            await runtimeBootTest(rootDir, id);
-            phaseLog('🚀 Boot Test', 'PASSED — /health responded OK');
-          } catch (bootErr: any) {
-            const errMsg = bootErr.message || 'Unknown boot error';
-            phaseLog('🚀 Boot Test', `FAILED — ${errMsg.substring(0, 80)}`);
+          // ── Runtime Boot Test — ลองบูท server จริงดูว่าไม่พัง (with 1 retry) ──
+          const MAX_BOOT_RETRIES = 1;
+          let bootPassed = false;
+          for (let bootAttempt = 0; bootAttempt <= MAX_BOOT_RETRIES; bootAttempt++) {
+            phaseLog('🚀 Boot Test', `spawning test server...${bootAttempt > 0 ? ` (retry ${bootAttempt})` : ''}`);
+            try {
+              await runtimeBootTest(rootDir, id);
+              phaseLog('🚀 Boot Test', 'PASSED — /health responded OK');
+              bootPassed = true;
+              break;
+            } catch (bootErr: any) {
+              const errMsg = bootErr.message || 'Unknown boot error';
+              phaseLog('🚀 Boot Test', `FAILED — ${errMsg.substring(0, 80)}`);
 
-            // Write boot error to log file
-            const logDir = path.resolve(process.cwd(), '../data/upgrade_logs');
-            if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
-            const logFilePath = path.join(logDir, `proposal_${proposal.id}_boot_rejected.log`);
-            fs.writeFileSync(logFilePath, errMsg, 'utf-8');
+              if (bootAttempt < MAX_BOOT_RETRIES) {
+                // Rollback → ask AI to fix → re-apply
+                phaseLog('🔄 Boot Fix', `Rolling back and asking AI to fix runtime error...`);
+                rollbackAll();
 
-            // Record lesson for future proposals
-            addLearning(
-              'error_solutions',
-              `Proposal "${proposal.title}" passed TSC but CRASHED at runtime: ${errMsg.substring(0, 200)}`,
-              'runtime_boot_test',
-              0.8
-            );
+                const bootFixPrompt = `You are fixing a RUNTIME BOOT ERROR that YOUR PREVIOUS EDIT caused.
+The TypeScript compiler was happy, but when the server actually started it crashed.
 
-            // Rollback ALL files
-            rollbackAll();
-            console.log(`\x1b[31m  └─ ❌ Boot Test Failed — ${totalModified} file(s) rolled back \x1b[90m(${elapsed()})\x1b[0m`);
-            throw new Error(`Runtime boot test failed (${totalModified} file(s) rolled back): ${errMsg.substring(0, 300)}`);
+[🚨 RUNTIME ERROR]:
+${errMsg.substring(0, 1500)}
+
+[ORIGINAL PROPOSAL]: ${proposal.title}
+[FILE]: ${fullPath}
+
+Your previous edit passed compile checks but crashed the server at runtime. This typically means:
+- An import references a module/export that doesn't exist at runtime
+- A function is called with wrong argument count/types at runtime
+- A circular dependency causes undefined at import time
+- A newly added code path throws during server initialization
+
+You MUST:
+1. Read the file using \`read_file_content\` to see the current state.
+2. Fix the runtime error surgically using file editing tools.
+3. Reply "DONE" when fixed, or "SKIP: [reason]" if unfixable.
+
+${commonSafetyRules}`;
+
+                try {
+                  const bootFixTaskId = await swarmCoordinator.delegateTask(
+                    {
+                      platform: 'system' as any,
+                      botId: rootAdmin.botId,
+                      botName: rootAdmin.botName,
+                      replyWithFile: async () => 'Not supported in autonomous mode'
+                    },
+                    'code_generation',
+                    { message: bootFixPrompt, context: `Self-Upgrade Boot Fix — Proposal #${proposal.id}` },
+                    {
+                      toSpecialist: specialistName,
+                      priority: 5,
+                      timeout: 180000,
+                      fromChatId: 'jarvis_self_upgrade',
+                      metadata: { proposalId: proposal.id, bootRetry: bootAttempt + 1 }
+                    }
+                  );
+                  const bootFixResult = await swarmCoordinator.waitForTaskResult(bootFixTaskId, 180000);
+                  if (bootFixResult?.status === 'completed' && !/^SKIP\s*:/i.test(String(bootFixResult.result || ''))) {
+                    phaseLog('🔄 Boot Fix', 'AI applied fix, re-running boot test...');
+                    continue; // Retry boot test
+                  }
+                } catch (fixErr: any) {
+                  phaseLog('🔄 Boot Fix', `Fix delegation failed: ${(fixErr.message || '').substring(0, 80)}`);
+                }
+              }
+
+              // Final failure — log and reject
+              const logDir = path.resolve(process.cwd(), '../data/upgrade_logs');
+              if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+              const logFilePath = path.join(logDir, `proposal_${proposal.id}_boot_rejected.log`);
+              fs.writeFileSync(logFilePath, errMsg, 'utf-8');
+
+              addLearning(
+                'error_solutions',
+                `Proposal "${proposal.title}" passed TSC but CRASHED at runtime: ${errMsg.substring(0, 200)}`,
+                'runtime_boot_test',
+                0.8
+              );
+
+              rollbackAll();
+              console.log(`\x1b[31m  └─ ❌ Boot Test Failed — ${totalModified} file(s) rolled back \x1b[90m(${elapsed()})\x1b[0m`);
+              throw new Error(`Runtime boot test failed (${totalModified} file(s) rolled back): ${errMsg.substring(0, 300)}`);
+            }
           }
 
-          // ── TSC Verification ──
-          phaseLog('🔨 TSC Check', 'running TypeScript compiler...');
-          invalidateBaselineCache(); // Reset TSC baseline after successful edit
+          // ── Finalization: Save state for Review ──
+          phaseLog('✅ All checks passed', 'Saving diff and rolling back for human review...');
+          invalidateBaselineCache();
 
           // Record successful implementation as positive learning (non-critical, ignore errors)
           try {
             addLearning(
               'general',
-              `Successfully implemented "${proposal.title}" on ${proposal.file_path} (${isMultiFile ? 'multi-file' : 'single-file'}, ${totalModified} files)`,
+              `Proposal "${proposal.title}" passed all checks on ${proposal.file_path} (${isMultiFile ? 'multi-file' : 'single-file'}, ${totalModified} files). Awaiting review.`,
               'self_upgrade_success',
               0.6
             );
-          } catch { /* non-critical */ }
-
-          try {
-            logEvolution('self_upgrade_impl', `Successfully implemented proposal #${id}: ${proposal.title}`, {
+            logEvolution('self_upgrade_impl', `Proposal #${id} passed checks: ${proposal.title}`, {
               proposalId: id,
               isMultiFile,
               filesModified: totalModified,
@@ -2552,9 +2753,25 @@ ${originalContent}
             });
           } catch { /* non-critical */ }
 
-          console.log(`\x1b[32m  └─ ✅ Implemented — ${totalModified} file(s) via ${specialistName} \x1b[90m(${elapsed()})\x1b[0m`);
-          releaseUpgradeLock();
-          return true;
+          try {
+            // Write the final JSON state
+            fs.writeFileSync(path.join(path.resolve(process.cwd(), '../data/upgrade_history'), `proposal_${id}_approved.json`), JSON.stringify(finalState), 'utf-8');
+            
+            // Rollback to original so the system is unchanged until user approves
+            rollbackAll();
+            
+            // Mark as review_diff
+            const db = getDb();
+            db.prepare(`UPDATE upgrade_proposals SET status = 'review_diff', reviewed_at = CURRENT_TIMESTAMP WHERE id = ?`).run(id);
+
+            console.log(`\x1b[33m  └─ 👁️ Pending Review — ${totalModified} file(s) rolled back awaiting approval \x1b[90m(${elapsed()})\x1b[0m`);
+            releaseUpgradeLock();
+            return true;
+          } catch (finErr: any) {
+            log.error(`[SelfUpgrade] Failed to finalize proposal #${id} to review_diff: ${finErr.message}`);
+            rollbackAll();
+            throw new Error(`Failed to save review state: ${finErr.message}`);
+          }
         } else {
           lastError = result.error || 'Unknown error';
           phaseLog('🤖 Implement', `${specialistName} failed: ${(lastError || '').substring(0, 80)}`);
@@ -3120,4 +3337,56 @@ export async function toggleContinuousScan(rootDir: string): Promise<boolean> {
   executeContinuousStart(rootDir);
   
   return true;
+}
+
+// ── Diff Review Approval ──
+
+export function approveDiff(id: number): boolean {
+  try {
+    const db = getDb();
+    const proposal = db.prepare('SELECT status FROM upgrade_proposals WHERE id = ?').get(id) as { status: string } | undefined;
+    if (!proposal || proposal.status !== 'review_diff') return false;
+
+    const historyDir = path.resolve(process.cwd(), '../data/upgrade_history');
+    const jsonPath = path.join(historyDir, `proposal_${id}_approved.json`);
+    
+    if (!fs.existsSync(jsonPath)) {
+      throw new Error('Approved state JSON not found');
+    }
+
+    const stateStr = fs.readFileSync(jsonPath, 'utf-8');
+    const finalState: Array<{ fullPath: string; content: string }> = JSON.parse(stateStr);
+
+    // Apply the saved state back to the real files
+    for (const fileState of finalState) {
+      log.info(`[SelfUpgrade] Applying diff to ${fileState.fullPath}`);
+      fs.writeFileSync(fileState.fullPath, fileState.content, 'utf-8');
+    }
+
+    // Mark as implemented
+    db.prepare(`UPDATE upgrade_proposals SET status = 'implemented', reviewed_at = CURRENT_TIMESTAMP WHERE id = ?`).run(id);
+    log.info(`[SelfUpgrade] Proposal #${id} diff approved and applied to ${finalState.length} files`);
+    return true;
+  } catch (err: any) {
+    log.error(`[SelfUpgrade] Failed to approve diff for #${id}: ${err.message}`);
+    return false;
+  }
+}
+
+export function rejectDiff(id: number, reason: string = 'Human rejected diff'): boolean {
+  try {
+    const db = getDb();
+    const proposal = db.prepare('SELECT status, title FROM upgrade_proposals WHERE id = ?').get(id) as { status: string, title?: string } | undefined;
+    if (!proposal || proposal.status !== 'review_diff') return false;
+
+    db.prepare(`UPDATE upgrade_proposals SET status = 'rejected', description = description || ? WHERE id = ?`)
+      .run(`\n\n[Diff Rejected]: ${reason}`, id);
+      
+    addLearning('general', `User rejected the diff for "${proposal.title || id}": ${reason}`, 'user_feedback', 0.8);
+    log.info(`[SelfUpgrade] Proposal #${id} diff rejected by user.`);
+    return true;
+  } catch (err: any) {
+    log.error(`[SelfUpgrade] Failed to reject diff for #${id}: ${err.message}`);
+    return false;
+  }
 }

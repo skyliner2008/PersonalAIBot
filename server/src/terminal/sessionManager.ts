@@ -36,6 +36,7 @@ export class SessionManager {
   private maxSessions: number;
   private idleTimeoutMs: number;
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
+  private isCreatingSession: boolean = false;
 
   constructor(opts: { maxSessions?: number; idleTimeoutMs?: number } = {}) {
     this.maxSessions = opts.maxSessions ?? 10;

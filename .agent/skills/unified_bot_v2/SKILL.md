@@ -3,6 +3,11 @@ name: "Unified Bot Architecture (v2)"
 description: "Complete architecture reference for PersonalAIBotV2 — Agentic AI Platform with multi-agent orchestration, 4-layer MemGPT memory, self-evolution engine, 40+ tools, and production hardening. Read this before any project work."
 ---
 
+### [Update 2026-03-24] Gemini Model & Dynamic Router Patch 🛰️🛠️
+- **Unlock Gemini 3 Series**: แก้ไขปัญหา Model Selection Lockdown โดยปรับปรุง `geminiProvider.ts` (Alias Persistence) และ `configManager.ts` (STALE_MODEL_MAP Removal) ทำให้เลือกใช้ `gemini-3-flash-preview` ได้ถาวร
+- **Resilient Tool Selection**: ปรับปรุง `agent.ts` เพื่อจัดการกับ `JSON parsing failed` โดยเน้นการดักจับ JSON Array ของ String ที่แม่นยำขึ้น ป้องกัน SyntaxError จากข้อความรบกวนของ LLM
+- **AST Protection**: ปรับปรุงให้ระบบ Self-Upgrade ปกป้องเครื่องมือกลุ่ม AST (ast_rename, find_references) เสมอ เพื่อรักษาความสามารถในการแก้ไขโค้ดที่ซับซ้อน
+
 # PersonalAIBotV2 — Complete Architecture Reference
 
 > **Last audited**: 2026-03-23  
@@ -257,7 +262,7 @@ Planning algorithm:
 |----------|-------|------|
 | **Utility** | `get_current_time`, `echo_message` | `tools/index.ts` |
 | **OS Control** | `run_command`, `run_python`, `open_application`, `close_application`, `system_info`, `screenshot_desktop`, `clipboard_read`, `clipboard_write` | `tools/os.ts` |
-| **File Ops** | `list_files`, `read_file_content`, `write_file_content`, `delete_file`, `send_file_to_chat` | `tools/file.ts` |
+| **File Ops** | `list_files`, `read_file_content`, `write_file_content`, `delete_file`, `send_file_to_chat`, `replace_code_block`, `search_codebase`, `ast_replace_function`, `ast_add_import`, `find_references`, `ast_rename` | `tools/file.ts` |
 | **Browser** | `browser_navigate`, `browser_click`, `browser_type`, `browser_close` | `tools/browser.ts` |
 | **Web/Search** | `web_search`, `read_webpage`, `mouse_click`, `keyboard_type` | `tools/limitless.ts` |
 | **Media** | `generate_image`, `generate_speech`, `generate_video` | `tools/media_generation.ts` |
@@ -288,6 +293,13 @@ Planning algorithm:
 **File**: `server/src/evolution/selfUpgrade.ts` (~2800 lines)
 
 The autonomous code modification engine. Scans the codebase for bugs/improvements, proposes fixes, and implements them with multi-layer safety gates. Features a **Graph-Enhanced Second Brain** that gives the AI deep understanding of the codebase architecture before making changes.
+
+**v2.2 AST-Aware Refactoring**:
+- **Precise Modifications**: Uses `ts-morph` (TypeScript AST) for code changes instead of regex-based replacement.
+- **Symbol Renaming**: Global rename across many files with reference tracking (`ast_rename`).
+- **Function Swapping**: Surgical replacement of entire function bodies while preserving signatures (`ast_replace_function`).
+- **Import Management**: Automatically resolves and adds missing imports (`ast_add_import`).
+- **Impact Analysis**: Uses AST to find all real call sites of a function before refactoring (`find_references`).
 
 **v2.1 Core Schema Integration**:
 - Official schema now includes all 7 evolution and second-brain tables (`upgrade_proposals`, `codebase_map`, etc.) in the main `schema.sql`.
@@ -378,8 +390,8 @@ Safety net that auto-rollbacks failed self-upgrades on server crash:
 
 #### Two-Mode Implementation
 
-- **SINGLE-FILE mode** (risk = safe): Only primary file edited, strict "no signature changes" rule, injected with full Second Brain graph context
-- **MULTI-FILE mode** (risk = moderate/high): AI receives dependency graph + architecture map + affected file previews, authorized to edit primary + all dependent files
+- **SINGLE-FILE mode** (risk = safe): Only primary file edited, strict "no signature changes" rule, injected with full Second Brain graph context. Uses `ast_replace_function` for precise edits.
+- **MULTI-FILE mode** (risk = moderate/high): AI receives dependency graph + architecture map + affected file previews, authorized to edit primary + all dependent files. Uses `find_references` and `ast_rename` for safe global refactoring.
 
 #### Multi-File Backup & Rollback
 

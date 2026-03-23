@@ -10,6 +10,10 @@ function isUpgradeLockActive(): boolean {
   try {
     if (!fs.existsSync(UPGRADE_LOCK_PATH)) return false;
     const lock = JSON.parse(fs.readFileSync(UPGRADE_LOCK_PATH, 'utf-8'));
+    if (typeof lock.startedAt !== 'number' || isNaN(lock.startedAt)) {
+      // Malformed lock file, treat as expired/inactive
+      return false;
+    }
     if (Date.now() - lock.startedAt > 720000) return false; // Expired after 12 min
     return true;
   } catch { return false; }
@@ -50,6 +54,11 @@ export function initBootGuardian() {
       const latestUpgradeContent = fs.readFileSync(latestUpgradeFile, 'utf-8');
       const latestUpgrade = JSON.parse(latestUpgradeContent);
 
+      if (typeof latestUpgrade.timestamp !== 'number' || isNaN(latestUpgrade.timestamp)) {
+        console.error('[BootGuardian] Malformed latest upgrade record: timestamp is invalid or missing. Exiting.');
+        process.exit(1);
+      }
+
       const msSinceUpgrade = Date.now() - latestUpgrade.timestamp;
       if (msSinceUpgrade > RECENT_UPGRADE_THRESHOLD_MS) {
         console.error('[BootGuardian] Latest upgrade was too long ago. Exiting.');
@@ -63,14 +72,14 @@ export function initBootGuardian() {
       let rolledBackCount = 0;
       if (latestUpgrade.allFiles && Array.isArray(latestUpgrade.allFiles)) {
         for (let i = 0; i < latestUpgrade.allFiles.length; i++) {
-          const backupName = `proposal_${latestUpgrade.id}_before${i > 0 ? `_dep${i}` : ''}.txt`;
-          const targetEntry = latestUpgrade.allFiles[i];
-          if (!targetEntry || !targetEntry.fullPath) {
-            console.warn(`[BootGuardian] Skipping malformed upgrade file entry at index ${i}.`);
+          const fileEntry = latestUpgrade.allFiles[i];
+          if (!fileEntry || typeof fileEntry.fullPath !== 'string') {
+            console.warn(`[BootGuardian] Skipping malformed file entry in allFiles at index ${i}.`);
             continue;
           }
+          const backupName = `proposal_${latestUpgrade.id}_before${i > 0 ? `_dep${i}` : ''}.txt`;
           const backupFile = path.join(historyDir, backupName);
-          const targetPath = targetEntry.fullPath;
+          const targetPath = fileEntry.fullPath;
           if (fs.existsSync(backupFile) && targetPath) {
             try {
               const originalContent = fs.readFileSync(backupFile, 'utf-8');

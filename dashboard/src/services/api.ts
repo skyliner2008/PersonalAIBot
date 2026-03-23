@@ -570,6 +570,14 @@ export const api = {
     request('/upgrade/activity', { method: 'POST' }),
   getUpgradeProposalDiff: (id: number) =>
     request(`/upgrade/proposals/${id}/diff`),
+  approveUpgradeDiff: (id: number) =>
+    request(`/upgrade/proposals/${id}/approve-diff`, { method: 'POST' }),
+  rejectUpgradeDiff: (id: number, reason?: string) =>
+    request(`/upgrade/proposals/${id}/reject-diff`, { 
+      method: 'POST', 
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason })
+    }),
   getUpgradeProposalLog: (id: number) =>
     request(`/upgrade/proposals/${id}/log`),
 

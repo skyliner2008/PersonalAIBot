@@ -9,7 +9,7 @@ const logger = createLogger('browser-tool');
 let browser: Browser | null = null;
 let context: BrowserContext | null = null;
 let page: Page | null = null;
-let getPageLock: Promise<Page> | null = null;
+let getPageLock: Promise<Page> | null = null; // Lock for getPage
 
 /**
  * ฟังก์ชันจัดการเบราว์เซอร์ให้มีเพียงตัวเดียวและเสถียร
@@ -31,7 +31,8 @@ async function getPage(): Promise<Page> {
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         viewport: { width: 1280, height: 720 }
       });
-      page = null; // Reset page เมื่อเปิด context ใหม่
+      page = null;
+  getPageLock = null; // Ensure the lock is cleared on cleanup // Reset page เมื่อเปิด context ใหม่
     }
 
     // 3. ตรวจสอบว่า Page ยังอยู่และไม่ถูกปิดไป

@@ -76,12 +76,24 @@
     "code": {
       "active": {
         "provider": "gemini",
-        "modelName": "gemini-2.5-flash"
+        "modelName": "gemini-3-flash-preview"
       },
       "fallbacks": [
         {
-          "provider": "openai",
-          "modelName": "gpt-4o"
+          "provider": "gemini",
+          "modelName": "gemini-2.5-flash"
+        },
+        {
+          "provider": "gemini",
+          "modelName": "gemini-2-flash"
+        },
+        {
+          "provider": "gemini",
+          "modelName": "gemini-2.5-pro"
+        },
+        {
+          "provider": "minimax",
+          "modelName": "MiniMax-M2.7"
         }
       ]
     },
@@ -100,12 +112,20 @@
     "system": {
       "active": {
         "provider": "gemini",
-        "modelName": "gemini-2.0-flash-lite"
+        "modelName": "gemini-2.0-flash"
       },
       "fallbacks": [
         {
           "provider": "gemini",
-          "modelName": "gemini-2.0-flash"
+          "modelName": "gemini-2.5-flash"
+        },
+        {
+          "provider": "gemini",
+          "modelName": "gemini-2.5-flash-lite"
+        },
+        {
+          "provider": "minimax",
+          "modelName": "MiniMax-M2.7"
         }
       ]
     }

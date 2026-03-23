@@ -346,6 +346,7 @@ export class LiveVideoClient extends EventEmitter {
       const parts = message.serverContent.modelTurn.parts;
       if (Array.isArray(parts)) {
         for (const part of parts) {
+          if (part == null) continue;
           if (part.inlineData?.mimeType?.startsWith('audio/pcm')) {
             this.emit('audioPart', part.inlineData.data);
           }
@@ -357,6 +358,7 @@ export class LiveVideoClient extends EventEmitter {
       const parts = message.serverContent.modelTurn.parts;
       if (Array.isArray(parts)) {
         for (const part of parts) {
+          if (part == null) continue;
           if (part.text) {
             this.emit('textPart', part.text);
           }

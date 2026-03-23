@@ -1,6 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { Type, FunctionDeclaration } from '@google/genai';
+import { astEditor } from '../../evolution/astEditor.js';
+import { refactorManager } from '../../evolution/refactorManager.js';
 
 declare global {
   var onFileWrittenByTool: ((filePath: string) => void) | undefined;
@@ -355,8 +357,8 @@ export async function searchCodebase({ query, directory }: { query: string, dire
     const MAX_RESULTS = 50;
     const MAX_DEPTH = 15;
 
-    function walkDir(currentDir: string) {
-      if (results.length >= MAX_RESULTS) return;
+    function walkDir(currentDir: string, depth: number = 0) {
+      if (depth >= MAX_DEPTH || results.length >= MAX_RESULTS) return;
       const files = fs.readdirSync(currentDir);
       for (const file of files) {
         if (results.length >= MAX_RESULTS) return;
@@ -366,7 +368,7 @@ export async function searchCodebase({ query, directory }: { query: string, dire
         try {
           const stat = fs.statSync(fullPath);
           if (stat.isDirectory()) {
-            walkDir(fullPath);
+            walkDir(fullPath, depth + 1);
           } else if (stat.isFile() && (file.endsWith('.ts') || file.endsWith('.tsx') || file.endsWith('.js') || file.endsWith('.json') || file.endsWith('.css') || file.endsWith('.md'))) {
             const content = fs.readFileSync(fullPath, 'utf8');
             const lines = content.split('\n');
@@ -400,5 +402,185 @@ export async function searchCodebase({ query, directory }: { query: string, dire
     return output;
   } catch (error: any) {
     return `Error searching codebase: ${error.message}`;
+  }
+}
+
+// ==========================================
+// 7. AST: Replace Function/Method
+// ==========================================
+export const astReplaceFunctionDeclaration: FunctionDeclaration = {
+  name: "ast_replace_function",
+  description: "AST-Aware: แก้ไข/แทนที่ฟังก์ชันเป้าหมายโดยไม่ต้องสนเว้นวรรค (space/tab) หรือรูปแบบเก่า เพียงบอกชื่อและให้โค้ดใหม่ทั้งหมด",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      file_path: {
+        type: Type.STRING,
+        description: "พาธของไฟล์เป้าหมาย",
+      },
+      function_name: {
+        type: Type.STRING,
+        description: "ชื่อฟังก์ชัน ตัวแปรที่เป็นฟังก์ชัน หรือเมธอดในคลาส",
+      },
+      new_function_code: {
+        type: Type.STRING,
+        description: "โค้ดใหม่ทั้งหมดของฟังก์ชันนี้ (รวม signature และ body)",
+      },
+    },
+    required: ["file_path", "function_name", "new_function_code"],
+  },
+};
+
+export async function astReplaceFunction({ file_path, function_name, new_function_code }: { file_path: string, function_name: string, new_function_code: string }): Promise<string> {
+  const check = validateFilePath(file_path);
+  if (!check.safe) return check.reason!;
+  try {
+    const resolvedPath = path.resolve(file_path);
+    astEditor.replaceFunction(resolvedPath, function_name, new_function_code);
+    await astEditor.saveFile(resolvedPath);
+    
+    // Trigger external listeners
+    if (typeof (global as any).onFileWrittenByTool === 'function') {
+      (global as any).onFileWrittenByTool(resolvedPath);
+    }
+    
+    return `Successfully updated function '${function_name}' in ${resolvedPath} using AST.`;
+  } catch (error: any) {
+    return `AST Error: ${error.message}`;
+  }
+}
+
+// ==========================================
+// 8. AST: Add Import
+// ==========================================
+export const astAddImportDeclaration: FunctionDeclaration = {
+  name: "ast_add_import",
+  description: "AST-Aware: เพิ่มคำสั่ง import ใหม่เข้าไปในไฟล์อย่างชาญฉลาด (ช่วยควบรวมกับ import ที่มีอยู่แล้วได้)",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      file_path: {
+        type: Type.STRING,
+        description: "พาธของไฟล์",
+      },
+      module_specifier: {
+        type: Type.STRING,
+        description: "ชื่อโมดูลเป้าหมายหรือพาธ relative (เช่น 'fs', '../utils', 'react')",
+      },
+      named_imports: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.STRING,
+        },
+        description: "รายชื่อ import แบบปีกกา { } (ถ้ามี)",
+      },
+      default_import: {
+        type: Type.STRING,
+        description: "ชื่อ import default (ถ้ามี)",
+      },
+    },
+    required: ["file_path", "module_specifier"],
+  },
+};
+
+export async function astAddImport({ file_path, module_specifier, named_imports, default_import }: { file_path: string, module_specifier: string, named_imports?: string[], default_import?: string }): Promise<string> {
+  const check = validateFilePath(file_path);
+  if (!check.safe) return check.reason!;
+  try {
+    const resolvedPath = path.resolve(file_path);
+    astEditor.addImport(resolvedPath, module_specifier, named_imports, default_import);
+    await astEditor.saveFile(resolvedPath);
+    
+    // Trigger external listeners
+    if (typeof (global as any).onFileWrittenByTool === 'function') {
+      (global as any).onFileWrittenByTool(resolvedPath);
+    }
+    
+    return `Successfully added import from '${module_specifier}' in ${resolvedPath} using AST.`;
+  } catch (error: any) {
+    return `AST Error: ${error.message}`;
+  }
+}
+
+// ==========================================
+// 9. AST: Find References (Global)
+// ==========================================
+export const findReferencesDeclaration: FunctionDeclaration = {
+  name: "find_references",
+  description: "Global Search: ค้นหาว่าชื่อฟังก์ชัน/ตัวแปรนี้ ถูกใช้งานที่ไหนบ้างทั่วทั้งโปรเจกต์ (ช่วยวางแผนก่อน Refactor)",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      file_path: {
+        type: Type.STRING,
+        description: "พาธของไฟล์ที่นิยามชื่อนั้นไว้ (เช่น 'src/utils/math.ts')",
+      },
+      symbol_name: {
+        type: Type.STRING,
+        description: "ชื่อฟังก์ชัน ตัวแปร หรือคลาสที่ต้องการหา",
+      },
+    },
+    required: ["file_path", "symbol_name"],
+  },
+};
+
+export async function findReferences({ file_path, symbol_name }: { file_path: string, symbol_name: string }): Promise<string> {
+  const check = validateFilePath(file_path, 'read');
+  if (!check.safe) return check.reason!;
+  try {
+    const resolvedPath = path.resolve(file_path);
+    const impacts = await refactorManager.findReferences(symbol_name, resolvedPath);
+    
+    if (impacts.length === 0) {
+      return `ไม่พบการเรียกใช้งานชื่อ '${symbol_name}' ในไฟล์อื่น (ยกเว้นในตัวมันเอง)`;
+    }
+
+    const report = impacts.map(imp => {
+      const rel = path.relative(process.cwd(), imp.file);
+      return `- [${rel}:${imp.line}]: ${imp.snippet.trim()}`;
+    }).join('\n');
+
+    return `พบการใช้งาน '${symbol_name}' ทั้งหมด ${impacts.length} จุด:\n${report}`;
+  } catch (error: any) {
+    return `Refactor Error: ${error.message}`;
+  }
+}
+
+// ==========================================
+// 10. AST: Global Rename
+// ==========================================
+export const astRenameDeclaration: FunctionDeclaration = {
+  name: "ast_rename",
+  description: "Global Refactor: เปลี่ยนชื่อฟังก์ชัน/ตัวแปร/คลาส ทุกที่ที่มีการเรียกใช้งานทั่วทั้งโปรเจกต์อย่างปลอดภัย",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      file_path: {
+        type: Type.STRING,
+        description: "พาธของไฟล์ที่นิยามชื่อเดิม",
+      },
+      old_name: {
+        type: Type.STRING,
+        description: "ชื่อเดิมที่ต้องการเปลี่ยน",
+      },
+      new_name: {
+        type: Type.STRING,
+        description: "ชื่อใหม่ที่ต้องการ",
+      },
+    },
+    required: ["file_path", "old_name", "new_name"],
+  },
+};
+
+export async function astRename({ file_path, old_name, new_name }: { file_path: string, old_name: string, new_name: string }): Promise<string> {
+  const check = validateFilePath(file_path);
+  if (!check.safe) return check.reason!;
+  try {
+    const resolvedPath = path.resolve(file_path);
+    const affectedFiles = await refactorManager.globalRename(resolvedPath, old_name, new_name);
+    
+    return `Successfully renamed '${old_name}' to '${new_name}' in ${affectedFiles.length} files:\n${affectedFiles.map(f => path.relative(process.cwd(), f)).join('\n')}`;
+  } catch (error: any) {
+    return `Refactor Error: ${error.message}`;
   }
 }

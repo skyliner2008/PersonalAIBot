@@ -47,6 +47,21 @@ export class MigrationRunner {
   private initializeMigrationsTable(): void {
     try {
       const db = getDb();
+      if (!db) {
+        throw new Error('Database connection is null or undefined after getDb()');
+      }
+      if (!db) {
+        throw new Error('Database connection is null or undefined after getDb()');
+      }
+      if (!db) {
+        throw new Error('Database connection is null or undefined after getDb()');
+      }
+      if (!db) {
+        throw new Error('Database connection is null or undefined after getDb()');
+      }
+      if (!db) {
+        throw new Error('Database connection is null or undefined after getDb()');
+      }
       db.prepare(`
         CREATE TABLE IF NOT EXISTS _migrations (
           version INTEGER PRIMARY KEY,

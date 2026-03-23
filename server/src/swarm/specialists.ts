@@ -43,7 +43,7 @@ export const SPECIALISTS: Specialist[] = [
     name: 'vision',
     description: 'Specializes in image analysis, OCR, visual understanding',
     capabilities: ['vision_analysis'],
-    preferredModel: 'gemini-2.0-flash',
+    preferredModel: '', // resolved dynamically by ConfigManager (TaskType.VISION)
     platform: null, // works on all platforms
     isAvailable: () => true,
     tags: ['image', 'visual', 'multimodal'],
@@ -52,7 +52,7 @@ export const SPECIALISTS: Specialist[] = [
     name: 'coder',
     description: 'Specializes in writing complex code, architecting software, and executing system commands.',
     capabilities: ['code_review', 'code_generation', 'general'],
-    preferredModel: 'gemini-2.5-pro',
+    preferredModel: '', // resolved dynamically by ConfigManager (TaskType.CODE)
     platform: null,
     isAvailable: () => true,
     tags: ['code', 'development', 'debugging'],
@@ -61,7 +61,7 @@ export const SPECIALISTS: Specialist[] = [
     name: 'tester',
     description: 'Specializes in writing automated tests, finding edge cases, and simulating user flows.',
     capabilities: ['code_review', 'code_generation', 'general'],
-    preferredModel: 'gemini-2.5-flash',
+    preferredModel: '', // resolved dynamically by ConfigManager (TaskType.CODE)
     platform: null,
     isAvailable: () => true,
     tags: ['testing', 'qa', 'automation', 'test'],
@@ -70,7 +70,7 @@ export const SPECIALISTS: Specialist[] = [
     name: 'researcher',
     description: 'Specializes in web search, fact-checking, information gathering',
     capabilities: ['web_search', 'summarization', 'data_analysis'],
-    preferredModel: 'gemini-2.0-flash',
+    preferredModel: '', // resolved dynamically by ConfigManager (TaskType.WEB_BROWSER)
     platform: null,
     isAvailable: () => true,
     tags: ['research', 'web', 'facts'],
@@ -79,7 +79,7 @@ export const SPECIALISTS: Specialist[] = [
     name: 'reviewer',
     description: 'Specializes in scrutinizing, critiquing, and finding flaws in code or logic. Strict and analytical.',
     capabilities: ['code_review', 'data_analysis', 'general'],
-    preferredModel: 'gemini-2.5-pro',
+    preferredModel: '', // resolved dynamically by ConfigManager (TaskType.COMPLEX)
     platform: null,
     isAvailable: () => true,
     tags: ['review', 'critic', 'qa'],
@@ -88,7 +88,7 @@ export const SPECIALISTS: Specialist[] = [
     name: 'translator',
     description: 'Specializes in language translation and localization',
     capabilities: ['translation'],
-    preferredModel: 'gemini-2.0-flash',
+    preferredModel: '', // resolved dynamically by ConfigManager (TaskType.GENERAL)
     platform: null,
     isAvailable: () => true,
     tags: ['language', 'translation', 'localization'],
@@ -97,7 +97,7 @@ export const SPECIALISTS: Specialist[] = [
     name: 'analyst',
     description: 'Specializes in data analysis, report generation, insights',
     capabilities: ['data_analysis', 'summarization'],
-    preferredModel: 'gemini-2.5-flash',
+    preferredModel: '', // resolved dynamically by ConfigManager (TaskType.DATA)
     platform: null,
     isAvailable: () => true,
     tags: ['data', 'analysis', 'reporting'],
@@ -151,7 +151,7 @@ export const SPECIALISTS: Specialist[] = [
     name: 'general',
     description: 'General-purpose assistant for any task type',
     capabilities: ['general', 'vision_analysis', 'code_review', 'code_generation', 'translation', 'web_search', 'data_analysis', 'summarization'],
-    preferredModel: 'gemini-2.0-flash',
+    preferredModel: '', // resolved dynamically by ConfigManager (TaskType.GENERAL)
     platform: null,
     isAvailable: () => true,
     tags: ['general', 'fallback'],

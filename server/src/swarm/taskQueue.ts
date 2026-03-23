@@ -618,7 +618,8 @@ export class TaskQueue {
    */
   cleanup(): void {
     const now = Date.now();
-    let removed = 0;
+    const idsToRemove: Set<string> = new Set();
+    let removedCount = 0;
 
     for (const [id, task] of this.tasks.entries()) {
       if (
@@ -626,13 +627,20 @@ export class TaskQueue {
         task.completedAt &&
         now - task.completedAt.getTime() > this.ARCHIVAL_AGE_MS
       ) {
-        this.tasks.delete(id);
-        removed++;
+        idsToRemove.add(id);
+        removedCount++;
       }
     }
 
-    if (removed > 0) {
-      queueInfo(`[TaskQueue] Cleaned up ${removed} old tasks`);
+    if (removedCount > 0) {
+      // Remove from the main tasks map
+      idsToRemove.forEach(id => this.tasks.delete(id));
+
+      // Remove from completedTasks and failedTasks arrays
+      this.completedTasks = this.completedTasks.filter(task => !idsToRemove.has(task.id));
+      this.failedTasks = this.failedTasks.filter(task => !idsToRemove.has(task.id));
+
+      queueInfo(`[TaskQueue] Cleaned up ${removedCount} old tasks`);
     }
   }
 

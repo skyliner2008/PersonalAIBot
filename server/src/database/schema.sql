@@ -273,7 +273,8 @@ CREATE TABLE IF NOT EXISTS upgrade_proposals (
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   reviewed_at DATETIME,
   affected_files TEXT DEFAULT NULL,
-  impact_analysis TEXT DEFAULT NULL
+  impact_analysis TEXT DEFAULT NULL,
+  diff_preview TEXT DEFAULT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_upgrade_status ON upgrade_proposals(status, priority);
 

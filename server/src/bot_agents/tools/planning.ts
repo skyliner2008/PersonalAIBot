@@ -41,19 +41,23 @@ async function createPlanToolForChat(
     return 'Error: Plan must contain at least one step';
   }
 
-  const plan = createPlan(chatId, objective, steps);
+  try {
+    const plan = createPlan(chatId, objective, steps);
 
-  if (!plan) {
-    return 'Error: Failed to create plan.';
+    if (!plan) {
+      return 'Error: Failed to create plan.';
+    }
+
+    let output = `Plan created successfully.\nObjective: ${plan.objective}\nSteps:\n`;
+    plan.steps.forEach((s) => {
+      output += `  [ ] ${s.id}: ${s.description}\n`;
+    });
+    output += '\nUse update_plan_step to update progress.';
+
+    return output;
+  } catch (error) {
+    return `Error: Failed to create plan due to an internal issue.`;
   }
-
-  let output = `Plan created successfully.\nObjective: ${plan.objective}\nSteps:\n`;
-  plan.steps.forEach((s) => {
-    output += `  [ ] ${s.id}: ${s.description}\n`;
-  });
-  output += '\nUse update_plan_step to update progress.';
-
-  return output;
 }
 
 // ============================================================
@@ -93,28 +97,32 @@ async function updatePlanStepToolForChat(
     return `Error: Invalid status. Allowed: ${validStatuses.join(', ')}`;
   }
 
-  const plan = getActivePlan(chatId);
-  if (!plan) {
-    return 'Error: No active plan found for this chat';
+  try {
+    const plan = getActivePlan(chatId);
+    if (!plan) {
+      return 'Error: No active plan found for this chat';
+    }
+
+    const success = updatePlanStep(chatId, step_id, status, result);
+    if (!success) {
+      return `Error: Step not found: ${step_id}`;
+    }
+
+    const updatedPlan = getActivePlan(chatId);
+    if (!updatedPlan) {
+      return `Plan completed: ${plan.objective}`;
+    }
+
+    let output = `Updated ${step_id} to [${status}]\nCurrent plan:\n`;
+    updatedPlan.steps.forEach((s) => {
+      const icon = s.status === 'completed' ? '[x]' : s.status === 'in_progress' ? '[~]' : s.status === 'failed' ? '[!]' : '[ ]';
+      output += `${icon} ${s.id}: ${s.description}\n`;
+    });
+
+    return output;
+  } catch (error) {
+    return `Error: Failed to update plan step due to an internal issue.`;
   }
-
-  const success = updatePlanStep(chatId, step_id, status, result);
-  if (!success) {
-    return `Error: Step not found: ${step_id}`;
-  }
-
-  const updatedPlan = getActivePlan(chatId);
-  if (!updatedPlan) {
-    return `Plan completed: ${plan.objective}`;
-  }
-
-  let output = `Updated ${step_id} to [${status}]\nCurrent plan:\n`;
-  updatedPlan.steps.forEach((s) => {
-    const icon = s.status === 'completed' ? '[x]' : s.status === 'in_progress' ? '[~]' : s.status === 'failed' ? '[!]' : '[ ]';
-    output += `${icon} ${s.id}: ${s.description}\n`;
-  });
-
-  return output;
 }
 
 // ============================================================

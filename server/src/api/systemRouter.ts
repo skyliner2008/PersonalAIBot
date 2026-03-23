@@ -246,8 +246,9 @@ router.get('/runtime-controls', (_req, res) => {
         summary: {
             total: enriched.length,
             overridden: enriched.filter((c: { isOverridden: boolean }) => c.isOverridden).length,
-            bySource: enriched.reduce((acc: Record<string, number>, c: { source: string }) => {
-                acc[c.source] = (acc[c.source] || 0) + 1;
+            bySource: enriched.reduce((acc: Record<string, number>, c: { source: string | null | undefined }) => {
+                const sourceKey = String(c.source); // Ensure source is a string
+                acc[sourceKey] = (acc[sourceKey] || 0) + 1;
                 return acc;
             }, {} as Record<string, number>),
             byCategory: enriched.reduce((acc: Record<string, number>, c: { category: string }) => {

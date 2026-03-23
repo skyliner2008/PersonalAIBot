@@ -215,7 +215,10 @@ export async function selfViewEvolution(
                 const logs = getEvolutionLog(n);
                 if (logs.length === 0) return '📋 ยังไม่มี evolution log';
                 return `📋 Evolution Log (${logs.length} entries):\n` +
-                    logs.map((l: any, i: number) => `${i + 1}. [${l.action_type}] ${l.description} (${l.created_at})`).join('\n');
+                    logs.map((l: any, i: number) => {
+                        if (!l) return `${i + 1}. [Invalid Log Entry]`;
+                        return `${i + 1}. [${l.action_type}] ${l.description} (${l.created_at})`;
+                    }).join('\n');
             }
         }
     } catch (err: any) {
@@ -351,7 +354,10 @@ export async function listDynamicToolsHandler(): Promise<string> {
             output += `• ${tool.name}\n`;
             output += `  ${tool.description}\n`;
             if (tool.parameters) {
-                const hasProperties = (tool.parameters as any).properties;
+                const hasProperties = (tool.parameters as any)?.properties;
+                if (tool.parameters && typeof tool.parameters === 'object' && !hasProperties) {
+                    log.warn(`Dynamic tool '${tool.name}' has a 'parameters' schema without 'properties' field, or 'properties' is not an object. Displaying as simple type.`, { toolParameters: tool.parameters });
+                }
                 if (hasProperties) {
                     const paramList = Object.keys(hasProperties)
                         .map((p) => `${p}`)

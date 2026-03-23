@@ -133,7 +133,7 @@ async function loadToolFromFile(filePath: string): Promise<{ tool?: DynamicToolD
     };
 
     // Create the FunctionDeclaration for Gemini API
-    const declaration: FunctionDeclaration = {
+    const declaration: FunctionDeclaration = { // TEST
       name: toolName,
       description: toolDescription,
       parameters: toolParameters

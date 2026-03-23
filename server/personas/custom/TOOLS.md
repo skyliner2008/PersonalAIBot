@@ -15,6 +15,12 @@ replace_code_block
 search_codebase
 send_file_to_chat
 
+# AST-Aware Code Editing (Phase D)
+ast_replace_function
+ast_add_import
+find_references
+ast_rename
+
 # Web & Search (critical for voice queries like gold price, weather, news)
 web_search
 read_webpage

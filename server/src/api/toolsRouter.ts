@@ -36,7 +36,7 @@ router.get('/', (_req, res) => {
 
     if (platform && typeof platform === 'string') {
       const platformTools = getToolsByPlatform(platform as ToolPlatform);
-      const platformNames = new Set(platformTools.map(t => t.name));
+      const platformNames = new Set(platformTools.filter(Boolean).map(t => t.name));
       tools = tools.filter(t => platformNames.has(t.name));
     }
 
@@ -44,13 +44,15 @@ router.get('/', (_req, res) => {
       const queryString = typeof q === 'string' ? q : Array.isArray(q) ? q.join(' ') : undefined;
       if (queryString) {
         const searchResults = searchTools(queryString);
-        const searchNames = new Set(searchResults.map(t => t.name));
+        const searchNames = new Set(searchResults.filter(Boolean).map(t => t.name));
         tools = tools.filter(t => searchNames.has(t.name));
       }
     }
 
     // Strip declaration from response (it's large and not needed by frontend)
-    const clean = tools.map(({ declaration: _, ...rest }) => rest);
+    const clean = tools
+      .filter(Boolean) // Ensure all elements are non-null/non-undefined objects
+      .map(({ declaration: _, ...rest }) => rest);
     res.json(clean);
   } catch (err: any) {
     res.status(500).json({ error: err.message });

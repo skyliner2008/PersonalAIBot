@@ -52,11 +52,15 @@ const defaultTools: Omit<ToolMeta, 'declaration'>[] = [
   // File Operations
   { name: 'list_files', displayName: 'List Files', description: 'แสดงรายการไฟล์', category: 'file', riskLevel: 'low', platforms: ['all'], tags: ['file', 'list'], enabledByDefault: true },
   { name: 'read_file_content', displayName: 'Read File', description: 'อ่านเนื้อหาไฟล์', category: 'file', riskLevel: 'low', platforms: ['all'], tags: ['file', 'read'], enabledByDefault: true },
-  { name: 'write_file_content', displayName: 'Write File', description: 'เขียนเนื้อหาไฟล์', category: 'file', riskLevel: 'medium', platforms: ['all'], tags: ['file', 'write'], enabledByDefault: false },
+  { name: 'write_file_content', displayName: 'Write File', description: 'เขียนเนื้อหาไฟล์', category: 'file', riskLevel: 'medium', platforms: ['all'], tags: ['file', 'write'], enabledByDefault: true },
   { name: 'delete_file', displayName: 'Delete File', description: 'ลบไฟล์', category: 'file', riskLevel: 'high', platforms: ['all'], tags: ['file', 'delete'], enabledByDefault: false },
   { name: 'send_file_to_chat', displayName: 'Send File to Chat', description: 'ส่งไฟล์ให้ผู้ใช้ในแชท', category: 'communication', riskLevel: 'low', platforms: ['telegram', 'line'], tags: ['file', 'send', 'chat'], enabledByDefault: true },
-  { name: 'replace_code_block', displayName: 'Replace Code Block', description: 'ผ่าตัดโค้ด: แทนที่บล็อคโค้ดเดิมด้วยโค้ดใหม่', category: 'file', riskLevel: 'medium', platforms: ['all'], tags: ['file', 'edit', 'code', 'replace'], enabledByDefault: false },
-  { name: 'search_codebase', displayName: 'Search Codebase', description: 'ค้นหาโค้ดในโปรเจกต์', category: 'file', riskLevel: 'low', platforms: ['all'], tags: ['file', 'search', 'code', 'grep'], enabledByDefault: false },
+  { name: 'replace_code_block', displayName: 'Replace Code Block', description: 'ผ่าตัดโค้ด: แทนที่บล็อคโค้ดเดิมด้วยโค้ดใหม่', category: 'file', riskLevel: 'medium', platforms: ['all'], tags: ['file', 'edit', 'code', 'replace'], enabledByDefault: true },
+  { name: 'search_codebase', displayName: 'Search Codebase', description: 'ค้นหาโค้ดในโปรเจกต์', category: 'file', riskLevel: 'low', platforms: ['all'], tags: ['file', 'search', 'code', 'grep'], enabledByDefault: true },
+  { name: 'ast_replace_function', displayName: 'AST Replace Function', description: 'แทนที่ฟังก์ชันด้วยความแม่นยำสูงโดยใช้ AST', category: 'file', riskLevel: 'medium', platforms: ['all'], tags: ['file', 'edit', 'code', 'ast', 'refactor'], enabledByDefault: true },
+  { name: 'ast_add_import', displayName: 'AST Add Import', description: 'เพิ่มการ Import โมดูลแบบอัตโนมัติโดยใช้ AST', category: 'file', riskLevel: 'low', platforms: ['all'], tags: ['file', 'edit', 'code', 'ast', 'import'], enabledByDefault: true },
+  { name: 'find_references', displayName: 'Find References', description: 'ค้นหาจุดที่มีการใช้งานตัวแปรหรือฟังก์ชันทั่วทั้งโปรเจกต์', category: 'file', riskLevel: 'low', platforms: ['all'], tags: ['file', 'search', 'code', 'ast', 'reference'], enabledByDefault: true },
+  { name: 'ast_rename', displayName: 'AST Rename Symbol', description: 'เปลี่ยนชื่อตัวแปรหรือฟังก์ชันแบบ Global ทั่วทั้งโปรเจกต์อย่างปลอดภัย', category: 'file', riskLevel: 'high', platforms: ['all'], tags: ['file', 'edit', 'code', 'ast', 'rename', 'refactor'], enabledByDefault: true },
 
   // Browser
   { name: 'browser_navigate', displayName: 'Browser Navigate', description: 'เปิดเว็บเพจ', category: 'browser', riskLevel: 'medium', platforms: ['all'], tags: ['browser', 'navigate'], enabledByDefault: false },

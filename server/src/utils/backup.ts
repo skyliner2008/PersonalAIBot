@@ -151,14 +151,20 @@ export function listBackups(): Array<{
     .filter(f => f.startsWith('backup_') || f.startsWith('export_'))
     .map(filename => {
       const filePath = path.join(BACKUP_DIR, filename);
-      const stat = fs.statSync(filePath);
-      return {
-        filename,
-        sizeKB: Math.round(stat.size / 1024),
-        createdAt: stat.mtime.toISOString(),
-        type: filename.endsWith('.db') ? 'db' as const : 'json' as const,
-      };
+      try {
+        const stat = fs.statSync(filePath);
+        return {
+          filename,
+          sizeKB: Math.round(stat.size / 1024),
+          createdAt: stat.mtime.toISOString(),
+          type: filename.endsWith('.db') ? 'db' as const : 'json' as const,
+        };
+      } catch (err: any) {
+        log.warn(`Could not stat backup file ${filename}: ${err.message}`);
+        return null;
+      }
     })
+    .filter((b): b is Exclude<typeof b, null> => b !== null)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 

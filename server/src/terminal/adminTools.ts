@@ -70,7 +70,7 @@ export const adminListProjectFilesDecl: FunctionDeclaration = {
     type: Type.OBJECT,
     properties: {
       dir: { type: Type.STRING, description: 'Directory path (สัมพัทธ์จาก project root)' },
-      pattern: { type: Type.STRING, description: 'Glob pattern สำหรับ filter (เช่น *.ts)' },
+      pattern: { type: Type.STRING, description: 'Glob pattern สำหรับ filter (e.g., *.ts)' },
     },
     required: ['dir'],
   },

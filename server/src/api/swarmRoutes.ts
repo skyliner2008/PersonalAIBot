@@ -28,6 +28,12 @@ function toOptionalBoolean(value: unknown): boolean | undefined {
   return undefined;
 }
 
+function toOptionalNumber(value: unknown, defaultValue?: number): number | undefined {
+  if (value === undefined || value === null || value === '') return defaultValue;
+  const parsed = parseInt(String(value), 10);
+  return Number.isFinite(parsed) ? parsed : defaultValue;
+}
+
 async function buildDefaultJarvisPlan(objective: string, multipass?: boolean): Promise<JarvisDelegationTask[]> {
   const runtimeHealth = coordinator.getSpecialistRuntimeHealth();
   const options: JarvisPlannerOptions = await buildRuntimeJarvisPlannerOptions(objective, runtimeHealth, multipass);
@@ -207,12 +213,21 @@ router.post('/tasks', async (req, res) => {
       replyWithFile: async () => '',
     };
 
+    const parsedPriority = priority ? parseInt(priority) : undefined;
+    const finalPriority = Number.isFinite(parsedPriority) ? parsedPriority : undefined;
+
+    const parsedTimeout = timeout ? parseInt(timeout) : undefined;
+    const finalTimeout = Number.isFinite(parsedTimeout) ? parsedTimeout : undefined;
+
+    const parsedMaxRetries = maxRetries ? parseInt(maxRetries) : 0;
+    const finalMaxRetries = Number.isFinite(parsedMaxRetries) ? parsedMaxRetries : 0;
+
     const taskId = await coordinator.delegateTask(ctx, taskType as any, { message }, {
       toSpecialist: specialist,
-      priority: priority ? parseInt(priority) : undefined,
-      timeout: timeout ? parseInt(timeout) : undefined,
+      priority: finalPriority,
+      timeout: finalTimeout,
       dependsOn: dependsOn as string[] | undefined,
-      maxRetries: maxRetries ? parseInt(maxRetries) : 0,
+      maxRetries: finalMaxRetries,
     });
 
     res.json({
@@ -345,16 +360,38 @@ router.post('/task-chain', async (req, res) => {
       replyWithFile: async () => '',
     };
 
-    const chainTasks = tasks.map((t: any) => ({
-      taskType: t.taskType as any,
-      payload: { message: t.message, context: t.context },
-      toSpecialist: t.specialist,
-      maxRetries: t.maxRetries ?? 1,
-    }));
+    let chainTasks: any[];
+    try {
+      chainTasks = tasks.map((t: any, index: number) => {
+        if (typeof t !== 'object' || t === null) {
+          throw new Error(`Invalid task definition at index ${index}: expected an object.`);
+        }
+        if (!t.taskType || typeof t.taskType !== 'string') {
+          throw new Error(`Task at index ${index} missing or invalid 'taskType'.`);
+        }
+        if (!t.message || typeof t.message !== 'string') {
+          throw new Error(`Task at index ${index} missing or invalid 'message'.`);
+        }
+        return {
+          taskType: t.taskType as any,
+          payload: { message: t.message, context: t.context },
+          toSpecialist: t.specialist,
+          maxRetries: t.maxRetries ?? 1,
+        };
+      });
+    } catch (validationError: any) {
+      return res.status(400).json({
+        success: false,
+        error: validationError.message,
+      });
+    }
+
+    const finalBasePriority = toOptionalNumber(priority, 3);
+    const finalTimeout = toOptionalNumber(timeout, undefined);
 
     const taskIds = await coordinator.delegateTaskChain(ctx, chainTasks, {
-      basePriority: priority ? parseInt(priority) : 3,
-      timeout: timeout ? parseInt(timeout) : undefined,
+      basePriority: finalBasePriority,
+      timeout: finalTimeout,
     });
 
     res.json({

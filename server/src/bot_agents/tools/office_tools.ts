@@ -150,13 +150,25 @@ export const createOfficeHandlers = (ctx: BotContext) => {
     },
 
     create_document: async ({ format, content, filename }: { format: string, content: string, filename: string }) => {
+      let resolveLock: (() => void) | undefined;
+      let newLockPromise: Promise<void> | undefined;
+      let targetPath = '';
+
       try {
         await loadDependencies();
         const cleanName = filename.replace(/[^a-zA-Z0-9_\u0E00-\u0E7F-]/g, '');
-        let targetPath = '';
+        targetPath = path.join(getUploadDir(), `${cleanName}.${format}`);
+
+        // Acquire lock for this file path
+        let currentOperationPromise = Promise.resolve();
+        if (fileOperationLocks.has(targetPath)) {
+          currentOperationPromise = fileOperationLocks.get(targetPath)!;
+        }
+        newLockPromise = new Promise<void>(resolve => { resolveLock = resolve; });
+        fileOperationLocks.set(targetPath, newLockPromise);
+        await currentOperationPromise; // Wait for previous operations on this file to complete
 
         if (format === 'pdf') {
-          targetPath = path.join(getUploadDir(), `${cleanName}.pdf`);
           const doc = new PDFDocument();
           const stream = fs.createWriteStream(targetPath);
           await new Promise<void>((resolve, reject) => {
@@ -171,7 +183,6 @@ export const createOfficeHandlers = (ctx: BotContext) => {
           });
         } 
         else if (format === 'docx') {
-          targetPath = path.join(getUploadDir(), `${cleanName}.docx`);
           const d_docx = new docx.Document({
              creator: "Jarvis AI",
              sections: [{
@@ -183,7 +194,6 @@ export const createOfficeHandlers = (ctx: BotContext) => {
           fs.writeFileSync(targetPath, buffer);
         }
         else if (format === 'xlsx') {
-          targetPath = path.join(getUploadDir(), `${cleanName}.xlsx`);
           let jsonData = [];
           try {
              jsonData = JSON.parse(content);
@@ -203,6 +213,14 @@ export const createOfficeHandlers = (ctx: BotContext) => {
         return `✅ สร้างไฟล์สำเร็จแล้ว! บันทึกอยู่ที่:\n${targetPath}\n\nคุณสามารถใช้ Tool 'send_file_to_chat' เพื่อส่งไฟล์นี้ให้ผู้ใช้ได้เลยครับ`;
       } catch (err: any) {
         return `❌ Create Error: ${err.message}`;
+      } finally {
+        // Release lock
+        if (resolveLock && newLockPromise) {
+          resolveLock();
+          if (fileOperationLocks.get(targetPath) === newLockPromise) {
+            fileOperationLocks.delete(targetPath);
+          }
+        }
       }
     },
 
