@@ -227,12 +227,11 @@ router.get('/runtime-controls', (_req, res) => {
         const valueType = typeof ctrl.value;
         const isOverridden = ctrl.source !== 'default';
         let category = 'general';
-        
-        // ctrl.key is guaranteed to be a string here due to the filter
-        if (ctrl.key.startsWith('swarm_')) category = 'swarm';
-        else if (ctrl.key.startsWith('web_voice_')) category = 'web_voice';
-        else if (ctrl.key.startsWith('agent_')) category = 'agent';
-        else if (ctrl.key.startsWith('self_')) category = 'self_evolve';
+        const key = String(ctrl.key); // Ensure key is a string
+        if (key.startsWith('swarm_')) category = 'swarm';
+        else if (key.startsWith('web_voice_')) category = 'web_voice';
+        else if (key.startsWith('agent_')) category = 'agent';
+        else if (key.startsWith('self_')) category = 'self_evolve';
         
         return {
             ...ctrl,

@@ -98,7 +98,11 @@ export class GeminiProvider implements AIProvider {
   private getClientForModel(modelName: string): GoogleGenAI {
     if (this.isVertexAI) return this.ai; // Vertex AI handles versioning internally
     if (this.v1Models.has(modelName)) {
-      return this.aiFallback!;
+      // Ensure aiFallback is initialized if a v1 model is requested
+      if (!this.aiFallback) {
+        this.aiFallback = new GoogleGenAI({ apiKey: this.apiKey, httpOptions: { apiVersion: 'v1' } });
+      }
+      return this.aiFallback;
     }
     return this.ai;
   }
@@ -197,7 +201,7 @@ export class GeminiProvider implements AIProvider {
           };
           
           try {
-            response = await this.aiFallback.models.generateContent(v1Payload);
+            response = await this.aiFallback!.models.generateContent(v1Payload);
           } catch (v1Err: any) {
             // If v1 STILL fails with INVALID_ARGUMENT, it might be due to remaining fields
             logger.error(`v1 retry also failed for ${modelName}:`, v1Err);

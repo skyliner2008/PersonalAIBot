@@ -53,11 +53,16 @@ export class RestApiProvider implements AIProvider {
       throw new Error(`Failed to serialize request body to JSON: ${e instanceof Error ? e.message : String(e)}`);
     }
 
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers,
-      body: serializedBody
-    });
+    let res: any;
+    try {
+      res = await fetch(endpoint, {
+        method: 'POST',
+        headers,
+        body: serializedBody
+      });
+    } catch (e) {
+      throw new Error(`REST API Image Generate Error: Network or communication issue: ${e instanceof Error ? e.message : String(e)}`);
+    }
 
     if (!res.ok) {
       const errText = await res.text();
@@ -68,8 +73,12 @@ export class RestApiProvider implements AIProvider {
     const contentType = res.headers.get('content-type') || '';
     if (contentType.includes('image/')) {
        // Direct Buffer Return
-       const arrayBuf = await res.arrayBuffer();
-       return [{ buffer: Buffer.from(arrayBuf) }];
+       try {
+         const arrayBuf = await res.arrayBuffer();
+         return [{ buffer: Buffer.from(arrayBuf) }];
+       } catch (e) {
+         throw new Error(`REST API Image Generate Error: Failed to read image data from response body: ${e instanceof Error ? e.message : String(e)}`);
+       }
     } else {
        // JSON formatting (like Cloudflare or OpenAI payload)
        let json;

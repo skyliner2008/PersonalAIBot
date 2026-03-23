@@ -25,7 +25,7 @@ const READ_ONLY_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 function getJwtSecret(): string {
   let dbSecret: string | undefined;
   try {
-    dbSecret = getCredential('JWT_SECRET');
+    dbSecret = getCredential('JWT_SECRET') ?? undefined;
   } catch (e) {
     log.error('Failed to retrieve JWT_SECRET from DB, falling back to ENV/default.', { error: e });
   }

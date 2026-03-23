@@ -64,8 +64,13 @@ export function initBootGuardian() {
       if (latestUpgrade.allFiles && Array.isArray(latestUpgrade.allFiles)) {
         for (let i = 0; i < latestUpgrade.allFiles.length; i++) {
           const backupName = `proposal_${latestUpgrade.id}_before${i > 0 ? `_dep${i}` : ''}.txt`;
+          const targetEntry = latestUpgrade.allFiles[i];
+          if (!targetEntry || !targetEntry.fullPath) {
+            console.warn(`[BootGuardian] Skipping malformed upgrade file entry at index ${i}.`);
+            continue;
+          }
           const backupFile = path.join(historyDir, backupName);
-          const targetPath = latestUpgrade.allFiles[i].fullPath;
+          const targetPath = targetEntry.fullPath;
           if (fs.existsSync(backupFile) && targetPath) {
             try {
               const originalContent = fs.readFileSync(backupFile, 'utf-8');

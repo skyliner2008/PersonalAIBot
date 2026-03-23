@@ -139,7 +139,8 @@ async function loadToolFromFile(filePath: string): Promise<{ tool?: DynamicToolD
       parameters: toolParameters
         ? {
             type: Type.OBJECT,
-            ...toolParameters,
+            ...(toolParameters as any),
+            type: mapSchemaType((toolParameters as any).type || 'object'),
           }
         : {
             type: Type.OBJECT,
