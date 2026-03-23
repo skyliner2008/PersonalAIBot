@@ -1,11 +1,13 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { TaskType, ModelConfig, MultiModelConfig, modelRouting as defaultMultiConfig, getBestModelForTask } from './aiConfig.js';
+import { 
   getProvider,
   getEnabledProviders,
-  getProvidersByCategory,
-  type ProviderCategory,
-  type ProviderDefinition,
+  getProvidersByCategory
 } from '../../providers/registry.js';
+import type { ProviderCategory, ProviderDefinition } from '../../providers/registry.js';
+import { getAgentCompatibleProvider, getAgentProviderDefaultModel } from '../../providers/agentRuntime.js';
 import { createLogger } from '../../utils/logger.js';
 
 const logger = createLogger('ConfigManager');
