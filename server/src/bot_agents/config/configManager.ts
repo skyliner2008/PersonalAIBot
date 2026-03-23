@@ -1,7 +1,11 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { TaskType, ModelConfig, MultiModelConfig, modelRouting as defaultMultiConfig, getBestModelForTask } from './aiConfig.js';
-import { getAgentCompatibleProvider, getAgentProviderDefaultModel } from '../../providers/agentRuntime.js';
+  getProvider,
+  getEnabledProviders,
+  getProvidersByCategory,
+  type ProviderCategory,
+  type ProviderDefinition,
+} from '../../providers/registry.js';
 import { createLogger } from '../../utils/logger.js';
 
 const logger = createLogger('ConfigManager');
@@ -199,16 +203,56 @@ export class ConfigManager {
   }
 
   public resolveModelConfig(taskType: TaskType, botId?: string): { config: MultiModelConfig; autoRouting: boolean } {
+    const checkEnabled = (cfg: ModelConfig) => {
+      const p = getProvider(cfg.provider);
+      return p && p.enabled;
+    };
+
+    let config: MultiModelConfig | undefined;
+
     if (botId) {
       const botRouteCfg = this.getBotConfig(botId);
-      if (botRouteCfg?.routes[taskType]) return { config: botRouteCfg.routes[taskType], autoRouting: botRouteCfg.autoRouting };
+      if (botRouteCfg?.routes[taskType]) {
+        config = botRouteCfg.routes[taskType];
+      }
     }
-    const routes = this.currentConfig.routes;
-    const config = routes[taskType] ?? routes[TaskType.GENERAL];
+
+    if (!config) {
+      const routes = this.currentConfig.routes;
+      config = routes[taskType] ?? routes[TaskType.GENERAL];
+    }
+
+    // Adaptive Auto-routing
     if (this.currentConfig.autoRouting) {
       const best = getBestModelForTask(taskType);
-      if (best) return { config: { active: best, fallbacks: [config.active, ...(config.fallbacks || [])] }, autoRouting: true };
+      if (best && checkEnabled(best)) {
+        return { 
+          config: { active: best, fallbacks: [config.active, ...(config.fallbacks || [])] }, 
+          autoRouting: true 
+        };
+      }
     }
+
+    // Ensure active is enabled, otherwise pick first enabled fallback
+    if (!checkEnabled(config.active)) {
+      const enabledFallback = config.fallbacks?.find(checkEnabled);
+      if (enabledFallback) {
+        return { 
+          config: { active: enabledFallback, fallbacks: config.fallbacks?.filter(f => f !== enabledFallback) }, 
+          autoRouting: this.currentConfig.autoRouting 
+        };
+      }
+      
+      // If still nothing, try to find any enabled LLM provider as ultimate fallback
+      const anyLlm = getEnabledProviders('llm').find(p => p.type !== 'platform');
+      if (anyLlm) {
+        return { 
+          config: { active: { provider: anyLlm.id, modelName: anyLlm.defaultModel || '' }, fallbacks: [] }, 
+          autoRouting: this.currentConfig.autoRouting 
+        };
+      }
+    }
+
     return { config, autoRouting: this.currentConfig.autoRouting };
   }
 
