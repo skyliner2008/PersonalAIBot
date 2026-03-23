@@ -504,17 +504,21 @@ function handleVoiceEvents(io: SocketServer, socket: Socket) {
                     return;
                 }
                 
-                // ─── Gemini Live Mode (default): real-time voice + tool bridge to Agent ───
+                // ─── Gemini Live Mode: Native Audio + Tool Bridge ───
                 const geminiDef = getProvider('gemini');
-                if (!geminiDef || !geminiDef.enabled) {
-                    socket.emit('voice:error', { message: 'Gemini Provider is disabled in Settings. Please enable it to use Live Call.' });
-                    return;
-                }
-
                 const keyResolution = resolveProviderApiKey('gemini');
                 const apiKey = keyResolution.key || process.env.GEMINI_API_KEY;
-                if (!apiKey) {
-                    socket.emit('voice:error', { message: 'Gemini API key is not configured' });
+
+                // Fallback to Browser STT if Gemini is disabled or API key is missing
+                if (!geminiDef?.enabled || !apiKey) {
+                    const reason = !geminiDef?.enabled ? 'Gemini Provider is disabled' : 'Gemini API key is missing';
+                    log.info(`[LiveVoice] ${reason}. Falling back to Browser STT...`);
+                    
+                    socket.emit('voice:warning', { message: `${reason}. Falling back to Browser STT.` });
+                    socket.emit('voice:model', { model: 'jarvis-agent', apiVersion: 'internal', mode: requestedMode, transport: 'stt' });
+                    socket.emit('voice:connected');
+                    socket.emit('voice:ready', { mode: requestedMode, transport: 'stt' });
+                    try { ack?.({ ok: true, stage: 'ready' }); } catch { /* ignore ack errors */ }
                     return;
                 }
                 
