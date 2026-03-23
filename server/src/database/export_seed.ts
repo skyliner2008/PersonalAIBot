@@ -43,7 +43,7 @@ for (const table of tablesToExport) {
     sqlOutput += `DELETE FROM ${table};\n`; // Clear existing if any
 
     for (const row of rows) {
-      const keys = Object.keys(row);
+      const keys = Object.keys(row as object);
       const values = keys.map(k => {
         const val = (row as any)[k];
         if (val === null) return 'NULL';
