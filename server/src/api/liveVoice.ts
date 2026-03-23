@@ -81,10 +81,13 @@ export function chooseLiveModelFromAvailable(
   return ranked[0] || null;
 }
 
-export async function resolveGeminiLiveModel(apiKey: string): Promise<string> {
+export async function resolveGeminiLiveModel(apiKey: string, preferredModel?: string): Promise<string> {
+  const normalizedPreferred = preferredModel ? normalizeModelName(preferredModel) : '';
   const forcedModel = normalizeModelName(String(process.env.GEMINI_LIVE_MODEL || ''));
   const candidates = parseCandidateModels();
-  const candidatePool = forcedModel ? [forcedModel, ...candidates] : candidates;
+  
+  // Try to use preferred model if it's explicitly set by user, but validate it later
+  const candidatePool = forcedModel ? [forcedModel, ...candidates] : (normalizedPreferred ? [normalizedPreferred, ...candidates] : candidates);
 
   try {
     const listUrl = `https://${HOST}/v1beta/models?key=${apiKey}&pageSize=1000`;
@@ -94,13 +97,26 @@ export async function resolveGeminiLiveModel(apiKey: string): Promise<string> {
     }
     const payload = await response.json() as GeminiListModelsResponse;
     const availableBidiModels = extractBidiModelsFromResponse(payload);
+    
+    // If preferred model is actually available for Bidi (Live), use it
+    if (normalizedPreferred && availableBidiModels.includes(normalizedPreferred)) {
+      logger.info(`[LiveVoice] Confirmed preferred model ${normalizedPreferred} supports Live API.`);
+      return normalizedPreferred;
+    }
+
     const selected = chooseLiveModelFromAvailable(availableBidiModels, candidatePool);
-    if (selected) return selected;
+    if (selected) {
+      if (normalizedPreferred && selected !== normalizedPreferred) {
+        logger.warn(`[LiveVoice] Preferred model ${normalizedPreferred} does NOT support Live API. Falling back to ${selected}`);
+      }
+      return selected;
+    }
   } catch (err) {
-    console.warn(`[LiveVoice] Failed to resolve live model dynamically: ${String(err)}`);
+    logger.warn(`[LiveVoice] Failed to resolve live model dynamically: ${String(err)}`);
   }
 
-  return candidatePool[0] || DEFAULT_LIVE_MODEL;
+  // Final static fallback
+  return normalizedPreferred || DEFAULT_LIVE_MODEL;
 }
 
 export class LiveVideoClient extends EventEmitter {

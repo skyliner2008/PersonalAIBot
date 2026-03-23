@@ -522,14 +522,12 @@ function handleVoiceEvents(io: SocketServer, socket: Socket) {
                     return;
                 }
                 
-                // Prioritize model from ai_routing_config.json if it's a Gemini model
+                // Prioritize Gemini model from SYSTEM config if available
                 const supportConfig = configManager.resolveModelConfig(TaskType.SYSTEM).config;
-                let liveModel = (supportConfig.active.provider === 'gemini') ? supportConfig.active.modelName : '';
+                const preferredModel = (supportConfig.active.provider === 'gemini') ? supportConfig.active.modelName : undefined;
                 
-                // If no specific Gemini model in SYSTEM, or it's not a Gemini model, use smart discovery
-                if (!liveModel) {
-                    liveModel = await resolveGeminiLiveModel(apiKey);
-                }
+                // Use smart discovery with preference
+                const liveModel = await resolveGeminiLiveModel(apiKey, preferredModel);
                 const liveApiVersion = process.env.GEMINI_LIVE_API_VERSION || 'v1beta';
                 
                 // Create a unique Chat ID for THIS specific voice session

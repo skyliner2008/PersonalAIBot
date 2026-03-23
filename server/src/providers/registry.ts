@@ -7,6 +7,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createLogger } from '../utils/logger.js';
+import { getSetting, setSetting, isDbInitialized } from '../database/db.js';
 
 const log = createLogger('ProviderRegistry');
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -115,7 +116,14 @@ class RegistryLoader {
 
   getProvider(providerId: string): ProviderDefinition | undefined {
     const registry = this.getRegistry();
-    return registry.providers[providerId];
+    const provider = registry.providers[providerId];
+    if (provider && isDbInitialized()) {
+      const dbEnabled = getSetting(`provider_enabled_${providerId}`);
+      if (dbEnabled !== null) {
+        provider.enabled = dbEnabled === '1';
+      }
+    }
+    return provider;
   }
 
   getProvidersByCategory(category: ProviderCategory): ProviderDefinition[] {
@@ -125,9 +133,9 @@ class RegistryLoader {
 
   getEnabledProviders(category?: ProviderCategory): ProviderDefinition[] {
     const registry = this.getRegistry();
-    return Object.values(registry.providers).filter(
-      (p) => p.enabled && (!category || p.category === category)
-    );
+    return Object.values(registry.providers)
+      .map(p => this.getProvider(p.id)!) // This ensures we get DB-vetted status
+      .filter((p) => p.enabled && (!category || p.category === category));
   }
 
   getFallbackOrder(category: ProviderCategory): string[] {
@@ -165,9 +173,15 @@ class RegistryLoader {
     const registry = this.getRegistry();
     const provider = registry.providers[providerId];
     if (!provider) return false;
+    
     provider.enabled = enabled !== undefined ? enabled : !provider.enabled;
+    
+    if (isDbInitialized()) {
+      setSetting(`provider_enabled_${providerId}`, provider.enabled ? '1' : '0');
+    }
+    
     this.saveRegistry();
-    log.info('Provider toggled', { id: providerId, enabled: provider.enabled });
+    log.info('Provider toggled (DB + JSON fallback)', { id: providerId, enabled: provider.enabled });
     return true;
   }
 

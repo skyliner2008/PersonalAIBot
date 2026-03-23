@@ -183,7 +183,7 @@ export const createMediaHandlers = (ctx: BotContext) => {
 
       try {
         const results = await providerDef.instance.generateVideo(prompt, providerDef.id, {});
-        const r = results[0];
+        const r = results?.[0];
         if (r && r.buffer) {
            const fp = path.join(config.uploadsDir, `vid_${Date.now()}.mp4`);
            fs.writeFileSync(fp, r.buffer);
