@@ -206,8 +206,8 @@ export function JarvisCall() {
 
   useEffect(() => {
     voiceModeRef.current = voiceMode;
-    // Always use 'live' transport for natural Thai + tool support
-    const nextTransport: VoiceTransport = 'live';
+    // Default to stt for typing / browser TTS support; startCall will upgrade to 'live' if possible
+    const nextTransport: VoiceTransport = 'stt';
     voiceTransportRef.current = nextTransport;
     setVoiceTransport(nextTransport);
   }, [voiceMode]);
@@ -710,8 +710,9 @@ export function JarvisCall() {
       awaitingAgentReplyRef.current = false;
       clearAgentReplyWatchdog();
       pushLog('assistant', reply);
-      // Only use browser TTS in STT-only mode; in Live mode Gemini speaks via audio stream
-      if (voiceTransportRef.current === 'stt') {
+      // Use browser TTS if we are in STT transport, 
+      // OR if we are in agent-tools mode and no audio-recv has happened (Gemini key missing)
+      if (voiceTransportRef.current === 'stt' || voiceTransport === 'stt') {
         speakAssistantReply(reply);
       }
     });
