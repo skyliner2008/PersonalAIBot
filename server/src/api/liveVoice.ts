@@ -241,7 +241,7 @@ export class LiveVideoClient extends EventEmitter {
           speechConfig: {
             voiceConfig: {
               prebuiltVoiceConfig: {
-                voiceName: 'Aoede',
+                voiceName: 'Charon',
               },
             },
           },
