@@ -258,7 +258,7 @@ export async function registerDynamicTool(
       parameters: parameters
         ? {
             ...(parameters as any),
-            type: mapSchemaType((parameters as any).type),
+            type: mapSchemaType((parameters as any).type || 'object'),
           }
         : {
             type: Type.OBJECT,

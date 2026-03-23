@@ -117,6 +117,9 @@ export const createMediaHandlers = (ctx: BotContext) => {
 
       try {
         const results = await providerDef.instance.generateImage(prompt, providerDef.id, { n });
+        if (!Array.isArray(results)) {
+          return '❌ Error: ผู้ให้บริการสร้างรูปภาพส่งคืนข้อมูลที่ไม่ถูกต้อง';
+        }
         if (!fs.existsSync(config.uploadsDir)) {
           fs.mkdirSync(config.uploadsDir, { recursive: true });
         }
@@ -183,7 +186,10 @@ export const createMediaHandlers = (ctx: BotContext) => {
 
       try {
         const results = await providerDef.instance.generateVideo(prompt, providerDef.id, {});
-        const r = results?.[0];
+        if (!Array.isArray(results)) {
+          return '❌ Error: ผู้ให้บริการสร้างวิดีโอส่งคืนข้อมูลที่ไม่ถูกต้อง';
+        }
+        const r = results[0];
         if (r && r.buffer) {
            const fp = path.join(config.uploadsDir, `vid_${Date.now()}.mp4`);
            fs.writeFileSync(fp, r.buffer);
