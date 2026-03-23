@@ -168,11 +168,13 @@ PROJECT_DIR="$INSTALLER_DIR/$REPO_NAME"
 if [ -f "server/package.json" ]; then
     PROJECT_DIR="$(pwd)"
     info "Running from within project folder. Checking for updates..."
+    git reset --hard HEAD &>/dev/null
     git pull --ff-only 2>/dev/null && ok "System is up to date" || warn "Git pull skipped (detached HEAD or local changes)."
 # Case 2: Subfolder exists — pull latest
 elif [ -f "$PROJECT_DIR/server/package.json" ]; then
     info "Project folder exists. Pulling latest..."
     cd "$PROJECT_DIR"
+    git reset --hard HEAD &>/dev/null
     git pull --ff-only 2>/dev/null && ok "Updated to latest" || warn "Git pull failed. Continuing with existing files."
 # Case 3: Fresh clone
 else
