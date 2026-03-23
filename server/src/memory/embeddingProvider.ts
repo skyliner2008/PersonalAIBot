@@ -1,7 +1,7 @@
 // ============================================================
 // Embedding Provider - centralized embedding generation with caching and batching
 // ============================================================
-// Supports Gemini embedding model chain (primary + fallback) for safer upgrades.
+// Supports multiple backends (Gemini, OpenAI, etc.) with automatic failover and caching.
 
 import crypto from 'crypto';
 import { GoogleGenAI } from '@google/genai';
@@ -10,59 +10,35 @@ import { createLogger } from '../utils/logger.js';
 const log = createLogger('EmbeddingProvider');
 
 // ============================================================
-// Configuration
+// Constants & Types
 // ============================================================
 
-const DEFAULT_PRIMARY_EMBEDDING_MODEL = 'gemini-embedding-001';
-const DEFAULT_FALLBACK_MODELS = ['gemini-embedding-001', 'gemini-embedding-002'];
-const CACHE_MAX_ENTRIES = 200;
+export interface EmbeddingProviderStats {
+  providerType: string;
+  cacheSize: number;
+  maxCacheSize: number;
+  queuedRequests: number;
+  activeModel: string;
+}
+
+export interface IEmbeddingProvider {
+  embed(text: string): Promise<number[]>;
+  embedBatch(texts: string[]): Promise<(number[] | null)[]>;
+  getStats(): EmbeddingProviderStats;
+  clearCache(): void;
+  getDimensions(): number;
+}
+
+const CACHE_MAX_ENTRIES = 500;
 const BATCH_SIZE = 10;
 const BATCH_TIMEOUT_MS = 500;
-
-function parseModelList(value: string | undefined): string[] {
-  if (!value) return [];
-  return value
-    .split(',')
-    .map((model) => model.trim())
-    .filter(Boolean);
-}
-
-function uniqueModels(models: string[]): string[] {
-  return Array.from(new Set(models.map((model) => model.trim()).filter(Boolean)));
-}
-
-function resolveEmbeddingModelChain(): string[] {
-  const explicitChain = parseModelList(process.env.GEMINI_EMBEDDING_MODELS);
-  if (explicitChain.length > 0) {
-    return uniqueModels(explicitChain);
-  }
-
-  const primaryModel =
-    process.env.GEMINI_EMBEDDING_MODEL ||
-    process.env.EMBEDDING_MODEL ||
-    DEFAULT_PRIMARY_EMBEDDING_MODEL;
-
-  const fallbackModels = parseModelList(process.env.GEMINI_EMBEDDING_FALLBACK_MODELS);
-  const effectiveFallbacks = fallbackModels.length > 0 ? fallbackModels : DEFAULT_FALLBACK_MODELS;
-
-  return uniqueModels([primaryModel, ...effectiveFallbacks]);
-}
-
-function toErrorMessage(err: unknown): string {
-  const raw = err instanceof Error ? err.message : String(err);
-  return raw.length > 300 ? `${raw.substring(0, 300)}...` : raw;
-}
 
 // ============================================================
 // LRU Cache Implementation
 // ============================================================
 
-interface CacheEntry {
-  embedding: number[];
-}
-
 class LRUCache {
-  private cache: Map<string, CacheEntry> = new Map();
+  private cache: Map<string, { embedding: number[] }> = new Map();
   private maxSize: number;
 
   constructor(maxSize: number = CACHE_MAX_ENTRIES) {
@@ -72,366 +48,203 @@ class LRUCache {
   get(key: string): number[] | null {
     const entry = this.cache.get(key);
     if (!entry) return null;
-
-    // Refresh order: delete and re-insert to move to the end (most recent)
     this.cache.delete(key);
     this.cache.set(key, entry);
-
     return entry.embedding;
   }
 
   set(key: string, embedding: number[]): void {
-    if (this.cache.has(key)) {
-      this.cache.delete(key);
-    }
-
+    if (this.cache.has(key)) this.cache.delete(key);
     this.cache.set(key, { embedding });
-
     if (this.cache.size > this.maxSize) {
-      // The first key in the Map is the least recently used
       const lruKey = this.cache.keys().next().value;
-      if (lruKey !== undefined) {
-        this.cache.delete(lruKey);
-      }
+      if (lruKey !== undefined) this.cache.delete(lruKey);
     }
   }
 
-  clear(): void {
-    this.cache.clear();
-  }
-
-  getStats(): { size: number; maxSize: number } {
-    return { size: this.cache.size, maxSize: this.maxSize };
-  }
+  clear(): void { this.cache.clear(); }
+  get size(): number { return this.cache.size; }
+  get max(): number { return this.maxSize; }
 }
 
 // ============================================================
-// Batch Queue
+// Base Provider with Caching and Batching
 // ============================================================
 
-interface BatchRequest {
-  text: string;
-  resolve: (embedding: number[]) => void;
-  reject: (err: Error) => void;
-}
-
-export interface EmbeddingProviderStats {
-  cacheSize: number;
-  maxCacheSize: number;
-  queuedRequests: number;
-  configuredModels: string[];
-  activeModel: string;
-  failoverCount: number;
-  modelErrors: Record<string, number>;
-}
-
-// ============================================================
-// EmbeddingProvider Class
-// ============================================================
-
-export class EmbeddingProvider {
-  private cache: LRUCache;
-  private batchQueue: BatchRequest[] = [];
-  private batchTimeout: NodeJS.Timeout | null = null;
-  private processing = false;
-  private modelChain: string[];
-  private activeModel: string;
-  private failoverCount = 0;
-  private modelErrorCount: Record<string, number> = {};
-  private ai: GoogleGenAI;
-
-  constructor(apiKey: string, models?: string[]) {
-    this.cache = new LRUCache(CACHE_MAX_ENTRIES);
-    this.ai = new GoogleGenAI({ apiKey });
-    const mergedModels = uniqueModels([...(models || []), ...resolveEmbeddingModelChain()]);
-    this.modelChain = mergedModels.length > 0 ? mergedModels : [DEFAULT_PRIMARY_EMBEDDING_MODEL];
-    this.activeModel = this.modelChain[0];
-
-    log.info('EmbeddingProvider initialized', {
-      configuredModels: this.modelChain,
-      activeModel: this.activeModel,
-    });
-  }
+abstract class BaseEmbeddingProvider implements IEmbeddingProvider {
+  protected cache = new LRUCache();
+  protected batchQueue: { text: string; resolve: (v: number[]) => void; reject: (e: Error) => void }[] = [];
+  protected batchTimeout: NodeJS.Timeout | null = null;
+  protected processing = false;
 
   async embed(text: string): Promise<number[]> {
-    if (!this.isValidText(text)) {
-      return [];
-    }
+    if (!text || !text.trim()) return [];
+    const hash = crypto.createHash('md5').update(text).digest('hex');
+    const cached = this.cache.get(hash);
+    if (cached) return cached;
 
-    const cacheKey = this.hashText(text);
-    const cached = this.cache.get(cacheKey);
-    if (cached) {
-      log.debug('Cache hit for embedding');
-      return cached;
-    }
-
-    return this.queueEmbedding(text);
+    return new Promise((resolve, reject) => {
+      this.batchQueue.push({ text, resolve, reject });
+      if (this.batchQueue.length >= BATCH_SIZE) this.processBatch();
+      else if (!this.batchTimeout) this.batchTimeout = setTimeout(() => this.processBatch(), BATCH_TIMEOUT_MS);
+    });
   }
 
   async embedBatch(texts: string[]): Promise<(number[] | null)[]> {
-    const validTexts = texts.filter((text) => this.isValidText(text));
-    if (validTexts.length === 0) {
-      return texts.map(() => null);
-    }
-
-    try {
-      const { embeddings } = await this.embedContentsWithFallback(validTexts);
-
-      validTexts.forEach((text, idx) => {
-        const embedding = embeddings[idx];
-        if (embedding && embedding.length > 0) {
-          const cacheKey = this.hashText(text);
-          this.cache.set(cacheKey, embedding);
-        }
-      });
-
-      const output: (number[] | null)[] = [];
-      let validIdx = 0;
-      for (const text of texts) {
-        if (this.isValidText(text)) {
-          output.push(embeddings[validIdx] || null);
-          validIdx += 1;
-        } else {
-          output.push(null);
-        }
-      }
-
-      return output;
-    } catch (err) {
-      log.error('Batch embedding failed', {
-        error: toErrorMessage(err),
-        count: validTexts.length,
-      });
-      return texts.map(() => null);
-    }
+    return Promise.all(texts.map(t => this.embed(t).catch(() => null)));
   }
 
-  private isValidText(text: string | null | undefined): boolean {
-    return !!(text && text.trim().length > 0);
-  }
+  protected abstract processBatchInternal(texts: string[]): Promise<number[][]>;
+  public abstract getStats(): EmbeddingProviderStats;
+  public abstract getDimensions(): number;
 
-  private queueEmbedding(text: string): Promise<number[]> {
-    return new Promise((resolve, reject) => {
-      this.batchQueue.push({ text, resolve, reject });
-
-      if (this.batchQueue.length >= BATCH_SIZE) {
-        this.processBatch();
-      } else if (!this.batchTimeout) {
-        this.batchTimeout = setTimeout(() => this.processBatch(), BATCH_TIMEOUT_MS);
-      }
-    });
-  }
-
-  private async processBatch(): Promise<void> {
+  protected async processBatch(): Promise<void> {
     if (this.processing || this.batchQueue.length === 0) return;
-
     this.processing = true;
-    if (this.batchTimeout) {
-      clearTimeout(this.batchTimeout);
-      this.batchTimeout = null;
-    }
+    if (this.batchTimeout) { clearTimeout(this.batchTimeout); this.batchTimeout = null; }
 
-    const currentBatch = this.batchQueue.splice(0, BATCH_SIZE);
-
+    const batch = this.batchQueue.splice(0, BATCH_SIZE);
     try {
-      const texts = currentBatch.map((request) => request.text);
-      const { embeddings } = await this.embedContentsWithFallback(texts);
-
-      currentBatch.forEach((request, idx) => {
-        const embedding = embeddings[idx] || [];
-        const cacheKey = this.hashText(request.text);
-        this.cache.set(cacheKey, embedding);
-        request.resolve(embedding);
+      const texts = batch.map(b => b.text);
+      const vectors = await this.processBatchInternal(texts);
+      batch.forEach((req, i) => {
+        const v = vectors[i] || [];
+        const hash = crypto.createHash('md5').update(req.text).digest('hex');
+        this.cache.set(hash, v);
+        req.resolve(v);
       });
     } catch (err) {
-      currentBatch.forEach((request) => {
-        request.reject(err as Error);
-      });
-      log.error('Batch processing failed', { error: toErrorMessage(err) });
+      batch.forEach(req => req.reject(err as Error));
     } finally {
       this.processing = false;
-    }
-
-    if (this.batchQueue.length > 0 && !this.processing) {
-      setImmediate(() => this.processBatch());
+      if (this.batchQueue.length > 0) setImmediate(() => this.processBatch());
     }
   }
 
-  private getModelCandidates(): string[] {
-    return uniqueModels([this.activeModel, ...this.modelChain]);
+  clearCache(): void { this.cache.clear(); }
+}
+
+// ============================================================
+// Gemini Provider Implementation
+// ============================================================
+
+export class GeminiEmbeddingProvider extends BaseEmbeddingProvider {
+  private ai: GoogleGenAI;
+  private model: string;
+
+  constructor(apiKey: string, model: string = 'gemini-embedding-001') {
+    super();
+    this.ai = new GoogleGenAI({ apiKey });
+    this.model = model;
+    log.info(`Gemini Embedding Provider initialized with model: ${model}`);
   }
 
-  private async embedContentsWithFallback(texts: string[]): Promise<{ embeddings: number[][]; model: string }> {
-    const candidates = this.getModelCandidates();
-    let lastError: Error | null = null;
-    const failedModels: string[] = [];
-
-    let currentApiKey: string;
-    try {
-      const { getProviderApiKey } = await import('../config/settingsSecurity.js');
-      currentApiKey = getProviderApiKey('gemini') || '';
-    } catch (keyErr) {
-      log.error('Failed to retrieve Gemini API key', { error: toErrorMessage(keyErr) });
-      throw new Error(`Failed to retrieve Gemini API key: ${toErrorMessage(keyErr)}`);
-    }
-    const ai = new GoogleGenAI({ apiKey: currentApiKey });
-
-    for (const model of candidates) {
-      try {
-        const result = await ai.models.embedContent({
-          model,
-          contents: texts.map((text) => ({
-            role: 'user',
-            parts: [{ text }],
-          })),
-        });
-
-        const embeddings = result.embeddings?.map((item) => item.values || []) || [];
-        if (embeddings.length < texts.length || embeddings.some((vec) => vec.length === 0)) {
-          throw new Error(`Model returned incomplete embeddings: ${model}`);
-        }
-
-        if (this.activeModel !== model) {
-          this.failoverCount += 1;
-          log.warn('Embedding model switched after fallback', {
-            from: this.activeModel,
-            to: model,
-            failoverCount: this.failoverCount,
-          });
-          this.activeModel = model;
-        }
-
-        return { embeddings, model };
-      } catch (err) {
-        failedModels.push(model);
-        lastError = err instanceof Error ? err : new Error(String(err));
-        
-        this.modelErrorCount[model] = (this.modelErrorCount[model] || 0) + 1;
-        log.warn('Embedding model failed, trying next fallback', {
-          model,
-          failures: this.modelErrorCount[model],
-          error: toErrorMessage(lastError),
-        });
-      }
-    }
-
-    const failureMsg = `All embedding models failed: [${failedModels.join(', ')}]. Last error: ${lastError?.message || 'Unknown error'}`;
-    throw new Error(failureMsg);
-  }
-
-  private cacheEmbedding(text: string, embedding: number[] | undefined | null): void {
-    if (this.isValidText(text) && embedding && embedding.length > 0) {
-      const cacheKey = this.hashText(text);
-      this.cache.set(cacheKey, embedding);
-    }
-  }
-
-  private hashText(text: string): string {
-    let hash = 0;
-    for (let i = 0; i < text.length; i++) {
-      const char = text.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash;
-    }
-    return `emb_${Math.abs(hash)}`;
-  }
-
-  clearCache(): void {
-    this.cache.clear();
-    log.info('Embedding cache cleared');
+  protected async processBatchInternal(texts: string[]): Promise<number[][]> {
+    const result = await this.ai.models.embedContent({
+      model: this.model,
+      contents: texts.map(text => ({ role: 'user', parts: [{ text }] })),
+    });
+    return result.embeddings?.map(e => e.values || []) || [];
   }
 
   getStats(): EmbeddingProviderStats {
-    const cacheStats = this.cache.getStats();
     return {
-      cacheSize: cacheStats.size,
-      maxCacheSize: cacheStats.maxSize,
+      providerType: 'gemini',
+      cacheSize: this.cache.size,
+      maxCacheSize: this.cache.max,
       queuedRequests: this.batchQueue.length,
-      configuredModels: [...this.modelChain],
-      activeModel: this.activeModel,
-      failoverCount: this.failoverCount,
-      modelErrors: { ...this.modelErrorCount },
+      activeModel: this.model,
     };
   }
+
+  getDimensions(): number { return 768; }
 }
 
 // ============================================================
-// Dependency Injection & Singleton Convenience Functions
+// OpenAI Provider Implementation (supports OpenAI and OpenRouter)
 // ============================================================
 
-let defaultProvider: EmbeddingProvider | null = null;
+export class OpenAIEmbeddingProvider extends BaseEmbeddingProvider {
+  private apiKey: string;
+  private model: string;
+  private baseUrl: string;
 
-export function initEmbeddingProvider(apiKey: string | undefined): void {
-  if (apiKey) {
-    defaultProvider = new EmbeddingProvider(apiKey);
-    log.info('Default EmbeddingProvider initialized');
-  } else {
-    log.warn('No apiKey provided for EmbeddingProvider initialization');
+  constructor(apiKey: string, model: string = 'text-embedding-3-small', baseUrl: string = 'https://api.openai.com/v1') {
+    super();
+    this.apiKey = apiKey;
+    this.model = model;
+    this.baseUrl = baseUrl;
+    log.info(`OpenAI Embedding Provider initialized with model: ${model} at ${baseUrl}`);
   }
-}
 
-export function getDefaultEmbeddingProvider(): EmbeddingProvider {
-  if (!defaultProvider) throw new Error('EmbeddingProvider not initialized');
-  return defaultProvider;
-}
+  protected async processBatchInternal(texts: string[]): Promise<number[][]> {
+    const response = await fetch(`${this.baseUrl}/embeddings`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${this.apiKey}`,
+      },
+      body: JSON.stringify({ input: texts, model: this.model }),
+    });
 
-/** Returns true if a default embedding provider has been initialized */
-export function isEmbeddingReady(): boolean {
-  return defaultProvider !== null;
-}
+    if (!response.ok) {
+      const err = await response.text();
+      throw new Error(`OpenAI Embedding Error (${response.status}): ${err}`);
+    }
 
-/**
- * Convenience wrapper for embedding a single text using a provided instance (or singleton).
- * Returns empty array if no provider is configured (graceful fallback for fresh installs).
- */
-export async function embedText(text: string, provider?: EmbeddingProvider): Promise<number[]> {
-  const p = provider || defaultProvider;
-  if (!p) {
-    log.debug('embedText skipped — no EmbeddingProvider configured yet');
-    return [];
+    const data = await response.json() as { data: { embedding: number[] }[] };
+    return data.data.map(d => d.embedding);
   }
-  try {
-    return await p.embed(text);
-  } catch (err) {
-    log.error('Embedding failed', { error: toErrorMessage(err) });
-    return [];
-  }
-}
 
-/**
- * Convenience wrapper for embedding multiple texts using a provided instance (or singleton).
- * Returns nulls if no provider is configured (graceful fallback for fresh installs).
- */
-export async function embedTexts(texts: string[], provider?: EmbeddingProvider): Promise<(number[] | null)[]> {
-  const p = provider || defaultProvider;
-  if (!p) {
-    log.debug('embedTexts skipped — no EmbeddingProvider configured yet');
-    return texts.map(() => null);
-  }
-  try {
-    return await p.embedBatch(texts);
-  } catch (err) {
-    log.error('Batch embedding failed', { error: toErrorMessage(err) });
-    return texts.map(() => null);
-  }
-}
-
-/**
- * Retrieves stats from an EmbeddingProvider instance (or singleton).
- * Returns default empty stats if no provider is configured.
- */
-export function getEmbeddingStats(provider?: EmbeddingProvider): EmbeddingProviderStats {
-  const p = provider || defaultProvider;
-  if (!p) {
+  getStats(): EmbeddingProviderStats {
     return {
-      cacheSize: 0,
-      maxCacheSize: 0,
-      queuedRequests: 0,
-      configuredModels: [],
-      activeModel: 'none (not configured)',
-      failoverCount: 0,
-      modelErrors: {},
+      providerType: 'openai',
+      cacheSize: this.cache.size,
+      maxCacheSize: this.cache.max,
+      queuedRequests: this.batchQueue.length,
+      activeModel: this.model,
     };
   }
-  return p.getStats();
+
+  getDimensions(): number {
+    return this.model.includes('3-small') ? 1536 : (this.model.includes('3-large') ? 3072 : 1536);
+  }
+}
+
+// ============================================================
+// Singleton & Lifecycle Management
+// ============================================================
+
+let defaultProvider: IEmbeddingProvider | null = null;
+
+export function initEmbeddingProvider(apiKey: string | undefined, type: 'gemini' | 'openai' = 'gemini', model?: string, baseUrl?: string): void {
+  if (!apiKey) {
+    log.warn('No API key provided for EmbeddingProvider initialization');
+    return;
+  }
+
+  if (type === 'gemini') {
+    defaultProvider = new GeminiEmbeddingProvider(apiKey, model);
+  } else {
+    defaultProvider = new OpenAIEmbeddingProvider(apiKey, model || 'text-embedding-3-small', baseUrl);
+  }
+}
+
+export function isEmbeddingReady(): boolean { return defaultProvider !== null; }
+
+export async function embedText(text: string): Promise<number[]> {
+  if (!defaultProvider) return [];
+  try { return await defaultProvider.embed(text); }
+  catch (e) { log.error('Embedding failed:', String(e)); return []; }
+}
+
+export async function embedTexts(texts: string[]): Promise<(number[] | null)[]> {
+  if (!defaultProvider) return texts.map(() => null);
+  try { return await defaultProvider.embedBatch(texts); }
+  catch (e) { log.error('Batch embedding failed:', String(e)); return texts.map(() => null); }
+}
+
+export function getEmbeddingStats(): EmbeddingProviderStats {
+  if (!defaultProvider) return { providerType: 'none', cacheSize: 0, maxCacheSize: 0, queuedRequests: 0, activeModel: 'none' };
+  return defaultProvider.getStats();
 }

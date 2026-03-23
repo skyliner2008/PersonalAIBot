@@ -926,3 +926,16 @@ Outcome:
 
 Outcome:
 - The system is now immune to "Credential Deadlock" — changing encryption keys no longer requires manual database surgery.
+
+### 18.12 Multi-Provider Embedding Support (2026-03-23)
+
+- **Polymorphic Architecture** (`server/src/memory/embeddingProvider.ts`):
+  - Refactored `EmbeddingProvider` into an interface-based design supporting **Gemini** and **OpenAI/OpenRouter** backends.
+  - Implemented automatic batching, caching, and failover across providers.
+- **Smart Auto-Detection** (`server/src/index.ts`):
+  - Added logic to automatically choose the best available embedding provider based on configured API keys (Gemini > OpenAI > OpenRouter).
+- **Dimension-Agnostic Memory** (`unifiedMemory.ts` & `vectorStore.ts`):
+  - Updated memory retrieval and vector search to gracefully handle differing vector dimensions (e.g. Gemini's 768 vs OpenAI's 1536), preventing crashes when switching providers.
+
+Outcome:
+- Fresh installs and OpenRouter-only users can now utilize **Semantic Memory** (Long-term Facts) without strictly requiring a Gemini API Key.

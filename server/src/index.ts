@@ -448,9 +448,23 @@ async function main() {
     startupInfo(`[Credentials] ⚠️ Purged ${credCheck.purged.length} unreadable key(s) — re-enter via Dashboard`);
   }
 
+  // --- Initialize Embedding Provider (Auto-detect available keys) ---
   const geminiKey = getCredential('provider_key_gemini') || getCredential('GEMINI_API_KEY') || process.env.GEMINI_API_KEY;
+  const openaiKey = getCredential('provider_key_openai') || getCredential('OPENAI_API_KEY') || process.env.OPENAI_API_KEY;
+  const openrouterKey = getCredential('provider_key_openrouter') || getCredential('OPENROUTER_API_KEY') || process.env.OPENROUTER_API_KEY;
+
   if (geminiKey) {
-    initEmbeddingProvider(geminiKey);
+    startupInfo('[Embedding] Initializing Gemini Embedding Provider');
+    initEmbeddingProvider(geminiKey, 'gemini');
+  } else if (openaiKey) {
+    startupInfo('[Embedding] Initializing OpenAI Embedding Provider');
+    initEmbeddingProvider(openaiKey, 'openai');
+  } else if (openrouterKey) {
+    startupInfo('[Embedding] Initializing OpenRouter Embedding Provider (OpenAI Compatible)');
+    // Use OpenRouter but with OpenAI compatible embedding endpoint
+    initEmbeddingProvider(openrouterKey, 'openai', 'openai/text-embedding-3-small', 'https://openrouter.ai/api/v1');
+  } else {
+    startupInfo('[Embedding] ⚠️ No Embedding API Key found. Semantic memory will be disabled.');
   }
   
   await initUnifiedMemory();
