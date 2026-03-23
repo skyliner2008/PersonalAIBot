@@ -8,6 +8,7 @@ import { addLog } from '../database/db.js';
 import { Type } from '@google/genai';
 import { LiveVideoClient, resolveGeminiLiveModel } from './liveVoice.js';
 import { resolveProviderApiKey } from '../config/settingsSecurity.js';
+import { getProvider } from '../providers/registry.js';
 import { personaManager } from '../ai/personaManager.js';
 import { getBot } from '../bot_agents/registries/botRegistry.js';
 import { executeCommand } from '../terminal/terminalGateway.js';
