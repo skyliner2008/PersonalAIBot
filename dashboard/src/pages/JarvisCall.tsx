@@ -787,10 +787,11 @@ export function JarvisCall() {
       recoveryInProgressRef.current = false;
       const msg = String(data?.message || 'Unknown voice error');
 
-      // Quota exceeded: fall back to STT mode automatically
-      if (data?.quotaExceeded) {
+      // Quota exceeded or Missing Gemini Key: fall back to STT mode automatically
+      const isMissingKey = msg.includes('Gemini API key is not configured') || (msg.includes('Gemini') && msg.includes('key'));
+      if (data?.quotaExceeded || isMissingKey) {
         pushLog('system', `⚠️ ${msg}`);
-        pushLog('system', 'สลับไปใช้โหมด STT (พิมพ์/พูดผ่านเบราว์เซอร์) อัตโนมัติ...');
+        pushLog('system', 'สลับไปใช้โหมด STT (Browser Voice Recognition) อัตโนมัติ...');
         isVoiceActiveRef.current = false;
         setIsVoiceActive(false);
         setIsVoiceLoading(false);

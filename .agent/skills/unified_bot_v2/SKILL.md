@@ -418,6 +418,18 @@ Cannot be auto-upgraded but ARE mapped in Second Brain: `index.ts`, `config.ts`,
 | `verifyUpgrade()` | TSC baseline comparison |
 | `captureBaselineErrors()` | Cache pre-existing compile errors |
 
+### 18.14 Automatic Voice Call Fallback (2026-03-24)
+
+- **Resilient Voice Architecture** (`dashboard/src/pages/JarvisCall.tsx`):
+  - Augmented `offVoiceError` listener to detect **Gemini API key missing** errors.
+  - Implemented automatic failover from `live` (multimodal) to `stt` (browser-based Speech-to-Text) transport.
+  - This ensures that users with only free/OpenRouter keys can still use voice commands seamlessly without manual configuration.
+- **Backend STT Stability** (`server/src/api/socketHandlers.ts`):
+  - Verified that the `stt` transport path remains independent of Gemini API keys, relying strictly on browser-native recognition.
+
+Outcome:
+- The system now provides a "Zero-Config Voice Experience" where Jarvis can be commanded by voice even on the most basic API tier.
+
 ### Boot Guardian
 
 **File**: `server/src/bootGuardian.ts` (91 lines)
