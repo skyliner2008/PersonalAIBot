@@ -287,7 +287,12 @@ Planning algorithm:
 
 **File**: `server/src/evolution/selfUpgrade.ts` (~2800 lines)
 
-The autonomous code modification engine. Scans the codebase for bugs/improvements, proposes fixes, and implements them with multi-layer safety gates. Features a **Graph-Enhanced Second Brain** that gives the AI deep understanding of the codebase architecture before making changes. **New in v2.1: Default Disabled state and Simplified Settings (Check-Interval only).**
+The autonomous code modification engine. Scans the codebase for bugs/improvements, proposes fixes, and implements them with multi-layer safety gates. Features a **Graph-Enhanced Second Brain** that gives the AI deep understanding of the codebase architecture before making changes.
+
+**v2.1 Core Schema Integration**:
+- Official schema now includes all 7 evolution and second-brain tables (`upgrade_proposals`, `codebase_map`, etc.) in the main `schema.sql`.
+- **Initialization Resilience**: Tables are created during server boot via `initDb()` migrations, preventing UI errors for new users.
+- **Simplified Settings**: Default Disabled state for new installs (Check-Interval only configuration).
 
 #### 11-Phase Implementation Pipeline
 

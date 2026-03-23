@@ -235,62 +235,9 @@ export interface UpgradeProposal {
 export function ensureUpgradeTable(): void {
   try {
     const db = getDb();
-    const checkStmt = db.prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name='upgrade_proposals'`).get() as { sql: string } | undefined;
     
-    // 1. Table & Migration Logic for upgrade_proposals
-    const currentCols = checkStmt ? (db.prepare(`PRAGMA table_info(upgrade_proposals)`).all() as { name: string }[]).map(c => c.name) : [];
-    
-    if (checkStmt && (!currentCols.includes('affected_files'))) {
-      log.info('Migrating upgrade_proposals table to add new columns and remove CHECK constraint...');
-      db.exec(`DROP TABLE IF EXISTS upgrade_proposals_new`);
-      const colList = currentCols.join(', ');
-      db.exec(`
-        CREATE TABLE upgrade_proposals_new (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          type TEXT NOT NULL,
-          title TEXT NOT NULL,
-          description TEXT NOT NULL,
-          file_path TEXT NOT NULL,
-          line_range TEXT,
-          suggested_fix TEXT,
-          priority TEXT DEFAULT 'medium',
-          status TEXT DEFAULT 'pending',
-          model_used TEXT DEFAULT 'local-analysis',
-          confidence REAL DEFAULT 0.5,
-          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-          reviewed_at DATETIME,
-          affected_files TEXT DEFAULT NULL,
-          impact_analysis TEXT DEFAULT NULL
-        );
-      `);
-      db.exec(`INSERT INTO upgrade_proposals_new (${colList}) SELECT ${colList} FROM upgrade_proposals`);
-      db.exec(`DROP TABLE upgrade_proposals`);
-      db.exec(`ALTER TABLE upgrade_proposals_new RENAME TO upgrade_proposals`);
-      log.info('Migration complete: upgrade_proposals now has flexible status + new columns');
-    } else if (!checkStmt) {
-      log.info('Creating new upgrade_proposals table...');
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS upgrade_proposals (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          type TEXT NOT NULL,
-          title TEXT NOT NULL,
-          description TEXT NOT NULL,
-          file_path TEXT NOT NULL,
-          line_range TEXT,
-          suggested_fix TEXT,
-          priority TEXT DEFAULT 'medium',
-          status TEXT DEFAULT 'pending',
-          model_used TEXT DEFAULT 'local-analysis',
-          confidence REAL DEFAULT 0.5,
-          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-          reviewed_at DATETIME,
-          affected_files TEXT DEFAULT NULL,
-          impact_analysis TEXT DEFAULT NULL
-        );
-      `);
-    }
-
-    // 2. Index & Logs Initialization
+    // 1. Ensure Upgrade Tables are ready (now handled by db.ts migrations, 
+    // but we keep this as a secondary check for indices/logs)
     db.exec(`
       CREATE INDEX IF NOT EXISTS idx_upgrade_status ON upgrade_proposals(status, priority);
       CREATE TABLE IF NOT EXISTS upgrade_scan_log (
@@ -303,7 +250,7 @@ export function ensureUpgradeTable(): void {
       CREATE INDEX IF NOT EXISTS idx_scan_file ON upgrade_scan_log(file_path);
     `);
     
-    // 3. Auto-recovery: If the server crashed while 'implementing'
+    // 2. Auto-recovery: If the server crashed while 'implementing'
     if (isUpgradeLockActive()) {
       log.info('Upgrade lock is active — skipping stuck proposal recovery (another process is still working)');
     } else {

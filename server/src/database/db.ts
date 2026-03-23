@@ -202,6 +202,53 @@ function runMigrations(dbInstance: SqliteDatabase): void {
       model_used TEXT,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
+    // --- Brain Evolution: Upgrade Proposals ---
+    try {
+      const checkStmt = dbInstance.prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name='upgrade_proposals'`).get() as { sql: string } | undefined;
+      const currentCols = checkStmt ? (dbInstance.prepare(`PRAGMA table_info(upgrade_proposals)`).all() as { name: string }[]).map(c => c.name) : [];
+
+      if (!checkStmt) {
+        dbInstance.exec(`
+          CREATE TABLE upgrade_proposals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            type TEXT NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            line_range TEXT,
+            suggested_fix TEXT,
+            priority TEXT DEFAULT 'medium',
+            status TEXT DEFAULT 'pending',
+            model_used TEXT DEFAULT 'local-analysis',
+            confidence REAL DEFAULT 0.5,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            reviewed_at DATETIME,
+            affected_files TEXT DEFAULT NULL,
+            impact_analysis TEXT DEFAULT NULL
+          )
+        `);
+        dbInstance.exec(`CREATE INDEX IF NOT EXISTS idx_upgrade_status ON upgrade_proposals(status, priority)`);
+      } else if (!currentCols.includes('affected_files')) {
+        // Migration for early v2.0 users
+        dbInstance.exec(`ALTER TABLE upgrade_proposals ADD COLUMN affected_files TEXT DEFAULT NULL`);
+        dbInstance.exec(`ALTER TABLE upgrade_proposals ADD COLUMN impact_analysis TEXT DEFAULT NULL`);
+      }
+    } catch (e) {
+      console.warn('[DB migration] error setting up upgrade_proposals:', String(e));
+    }
+
+    try {
+      dbInstance.exec(`CREATE TABLE IF NOT EXISTS upgrade_scan_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        file_path TEXT NOT NULL,
+        file_hash TEXT,
+        findings_count INTEGER DEFAULT 0,
+        scanned_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+      dbInstance.exec(`CREATE INDEX IF NOT EXISTS idx_scan_file ON upgrade_scan_log(file_path)`);
+    } catch (e) {
+      console.warn('[DB migration] error setting up upgrade_scan_log:', String(e));
+    }
   } catch (e) {
     console.warn('[DB migration] unexpected error creating evolution/system tables:', String(e));
   }

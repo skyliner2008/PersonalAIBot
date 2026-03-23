@@ -63,7 +63,9 @@ Memory engine ที่ออกแบบมาให้คุม context ให
 | 1 | **Core Memory** | SQLite `core_memory` | ข้อมูลผู้ใช้, preferences, facts สำคัญ — โหลดทุก message |
 | 2 | **Working Memory** | In-RAM LRU Cache | 5–10 ข้อความล่าสุด สำหรับ context ทันที |
 | 3 | **Recall Memory** | SQLite `episodes` | ทุกบทสนทนาเก่า ค้นหาด้วย keyword |
-| 4 | **Archival Memory** | SQLite + HNSW Vector + GraphRAG | Long-term facts + semantic search + knowledge graph |
+| 4 | **Archival Memory** | SQLite + HNSW Vector + GraphRAG | Long-term facts + semantic search + knowledge graph
+   - **Self-Optimization**: Autonomous code improvement via Self-Upgrade loop (Disabled by default).
+   - **Second Brain Integration**: Core schema now includes codebase mapping and semantic memory tables for faster, safer upgrades. |
 
 - **Embeddings**: Gemini-based vector embeddings พร้อม HNSW index
 - **Dedup**: Cosine similarity > 0.9 ตัด duplicate อัตโนมัติ

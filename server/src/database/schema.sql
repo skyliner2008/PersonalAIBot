@@ -254,30 +254,90 @@ CREATE TABLE IF NOT EXISTS agent_plans (
 CREATE INDEX IF NOT EXISTS idx_agent_plans_chat ON agent_plans(chat_id, status);
 
 -- ============================================
--- Agentic AI Upgrades: GraphRAG Memory
+-- Agentic AI Upgrades: Evolution & Second Brain
 -- ============================================
 
--- Knowledge Graph Nodes (Entities)
-CREATE TABLE IF NOT EXISTS knowledge_nodes (
-  id TEXT PRIMARY KEY,       -- Format: chatId_normalizedLabel
-  chat_id TEXT NOT NULL,
-  label TEXT NOT NULL,       -- Human readable entity name (e.g. "ผู้ใช้", "โปรเจคระบบ AI")
-  node_type TEXT DEFAULT 'entity',
+-- Upgrade Proposals: Suggestions for code improvement
+CREATE TABLE IF NOT EXISTS upgrade_proposals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  type TEXT NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL,
+  file_path TEXT NOT NULL,
+  line_range TEXT,
+  suggested_fix TEXT,
+  priority TEXT DEFAULT 'medium',
+  status TEXT DEFAULT 'pending',
+  model_used TEXT DEFAULT 'local-analysis',
+  confidence REAL DEFAULT 0.5,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  reviewed_at DATETIME,
+  affected_files TEXT DEFAULT NULL,
+  impact_analysis TEXT DEFAULT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_upgrade_status ON upgrade_proposals(status, priority);
+
+-- Upgrade Scan Log: History of file scans
+CREATE TABLE IF NOT EXISTS upgrade_scan_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  file_path TEXT NOT NULL,
+  file_hash TEXT,
+  findings_count INTEGER DEFAULT 0,
+  scanned_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_scan_file ON upgrade_scan_log(file_path);
+
+-- Evolution Log: History of autonomous actions
+CREATE TABLE IF NOT EXISTS evolution_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  action_type TEXT NOT NULL,
+  description TEXT NOT NULL,
+  details TEXT,
+  applied INTEGER DEFAULT 0,
+  success INTEGER DEFAULT 1,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_evolution_log_type ON evolution_log(action_type, created_at);
+
+-- Learning Journal: Lessons learned from successes and failures
+CREATE TABLE IF NOT EXISTS learning_journal (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  category TEXT NOT NULL,
+  insight TEXT NOT NULL,
+  source TEXT,
+  confidence REAL DEFAULT 0.5,
+  times_applied INTEGER DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_learning_journal_cat ON learning_journal(category, confidence);
+
+-- Codebase Map: Second Brain Layer 1 (Metadata & Summaries)
+CREATE TABLE IF NOT EXISTS codebase_map (
+  file_path TEXT PRIMARY KEY,
+  summary TEXT,
+  exports_json TEXT DEFAULT '[]',
+  dependencies_json TEXT DEFAULT '[]',
+  last_scanned DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Codebase Edges: Second Brain Layer 2 (Dependency Graph)
+CREATE TABLE IF NOT EXISTS codebase_edges (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  source_file TEXT NOT NULL,
+  target_file TEXT NOT NULL,
+  edge_type TEXT NOT NULL DEFAULT 'imports',
+  symbols_json TEXT DEFAULT '[]',
+  weight REAL DEFAULT 1.0,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(source_file, target_file, edge_type)
+);
+CREATE INDEX IF NOT EXISTS idx_codebase_edges_src ON codebase_edges(source_file);
+CREATE INDEX IF NOT EXISTS idx_codebase_edges_tgt ON codebase_edges(target_file);
+
+-- Codebase Embeddings: Second Brain Layer 3 (Semantic Knowledge)
+CREATE TABLE IF NOT EXISTS codebase_embeddings (
+  file_path TEXT PRIMARY KEY,
+  embedding BLOB,
+  model_used TEXT,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX IF NOT EXISTS idx_knodes_chat ON knowledge_nodes(chat_id);
-
--- Knowledge Graph Edges (Relationships)
-CREATE TABLE IF NOT EXISTS knowledge_edges (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  chat_id TEXT NOT NULL,
-  source_id TEXT NOT NULL REFERENCES knowledge_nodes(id) ON DELETE CASCADE,
-  target_id TEXT NOT NULL REFERENCES knowledge_nodes(id) ON DELETE CASCADE,
-  relationship TEXT NOT NULL, -- The predicate (e.g. "เป็นเจ้าของ", "ชอบ")
-  weight REAL DEFAULT 1.0,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE(chat_id, source_id, target_id, relationship)
-);
-CREATE INDEX IF NOT EXISTS idx_kedges_source ON knowledge_edges(source_id);
-CREATE INDEX IF NOT EXISTS idx_kedges_target ON knowledge_edges(target_id);
