@@ -142,7 +142,19 @@ export async function resumeBatchImplementation(rootDir: string): Promise<void> 
     `).get() as { id: number; title: string } | undefined;
 
     if (!nextProposal) {
+      // Check if there are any still 'implementing' — if so, wait for recovery to finish
+      const stuckCount = db.prepare(`SELECT COUNT(*) as count FROM upgrade_proposals WHERE status = 'implementing'`).get() as { count: number };
+      if (stuckCount && stuckCount.count > 0 && currentTaskNumber < 10) { 
+        // We use currentTaskNumber (re-purposed as wait counter here since it's the first iteration) 
+        // to prevent infinite waiting if recovery fails
+        console.log(`\x1b[33m  └─ Waiting for ${stuckCount.count} 'implementing' proposals to be recovered (Attempt ${currentTaskNumber}/10)...\x1b[0m`);
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        currentTaskNumber++; 
+        continue; 
+      }
+      
       dbModule.setSetting('upgrade_implement_all', 'false');
+      console.log(`\x1b[32m  └─ No more approved proposals found. Batch mode deactivated.\x1b[0m`);
       break;
     }
 
@@ -2868,9 +2880,12 @@ export async function startSelfUpgrade(rootDir: string): Promise<void> {
       // 2. Resume Batch Implementation (Queue Zero)
       const isBatching = dbModule.getSetting('upgrade_implement_all');
       if (isBatching === 'true') {
-        import('./selfUpgrade.js').then(({ resumeBatchImplementation }) => {
-           resumeBatchImplementation(rootDir);
-        });
+        // Delay slightly to allow server to fully boot and recovery logic (ensureUpgradeTable) to finish transactions
+        setTimeout(() => {
+          resumeBatchImplementation(rootDir).catch(e => {
+            log.error('[SelfUpgrade] Failed to resume batch implementation', { error: e.message });
+          });
+        }, 3000);
       }
     } catch (err: any) {
       log.warn(`[SelfUpgrade] Failed to restore state from DB: ${err.message}`);

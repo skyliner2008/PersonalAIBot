@@ -219,10 +219,16 @@ router.get('/topology', (_req, res) => {
 
 router.get('/runtime-controls', (_req, res) => {
     const controls = getRuntimeControlSnapshot();
-    const enriched = controls.map((ctrl: any) => {
+    const validControls = controls.filter((ctrl: any): ctrl is { key: string; value: any; source: string } => 
+        ctrl && typeof ctrl === 'object' && typeof ctrl.key === 'string'
+    );
+
+    const enriched = validControls.map((ctrl) => {
         const valueType = typeof ctrl.value;
         const isOverridden = ctrl.source !== 'default';
         let category = 'general';
+        
+        // ctrl.key is guaranteed to be a string here due to the filter
         if (ctrl.key.startsWith('swarm_')) category = 'swarm';
         else if (ctrl.key.startsWith('web_voice_')) category = 'web_voice';
         else if (ctrl.key.startsWith('agent_')) category = 'agent';

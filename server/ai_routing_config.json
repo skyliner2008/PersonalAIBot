@@ -41,20 +41,7 @@
         "provider": "gemini",
         "modelName": "gemini-2.5-flash"
       },
-      "fallbacks": [
-        {
-          "provider": "gemini",
-          "modelName": "gemini-1.5-pro"
-        },
-        {
-          "provider": "gemini",
-          "modelName": "gemini-1.5-flash"
-        },
-        {
-          "provider": "minimax",
-          "modelName": "MiniMax-M2.7"
-        }
-      ]
+      "fallbacks": []
     },
     "data": {
       "active": {
@@ -110,10 +97,6 @@
             {
               "provider": "gemini",
               "modelName": "gemini-1.5-flash"
-            },
-            {
-              "provider": "perplexity",
-              "modelName": "sonar-pro"
             }
           ]
         },

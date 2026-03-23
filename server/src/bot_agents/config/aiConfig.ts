@@ -142,11 +142,11 @@ export function getModelPerformance(taskType?: string): ModelPerformanceEntry[] 
       const score = Math.round((successRate * 40) + (speedScore * 30) + (volumeScore * 30));
 
       return {
-        model: r.model,
-        provider: r.provider,
-        taskType: r.task,
+        model: r.model ?? '',
+        provider: r.provider ?? '',
+        taskType: r.task ?? '',
         successRate,
-        avgDurationMs: r.avgMs,
+        avgDurationMs: r.avgMs ?? 0,
         totalRuns: r.total,
         score,
       };

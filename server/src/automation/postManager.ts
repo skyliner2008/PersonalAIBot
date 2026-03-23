@@ -79,16 +79,22 @@ export function schedulePost(data: {
     data.content ? POST_STATUS_READY : POST_STATUS_PENDING
   ];
 
-  dbRun(`
-    INSERT INTO scheduled_posts (content, ai_topic, post_type, target, target_id, target_name, scheduled_at, cron_expression, status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `, params);
+  try {
+    dbRun(`
+      INSERT INTO scheduled_posts (content, ai_topic, post_type, target, target_id, target_name, scheduled_at, cron_expression, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, params);
 
-  const lastRow = dbGet('SELECT last_insert_rowid() as id');
-  const insertId = lastRow?.id ? Number(lastRow.id) : 0;
+    const lastRow = dbGet('SELECT last_insert_rowid() as id');
+    const insertId = lastRow?.id ? Number(lastRow.id) : 0;
 
-  addLog('post', 'Post scheduled', `ID: ${insertId}, scheduled: ${data.scheduledAt}`, 'info');
-  return insertId;
+    addLog('post', 'Post scheduled', `ID: ${insertId}, scheduled: ${data.scheduledAt}`, 'info');
+    return insertId;
+  } catch (e) {
+    const errorMessage = e instanceof Error ? e.message : String(e);
+    addLog('post', 'Failed to schedule post', `Error: ${errorMessage}. Data: ${JSON.stringify(data)}`, 'error');
+    throw e;
+  }
 }
 
 /**
@@ -199,15 +205,27 @@ export async function processPendingPosts(io: SocketServer): Promise<void> {
  * Get all scheduled posts.
  */
 export function getScheduledPosts(limit: number = 50): any[] {
-  return dbAll(
-    'SELECT id, content, ai_topic, post_type, target, target_id, target_name, scheduled_at, cron_expression, status, error_message FROM scheduled_posts ORDER BY scheduled_at DESC LIMIT ?',
-    [limit]
-  );
+  try {
+    return dbAll(
+      'SELECT id, content, ai_topic, post_type, target, target_id, target_name, scheduled_at, cron_expression, status, error_message FROM scheduled_posts ORDER BY scheduled_at DESC LIMIT ?',
+      [limit]
+    );
+  } catch (e) {
+    const errorMessage = e instanceof Error ? e.message : String(e);
+    addLog('post', 'Failed to retrieve scheduled posts', `Error: ${errorMessage}`, 'error');
+    throw e;
+  }
 }
 
 /**
  * Delete a scheduled post.
  */
 export function deleteScheduledPost(id: number): void {
-  dbRun('DELETE FROM scheduled_posts WHERE id = ?', [id]);
+  try {
+    dbRun('DELETE FROM scheduled_posts WHERE id = ?', [id]);
+  } catch (e) {
+    const errorMessage = e instanceof Error ? e.message : String(e);
+    addLog('post', 'Failed to delete scheduled post', `ID: ${id}. Error: ${errorMessage}`, 'error');
+    throw e;
+  }
 }

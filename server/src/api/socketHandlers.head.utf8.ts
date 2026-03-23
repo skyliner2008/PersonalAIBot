@@ -113,7 +113,12 @@ function handleChatBotEvents(socket: Socket, io: SocketServer): void {
     }
   });
   socket.on('chatbot:stop', () => {
-    stopChatMonitor(io);
+    try {
+      stopChatMonitor(io);
+    } catch (e: any) {
+      addLog('chatbot', 'Stop failed', String(e), 'error');
+      socket.emit('error', { message: `Chat bot stop failed: ${e}` });
+    }
     io.emit('chatbot:status', { active: false });
   });
 }
@@ -133,7 +138,12 @@ function handleCommentBotEvents(socket: Socket, io: SocketServer): void {
     }
   });
   socket.on('commentbot:stop', () => {
-    stopCommentMonitor(io);
+    try {
+      stopCommentMonitor(io);
+    } catch (e: any) {
+      addLog('commentbot', 'Stop failed', String(e), 'error');
+      socket.emit('error', { message: `Comment bot stop failed: ${e}` });
+    }
     io.emit('commentbot:status', { active: false });
   });
 }
@@ -148,7 +158,11 @@ function handleSchedulerEvents(socket: Socket, io: SocketServer): void {
     }
   });
   socket.on('scheduler:stop', () => {
-    stopScheduler();
+    try {
+      stopScheduler();
+    } catch (e: any) {
+      addLog('scheduler', 'Stop failed', String(e), 'error');
+    }
     io.emit('scheduler:status', { active: false });
   });
 }

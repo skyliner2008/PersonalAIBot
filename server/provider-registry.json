@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-03-22",
+  "lastUpdated": "2026-03-23",
   "description": "Unified Provider Registry — เพิ่ม provider ใหม่ได้ที่ไฟล์นี้ ไม่ต้องแก้โค้ด",
   "providers": {
     "gemini": {
@@ -9,7 +9,7 @@
       "category": "llm",
       "type": "gemini",
       "baseUrl": "https://generativelanguage.googleapis.com",
-      "defaultModel": "gemini-2.0-flash",
+      "defaultModel": "gemini-3-flash-preview",
       "models": [
         "deep-research-pro-preview-12-2025",
         "gemini-2.0-flash",

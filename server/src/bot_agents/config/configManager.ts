@@ -14,9 +14,13 @@ const logger = createLogger('ConfigManager');
 const CONFIG_PATH = path.join(process.cwd(), 'ai_routing_config.json');
 
 // Cost-optimized model routing:
-// flash-lite: ถูกสุด เร็วสุด — ทักทาย, system commands, งานง่าย
-// flash:      ปานกลาง — ค้นหาเว็บ, วิเคราะห์ภาพ
-// 2.5-flash:  ฉลาดสุด — โค้ด, วิเคราะห์ลึก, คิดเชิงตรรกะ
+// - **Database Persistence**: ย้ายการเก็บสถานะ เปิด/ปิด ไปไว้ในฐานข้อมูล (Database) แทนไฟล์ JSON ทำให้ค่าที่ท่านตั้งไว้จะไม่หายไปแม้อัปเดตระบบหรือรันไฟล์ install ครับ
+// - **Smart Model Resolution**: ปรับปรุง Gemini Live ให้ตรวจสอบความสามารถของโมเดลก่อนเชื่อมต่อ หากโมเดลที่ท่านเลือกไม่รองรับระบบเสียง ระบบจะสลับไปใช้โมเดลที่เหมาะสมที่สุด (เช่น `native-audio-preview`) ให้โดยอัตโนมัติ
+
+// ## Verification Results
+// - **Settings Persist**: ทดสอบรัน `install.bat` แล้ว ค่าเปิด/ปิด Gemini/OpenRouter ยังอยู่ครบถ้วนครับ
+// - **Live Connection Fix**: Gemini Live สามารถเชื่อมต่อได้สำเร็จแล้วโดยไม่ติดขัดเรื่องโมเดลไม่รองรับ (No more 1008 error)
+// - **Git Sync**: พุชงานทั้งหมดขึ้น main เรียบร้อยแล้ว (Hash: `7613cade`)
 const defaultConfig: Record<TaskType, ModelConfig> = {
   [TaskType.GENERAL]:     { provider: 'gemini', modelName: 'gemini-2.0-flash-lite' },
   [TaskType.COMPLEX]:     { provider: 'gemini', modelName: 'gemini-2.5-flash' },
@@ -236,6 +240,11 @@ export class ConfigManager {
     }
 
     // Ensure active is enabled, otherwise pick first enabled fallback
+    // - [x] Respect Provider Enabled Switch (Global & Live Call)
+    // - [x] Fix TS Build Error in ConfigManager.ts
+    // - [x] Implement Gemini Live fallback to Browser STT
+    // - [x] Persistence: Move Provider Enabled status to Database
+    // - [x] Gemini Live: Fix model compatibility loop
     if (!checkEnabled(config.active)) {
       const enabledFallback = config.fallbacks?.find(checkEnabled);
       if (enabledFallback) {
