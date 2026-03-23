@@ -201,7 +201,7 @@ if [ -f "server/.env" ]; then
     for(const[k,len]of Object.entries(keys)){
         const re=new RegExp('^'+k+'\\s*=\\s*(.*)$','m');
         const m=c.match(re);
-        if(!m||m[1].length<16||m[1].includes('change-me')||m[1].includes('your-')){
+        if(m===null||m[1].length<16||m[1].includes('change-me')||m[1].includes('your-')){
             const v=crypto.randomBytes(len/2).toString('hex');
             if(m){c=c.replace(re,k+'='+v)}else{c+='\n'+k+'='+v}
             changed=true;console.log('  [PATCHED] '+k)
