@@ -269,18 +269,37 @@ export class Agent {
       // Apply to all task types if tool count is high (> 10)
       if (activeTools.length > 10) {
         try {
-          const routerPrompt = `You are a tool selector. User said: "${cleanMessage}". Available tools: ${activeTools.map(t => t.name).join(', ')}. Return ONLY a JSON array of max 5 tool names needed. Return [] if none needed. Do NOT use markdown code blocks, just the JSON array.`;
+          const routerPrompt = `You are a high-speed tool selector.
+User Goal: "${cleanMessage}"
+Task Type: ${taskType}
+Available Tools: ${activeTools.map(t => t.name).join(', ')}
+
+Rules:
+1. Return ONLY a JSON array of strings (e.g., ["tool1", "tool2"]).
+2. Max 5 tools.
+3. Return [] if no special tool is needed.
+4. DO NOT explain. DO NOT use <think> tags. DO NOT use markdown.
+5. JUST THE RAW JSON ARRAY.`;
+
           const supportConfig = configManager.resolveModelConfig(TaskType.SYSTEM, ctx?.botId).config;
           const p = createAgentRuntimeProvider(supportConfig.active.provider);
           if (p) {
-            const routerRes = await p.generateResponse(supportConfig.active.modelName, 'You are a tool selector.', [{ role: 'user', parts: [{ text: routerPrompt }] }]);
-            if (routerRes.text) {
-              // Robust extraction: find all occurrences of something that looks like a JSON array of strings
-              const matches = routerRes.text.match(/\[\s*".*?"\s*(?:,\s*".*?"\s*)*\]/gs);
+            const routerRes = await p.generateResponse(supportConfig.active.modelName, 'You are a tool selector. Output only raw JSON.', [{ role: 'user', parts: [{ text: routerPrompt }] }]);
+            let text = routerRes.text || '';
+            
+            if (text) {
+              // 1. Remove <think> blocks if any
+              text = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+              // 2. Remove markdown code blocks
+              text = text.replace(/```(?:json)?([\s\S]*?)```/gi, '$1').trim();
+              
+              // 3. More permissive Regex (supports newlines and diverse spacing)
+              const matches = text.match(/\[\s*".*?"\s*(?:,\s*".*?"\s*)*\]/gs) || 
+                              text.match(/\[[\s\S]*?\]/gs); // Fallback to any brackets if specific fails
+              
               if (matches && matches.length > 0) {
-                  // Try to find the first one that is actually valid JSON
                   for (let jsonStr of matches) {
-                      // Resilience: Handle common LLM formatting errors (single quotes)
+                      // Normalize single quotes to double quotes for JSON.parse
                       if (jsonStr.includes("'") && !jsonStr.includes('"')) {
                         jsonStr = jsonStr.replace(/'/g, '"');
                       }
@@ -288,7 +307,7 @@ export class Agent {
                       try {
                         const selected = JSON.parse(jsonStr);
                         if (Array.isArray(selected)) {
-                            // Always keep essential tools — include AST tools and critical system tools
+                            // Essential tools list
                             const essential = [
                               'memory_save', 'search_knowledge', 'replace_code_block', 'run_command', 'read_file', 'system_terminal',
                               'read_file_content', 'write_file_content', 'search_codebase', 'ast_replace_function', 'ast_add_import', 
@@ -296,20 +315,18 @@ export class Agent {
                             ];
                             const validatedTools = selected.filter(s => typeof s === 'string' && activeTools.some(t => t.name === s));
                             activeTools = activeTools.filter(t => t.name && (validatedTools.includes(t.name) || essential.includes(t.name)));
-                            console.log(`[DynamicRouter] Tools successfully reduced to ${activeTools.length}:`, activeTools.map(t=>t.name));
-                            break; // Success!
+                            console.log(`[DynamicRouter] Optimized to ${activeTools.length} tools:`, activeTools.map(t=>t.name));
+                            break;
                         }
-                      } catch (jsonErr) {
-                        // try next match
-                      }
+                      } catch (e) {}
                   }
               } else {
-                  console.warn('[DynamicRouter] No valid JSON array found in response:', routerRes.text);
+                console.warn('[DynamicRouter] No valid JSON found. Raw response length:', text.length);
               }
             }
           }
         } catch (e) {
-          console.warn('[DynamicRouter] Failed, fallback to all tools', String(e));
+          console.warn('[DynamicRouter] Fallback triggered:', String(e));
         }
       }
       // -------------------------------------------------
