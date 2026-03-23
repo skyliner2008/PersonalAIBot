@@ -99,6 +99,18 @@ class SimpleVectorIndex {
   }
 
   add(doc: VectorDocument): void {
+    // If the document ID already exists in the map, it means we are updating it.
+    // In this case, we must first remove its old entry from the parallel arrays
+    // to prevent duplicates and ensure consistency.
+    if (this.index.documents.has(doc.id)) {
+      const idxToRemove = this.index.ids.indexOf(doc.id); // Find the first occurrence
+      if (idxToRemove !== -1) {
+        this.index.ids.splice(idxToRemove, 1);
+        this.index.vectors.splice(idxToRemove, 1);
+      }
+    }
+
+    // Now, add the new/updated document.
     this.index.documents.set(doc.id, doc);
     this.index.ids.push(doc.id);
     this.index.vectors.push(doc.embedding);

@@ -375,6 +375,9 @@ async function handleStartRoundtable(args: StartRoundtableArgs) {
 
 export function getSwarmToolHandlers(ctx: BotContext) {
   const coordinator = getSwarmCoordinator();
+  if (!coordinator) {
+    throw new Error('Swarm coordinator could not be initialized.');
+  }
 
   return {
     delegate_task: (args: any) => handleDelegateTask(coordinator, ctx, args as DelegateTaskArgs),

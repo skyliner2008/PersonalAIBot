@@ -785,6 +785,12 @@ export function JarvisCall() {
       lastVoiceActivityAtRef.current = now;
     });
 
+    const offVoiceWarning = on('voice:warning', (data: { message?: string }) => {
+      markVoiceActivity();
+      const msg = String(data?.message || '');
+      if (msg) pushLog('system', `⚠️ ${msg}`);
+    });
+
     const offVoiceReconnecting = on('voice:reconnecting', (data: { attempt: number; maxAttempts: number }) => {
       markVoiceActivity();
       pushLog('system', `Gemini Live reconnecting (${data.attempt}/${data.maxAttempts})...`);
@@ -940,6 +946,7 @@ export function JarvisCall() {
       offVoiceFile();
       offVoiceAgentStatus();
       offVoicePong();
+      offVoiceWarning();
       offVoiceReconnecting();
       offVoiceError();
       offVoiceDisconnected();
@@ -1160,6 +1167,12 @@ export function JarvisCall() {
 
     if (autoStart === '1' || autoStart === 'true') {
       autoStartDoneRef.current = true;
+      // Remove autostart from URL to prevent re-triggering on page reload / navigation
+      try {
+        const cleanUrl = new URL(window.location.href);
+        cleanUrl.searchParams.delete('autostart');
+        window.history.replaceState({}, '', `${cleanUrl.pathname}${cleanUrl.search}`);
+      } catch { /* best-effort */ }
       startCall();
     }
   }, [connected, startCall]);

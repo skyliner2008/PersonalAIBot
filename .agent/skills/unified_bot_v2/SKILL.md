@@ -5,7 +5,7 @@ description: "Complete architecture reference for PersonalAIBotV2 — Agentic AI
 
 # PersonalAIBotV2 — Complete Architecture Reference
 
-> **Last audited**: 2026-03-22  
+> **Last audited**: 2026-03-23  
 > **Stack**: TypeScript, Express, Socket.IO, React+Vite, SQLite, Google GenAI SDK
 
 This is the authoritative reference for `PersonalAIBotV2`. Read this document fully before making any changes to the project. It covers all subsystems, file locations, data flows, and operational details.
@@ -798,6 +798,12 @@ Use this section as the first read before continuing development in a new chat/t
 - `server/src/api/liveVoice.ts`
   - Added function declaration/tool-response support for Gemini Live websocket setup.
   - Improved live model resolution with candidate ranking + fallback.
+- **Self-Upgrade Resilience (2026-03-23)**:
+  - Fixed `DRY_RUN` logic in `selfUpgrade.ts` to default to `ENABLED` (propose+fix) if the DB value is null.
+  - Moved `resumeBatchImplementation` logic out of the `evolutionEnabled` toggle in `index.ts`, ensuring batch upgrades survive server restarts regardless of the global evolution setting.
+  - Added a 3-second stabilization buffer and stuck-proposal recovery wait to prevent race conditions during `tsx watch` restarts.
+- **JarvisCall UX Fix (2026-03-23)**:
+  - Implemented `autostart` URL parameter cleanup using `window.history.replaceState()` to prevent unintended repeated calls on page reload or navigation.
 
 Outcome:
 - Voice mode can delegate actions to Jarvis agent tools and return results into live conversation flow.

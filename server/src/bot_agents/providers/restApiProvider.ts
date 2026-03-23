@@ -73,12 +73,13 @@ export class RestApiProvider implements AIProvider {
     } else {
        // JSON formatting (like Cloudflare or OpenAI payload)
        let json;
+       const resCloneForError = res.clone();
        try {
          json = await res.json();
        } catch (e) {
          // If res.json() fails, it means the content was not valid JSON.
          // Read as text to include in error for debugging.
-         const errText = await res.text();
+         const errText = await resCloneForError.text();
          throw new Error(`REST API Image Generate Error: Invalid JSON response after successful call. Original error: ${(e as Error).message}. Response body: ${errText}`);
        }
 

@@ -120,10 +120,10 @@ export const browserClickDeclaration: FunctionDeclaration = {
 
 export async function browserClick({ selector }: { selector: string }): Promise<string> {
   try {
-    if (!page || page.isClosed()) return "ข้อผิดพลาด: ยังไม่ได้เปิดหน้าเว็บ กรุณาใช้ browser_navigate ก่อน";
-    await page.click(selector, { timeout: 10000 });
-    await page.waitForLoadState('networkidle').catch(() => {});
-    const newUrl = page.url();
+    const p = await getPage();
+    await p.click(selector, { timeout: 10000 });
+    await p.waitForLoadState('networkidle').catch(() => {});
+    const newUrl = p.url();
     return `คลิกที่ '${selector}' สำเร็จแล้ว. URL ปัจจุบันคือ: ${newUrl}`;
   } catch (error: any) {
     return `ไม่สามารถคลิกได้: ${error.message}`;

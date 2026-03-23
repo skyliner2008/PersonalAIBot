@@ -12,6 +12,8 @@ let mammoth: any;
 let docx: any;
 let xlsx: any;
 
+const fileLocks = new Map<string, Promise<void>>();
+
 async function loadDependencies() {
   const pParse: any = await import('pdf-parse');
   if (!pdfParse) pdfParse = pParse.default || pParse;

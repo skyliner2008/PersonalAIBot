@@ -678,6 +678,24 @@ async function main() {
       startupInfo('[SelfEvolution] Autonomous evolution system initialized');
     } else {
       startupInfo('[SelfEvolution] Autonomous evolution system is DISABLED (default)');
+      // Even when evolution is disabled, resume any pending batch implementations
+      // that were started via Dashboard (e.g., user approved proposals and clicked "Implement All")
+      // This ensures batch implementation survives tsx watch restarts regardless of evolution toggle.
+      try {
+        const batchFlag = getSetting('upgrade_implement_all');
+        if (batchFlag === 'true') {
+          const { resumeBatchImplementation, ensureUpgradeTable } = await import('./evolution/selfUpgrade.js');
+          ensureUpgradeTable();
+          startupInfo('[SelfUpgrade] Resuming pending batch implementation (evolution disabled but batch was active)...');
+          setTimeout(() => {
+            resumeBatchImplementation(path.resolve(process.cwd(), 'src')).catch(e => {
+              console.error('[SelfUpgrade] Failed to resume batch:', e.message);
+            });
+          }, 3000);
+        }
+      } catch (e: any) {
+        console.warn('[SelfUpgrade] Could not check batch state:', e.message);
+      }
     }
 
     if (subconsciousEnabled) {

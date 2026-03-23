@@ -167,10 +167,22 @@ export class GeminiProvider implements AIProvider {
         // If model not found or invalid args on current API version, try alternative version
         if (!this.isVertexAI && (modelNotFound || invalidArgs) && !this.v1Models.has(modelName)) {
           logger.warn(`Model "${modelName}" ${modelNotFound ? 'not found' : 'invalid args'} on v1beta, retrying with v1 API version...`);
-          this.v1Models.add(modelName);
-          if (!this.aiFallback) {
-            this.aiFallback = new GoogleGenAI({ apiKey: this.apiKey, httpOptions: { apiVersion: 'v1' } });
+          
+          let fallbackClient: GoogleGenAI | null = this.aiFallback;
+          if (!fallbackClient) {
+            try {
+              fallbackClient = new GoogleGenAI({ apiKey: this.apiKey, httpOptions: { apiVersion: 'v1' } });
+              this.aiFallback = fallbackClient; // Assign to class property only on successful initialization
+            } catch (fallbackInitErr: any) {
+              logger.error(`Failed to initialize v1 fallback GoogleGenAI client for model "${modelName}":`, fallbackInitErr);
+              throw genErr; 
+            }
           }
+
+          // Now that we have a valid fallbackClient (or confirmed it's null and re-threw),
+          // we can safely add the model to the v1Models set.
+          // This ensures getClientForModel will only return this.aiFallback! if it's actually initialized.
+          this.v1Models.add(modelName); 
           
           // CRITICAL: For v1, strip systemInstruction and tools if WE DETECTED INVALID_ARGUMENT
           // OR if we suspect this model is in the restricted list for v1.

@@ -367,7 +367,8 @@ export async function handleAdminCommand(
       }
     }
 
-    const result = await executeCommand(fullCommand, platform, userId);
+    const rawResult = await executeCommand(fullCommand, platform, userId);
+    const result = String(rawResult || ''); // Ensure result is a string, defaulting to empty if falsy
     if (/^\[(?:error|agent error)\]/i.test(result.trim())) {
       log.warn(`[${platform}] Terminal command failed for ${userId}`, {
         fullCommand: fullCommand.substring(0, 160),

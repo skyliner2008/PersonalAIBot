@@ -49,11 +49,15 @@ function refreshConfig() {
   try {
     const idleMin = parseInt(getSetting('upgrade_idle_threshold') || '1', 10);
     IDLE_THRESHOLD_MS = idleMin * 60 * 1000;
-    
+
     const intervalMs = parseInt(getSetting('upgrade_check_interval') || '1800000', 10);
     CHECK_INTERVAL_MS = intervalMs;
-    
-    DRY_RUN = getSetting('upgrade_auto_fix') !== 'true';
+
+    // Auto-Fix default: ENABLED (DRY_RUN=false) unless explicitly disabled
+    // getSetting returns null if key doesn't exist → treat as enabled
+    const autoFixSetting = getSetting('upgrade_auto_fix');
+    DRY_RUN = autoFixSetting === 'false';  // Only disable if explicitly set to 'false'
+
     _paused = getSetting('upgrade_paused') === 'true';
   } catch (err) {
     log.error('Failed to refresh config from DB', { error: err });

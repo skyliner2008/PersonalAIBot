@@ -133,12 +133,16 @@ export const globalErrorHandler = (
       return acc;
     }, {} as Record<string, string[]>);
     
-    logger.warn({
-      message: 'Validation error',
-      path: req.path,
-      method: req.method,
-      errors,
-    });
+    try {
+      logger.warn({
+        message: 'Validation error',
+        path: req.path,
+        method: req.method,
+        errors,
+      });
+    } catch (logErr) {
+      console.error('Failed to log validation error:', logErr);
+    }
 
     return res.status(statusCode).json({
       status: 'fail',
@@ -153,21 +157,29 @@ export const globalErrorHandler = (
     message = err.message;
     errors = err instanceof ValidationError ? err.errors : undefined;
 
-    logger.warn({
-      message: err.message,
-      code: err.code,
-      statusCode: err.statusCode,
-      path: req.path,
-      method: req.method,
-    });
+    try {
+      logger.warn({
+        message: err.message,
+        code: err.code,
+        statusCode: err.statusCode,
+        path: req.path,
+        method: req.method,
+      });
+    } catch (logErr) {
+      console.error('Failed to log AppError:', logErr);
+    }
   } else {
     // Handle unknown/untrusted errors
-    logger.error({
-      message: err.message,
-      stack: err.stack,
-      path: req.path,
-      method: req.method,
-    });
+    try {
+      logger.error({
+        message: err.message,
+        stack: err.stack,
+        path: req.path,
+        method: req.method,
+      });
+    } catch (logErr) {
+      console.error('Failed to log unknown error:', logErr);
+    }
   }
 
   // Send response based on environment

@@ -98,6 +98,15 @@ class RegistryLoader {
       if (!('providers' in parsed) || !('fallbackOrder' in parsed) || !('categories' in parsed)) {
         throw new Error('Provider registry must be a JSON object with "providers", "fallbackOrder", and "categories" properties');
       }
+      if (typeof (parsed as any).providers !== 'object' || (parsed as any).providers === null) {
+        throw new Error('Provider registry "providers" property must be an object');
+      }
+      if (typeof (parsed as any).fallbackOrder !== 'object' || (parsed as any).fallbackOrder === null) {
+        throw new Error('Provider registry "fallbackOrder" property must be an object');
+      }
+      if (!Array.isArray((parsed as any).categories)) {
+        throw new Error('Provider registry "categories" property must be an array');
+      }
       // ADDED VALIDATION END
       this.registry = parsed as ProviderRegistry;
       log.info('✓ Provider registry loaded', {

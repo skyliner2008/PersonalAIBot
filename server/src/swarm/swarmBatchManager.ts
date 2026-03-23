@@ -23,12 +23,13 @@ export class SwarmBatchManager {
    * Recompute batch progress based on assignment statuses
    */
   recomputeBatchProgress(batch: SwarmBatch): void {
+    const assignments = batch.assignments || []; // Safely default to empty array
     let queued = 0;
     let processing = 0;
     let completed = 0;
     let failed = 0;
 
-    for (const assignment of batch.assignments) {
+    for (const assignment of assignments) { // Use the safe 'assignments' variable
       if (assignment.status === 'queued') queued++;
       if (assignment.status === 'processing') processing++;
       if (assignment.status === 'completed') completed++;
@@ -36,14 +37,14 @@ export class SwarmBatchManager {
     }
 
     batch.progress = {
-      total: batch.assignments.length,
+      total: assignments.length, // Use the safe 'assignments' variable
       queued,
       processing,
       completed,
       failed,
     };
 
-    if (completed + failed === batch.assignments.length) return;
+    if (completed + failed === assignments.length) return; // Use the safe 'assignments' variable
     if (processing > 0 || completed > 0 || failed > 0) {
       batch.status = 'running';
       return;

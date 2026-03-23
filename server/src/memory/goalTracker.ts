@@ -127,26 +127,32 @@ export function updateGoalProgress(goalId: string, progress?: number, status?: G
 }
 
 export function updateSubGoal(goalId: string, subGoalId: string, updates: Partial<SubGoal>): Goal | null {
-  const goal = getGoalById(goalId);
-  if (!goal) return null;
-
-  const subGoals = goal.subGoals.map((sg: SubGoal) => {
-    if (sg.id === subGoalId) return { ...sg, ...updates };
-    return sg;
-  });
-
-  // Recalculate progress from sub-goals
-  const completedCount = subGoals.filter((sg: SubGoal) => sg.status === 'completed').length;
-  const totalCount = subGoals.filter((sg: SubGoal) => sg.status !== 'skipped').length;
-  const progress = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
-  const allDone = totalCount > 0 && completedCount === totalCount;
-
   const db = getDb();
-  const now = new Date().toISOString();
-  db.prepare(`UPDATE goals SET sub_goals = ?, progress = ?, status = ?, updated_at = ?, completed_at = COALESCE(?, completed_at) WHERE id = ?`)
-    .run(JSON.stringify(subGoals), progress, allDone ? 'completed' : 'active', now, allDone ? now : null, goalId);
 
-  return getGoalById(goalId);
+  // Use a transaction to ensure atomicity for the read-modify-write operation.
+  const result = db.transaction(() => {
+    const goal = getGoalById(goalId); // Re-fetch inside transaction to get latest state
+    if (!goal) return null;
+
+    const subGoals = goal.subGoals.map(sg => {
+      if (sg.id === subGoalId) return { ...sg, ...updates };
+      return sg;
+    });
+
+    // Recalculate progress from sub-goals
+    const completedCount = subGoals.filter(sg => sg.status === 'completed').length;
+    const totalCount = subGoals.filter(sg => sg.status !== 'skipped').length;
+    const progress = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
+    const allDone = totalCount > 0 && completedCount === totalCount;
+
+    const now = new Date().toISOString();
+    db.prepare(`UPDATE goals SET sub_goals = ?, progress = ?, status = ?, updated_at = ?, completed_at = COALESCE(?, completed_at) WHERE id = ?`)
+      .run(JSON.stringify(subGoals), progress, allDone ? 'completed' : 'active', now, allDone ? now : null, goalId);
+
+    return getGoalById(goalId); // Re-fetch the updated goal after the transaction
+  })(); // Execute the transaction
+
+  return result;
 }
 
 export function addSubGoal(goalId: string, title: string, order?: number): Goal | null {

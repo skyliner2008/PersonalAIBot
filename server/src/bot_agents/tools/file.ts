@@ -353,6 +353,7 @@ export async function searchCodebase({ query, directory }: { query: string, dire
     const startDir = path.resolve(directory && directory.trim() !== '' ? directory : path.join(process.cwd(), 'src'));
     const results: string[] = [];
     const MAX_RESULTS = 50;
+    const MAX_DEPTH = 15;
 
     function walkDir(currentDir: string) {
       if (results.length >= MAX_RESULTS) return;

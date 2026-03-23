@@ -150,8 +150,12 @@ export class SpecialistDispatcher {
       .map((assignment) => {
         const task = taskMap.get(assignment.taskId);
         const runtime = runtimeHealthGetter(assignment.specialist);
-        const duration = task?.startedAt && task?.completedAt
-          ? task.completedAt.getTime() - task.startedAt.getTime()
+        const rawDuration = task?.startedAt && task?.completedAt
+          ? (new Date(task.completedAt)).getTime() - (new Date(task.startedAt)).getTime()
+          : NaN;
+
+        const duration = Number.isFinite(rawDuration) && rawDuration >= 0
+          ? rawDuration
           : runtime.averageLatencyMs || Number.MAX_SAFE_INTEGER;
         return {
           specialist: assignment.specialist,

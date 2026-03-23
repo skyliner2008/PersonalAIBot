@@ -22,8 +22,8 @@
 - รับคำสั่งผ่าน **LINE, Telegram, Web Dashboard และ Terminal**
 - วิเคราะห์ intent และ route งานซับซ้อนไปยัง **Swarm of AI Agents**
 - **จำทุกการสนทนาตลอดชาติ** ด้วย 4-Layer Memory + Vector Embeddings
-- **แก้โค้ดตัวเองได้** พร้อมระบบ rollback ป้องกันการพัง (ปิดเป็นค่าเริ่มต้นเพื่อความปลอดภัย)
-- **Zero-Config Voice Experience**: ระบบสำรองการโทรด้วยเสียง (Automatic STT Fallback) ช่วยให้ใช้งานคำสั่งเสียงได้แม้ไม่มีคีย์ Gemini
+- **แก้โค้ดตัวเองได้ (v2.1)** พร้อมระบบ rollback ป้องกันการพัง และระบบ **Resilient Batch Implementation** ที่ทำงานต่อเนื่องข้ามการรีสตาร์ท (ปิดเป็นค่าเริ่มต้นเพื่อความปลอดภัย)
+- **Zero-Config Voice Experience**: ระบบสำรองการโทรด้วยเสียง (Automatic STT Fallback) พร้อมระบบล้าง URL Autostart ป้องกันการโทรเองซ้ำซ้อน
 - **Gemini 2.x/3.x Optimized**: รองรับ Gemini 2.5 Flash/Pro และ Gemini 3.1 Pro เต็มรูปแบบ พร้อมระบบ Model Routing ที่เสถียรสำหรับผู้ใช้ Paid Tier 1
 - **Automate Facebook** ตอบแชท/คอมเมนต์/โพสต์อัตโนมัติ
 
@@ -584,5 +584,5 @@ PersonalAIBotV2/
 <div align="center">
   <i>"I am Jarvis. What are we building today, sir?"</i>
   <br/><br/>
-  <sub>Built with ❤️ — PersonalAIBotV2 v2.1 | Last updated: 24 March 2026</sub>
+  <sub>Built with ❤️ — PersonalAIBotV2 v2.1 | Last updated: 23 March 2026</sub>
 </div>

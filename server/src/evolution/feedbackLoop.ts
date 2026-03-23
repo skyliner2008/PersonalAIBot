@@ -92,7 +92,7 @@ export class AgentFeedbackLoop {
     try {
       const db = getDb();
       const rows = db.prepare(`
-        SELECT agent_id, task_type, outcome, latency_ms, tokens_used, timestamp
+        SELECT id, agent_id, task_type, outcome, latency_ms, tokens_used, timestamp
         FROM feedback_metrics
         WHERE timestamp > datetime('now', '-7 days')
         ORDER BY timestamp DESC
@@ -104,6 +104,7 @@ export class AgentFeedbackLoop {
           this.outcomes.set(agentId, []);
         }
         this.outcomes.get(agentId)!.push({
+          id: row.id, // Ensure ID is loaded for existing records
           agentId,
           taskType: row.task_type,
           outcome: row.outcome,
@@ -158,20 +159,25 @@ export class AgentFeedbackLoop {
   private syncToDb(): void {
     try {
       const db = getDb();
+      const stmt = db.prepare(`
+        INSERT INTO feedback_metrics
+        (agent_id, task_type, outcome, latency_ms, tokens_used, timestamp)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `);
+
       for (const [agentId, records] of this.outcomes) {
         for (const record of records) {
-          db.prepare(`
-            INSERT OR IGNORE INTO feedback_metrics
-            (agent_id, task_type, outcome, latency_ms, tokens_used, timestamp)
-            VALUES (?, ?, ?, ?, ?, ?)
-          `).run(
-            record.agentId,
-            record.taskType,
-            record.outcome,
-            record.latencyMs,
-            record.tokensUsed,
-            record.timestamp
-          );
+          if (record.id === undefined) { // Only insert records that haven't been persisted yet
+            const info = stmt.run(
+              record.agentId,
+              record.taskType,
+              record.outcome,
+              record.latencyMs,
+              record.tokensUsed,
+              record.timestamp
+            );
+            record.id = info.lastInsertRowid as number; // Store the DB ID back to the in-memory record
+          }
         }
       }
       this.lastDbSync = Date.now();

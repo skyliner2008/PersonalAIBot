@@ -39,7 +39,7 @@
     "code": {
       "active": {
         "provider": "gemini",
-        "modelName": "gemini-2.5-flash"
+        "modelName": "gemini-3-flash-preview"
       },
       "fallbacks": []
     },

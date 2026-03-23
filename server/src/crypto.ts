@@ -11,6 +11,9 @@ import crypto from 'crypto';
 import { config } from './config.js';
 import { getCredential } from './database/db.js';
 
+let _encryptionKeySource: string | undefined;
+let _cipherKeyBuffer: Buffer | undefined;
+
 // Error classes for better error handling
 export class EncryptionError extends Error {
   constructor(message: string) {
@@ -27,16 +30,24 @@ export class DecryptionError extends Error {
 }
 
 function getCipherKey(): Buffer {
-  const dbKey = getCredential('ENCRYPTION_KEY');
-  const rawKey = dbKey || config.encryption.key;
-  
-  if (!rawKey && config.security.requireEncryptionKey) {
-    throw new EncryptionError(
-      'ENCRYPTION_KEY is not set in DB or .env and REQUIRE_ENCRYPTION_KEY is enabled.'
-    );
+  if (_cipherKeyBuffer) {
+    return _cipherKeyBuffer;
   }
-  const key = rawKey || crypto.randomBytes(32).toString('hex');
-  return crypto.createHash('sha256').update(String(key), 'utf8').digest();
+
+  if (!_encryptionKeySource) {
+    const dbKey = getCredential('ENCRYPTION_KEY');
+    const rawKey = dbKey || config.encryption.key;
+    
+    if (!rawKey && config.security.requireEncryptionKey) {
+      throw new EncryptionError(
+        'ENCRYPTION_KEY is not set in DB or .env and REQUIRE_ENCRYPTION_KEY is enabled.'
+      );
+    }
+    _encryptionKeySource = rawKey || crypto.randomBytes(32).toString('hex');
+  }
+  
+  _cipherKeyBuffer = crypto.createHash('sha256').update(_encryptionKeySource, 'utf8').digest();
+  return _cipherKeyBuffer;
 }
 
 /**

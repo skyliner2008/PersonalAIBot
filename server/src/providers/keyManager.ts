@@ -24,7 +24,7 @@ export class KeyManager {
   static async importEnvKeys(): Promise<void> {
     try {
       // Ensure unique constraint exists to prevent race conditions during concurrent imports
-      dbRun('CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_provider_type ON api_keys (provider_id, key_type)');
+      await dbRun('CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_provider_type ON api_keys (provider_id, key_type)');
 
       const registry = getRegistry();
       let imported = 0;
@@ -107,7 +107,7 @@ export class KeyManager {
    */
   static async deleteKey(providerId: string): Promise<boolean> {
     try {
-      dbRun('DELETE FROM api_keys WHERE provider_id = ?', [providerId]);
+      await dbRun('DELETE FROM api_keys WHERE provider_id = ?', [providerId]);
       // Also remove from credential store - use SQL concatenation to prevent injection
       dbRun("DELETE FROM settings WHERE key = 'provider_key_' || ?", [providerId]);
       log.info('✓ Key deleted', { providerId });
@@ -124,7 +124,7 @@ export class KeyManager {
   static async listConfigured(): Promise<string[]> {
     try {
       // Query optimized to filter directly for providers with corresponding entries in settings table
-      const rows = dbAll<{ provider_id: string }>(
+      const rows = await dbAll<{ provider_id: string }>(
         "SELECT DISTINCT provider_id FROM api_keys WHERE EXISTS (SELECT 1 FROM settings WHERE key = 'provider_key_' || provider_id)"
       );
       return rows.map(r => r.provider_id);

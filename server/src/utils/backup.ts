@@ -67,42 +67,47 @@ export function exportDataAsJSON(options: {
 } = {}): { data: Record<string, unknown>; filename: string; path: string } {
   ensureBackupDir();
 
-  const exportData: Record<string, unknown> = {
-    exportedAt: new Date().toISOString(),
-    version: '2.0',
-  };
+  try {
+    const exportData: Record<string, unknown> = {
+      exportedAt: new Date().toISOString(),
+      version: '2.0',
+    };
 
-  if (options.conversations !== false) {
-    exportData.conversations = dbAll('SELECT * FROM conversations ORDER BY updated_at DESC LIMIT 1000');
-    exportData.messages = dbAll('SELECT * FROM messages ORDER BY created_at DESC LIMIT 10000');
+    if (options.conversations !== false) {
+      exportData.conversations = dbAll('SELECT * FROM conversations ORDER BY updated_at DESC LIMIT 1000');
+      exportData.messages = dbAll('SELECT * FROM messages ORDER BY created_at DESC LIMIT 10000');
+    }
+
+    if (options.personas !== false) {
+      exportData.personas = dbAll('SELECT * FROM personas');
+    }
+
+    if (options.settings !== false) {
+      exportData.settings = dbAll('SELECT * FROM settings');
+    }
+
+    if (options.qaDatabase !== false) {
+      try {
+        exportData.qaDatabase = dbAll('SELECT * FROM qa_database');
+      } catch (err) { log.debug('qa_database table not found during export', { error: String(err) }); }
+    }
+
+    if (options.activityLogs !== false) {
+      exportData.activityLogs = dbAll('SELECT * FROM activity_log ORDER BY created_at DESC LIMIT 5000');
+    }
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
+    const filename = `export_${timestamp}.json`;
+    const exportPath = path.join(BACKUP_DIR, filename);
+
+    fs.writeFileSync(exportPath, JSON.stringify(exportData, null, 2));
+    log.info(`JSON export created: ${filename}`);
+
+    return { data: exportData, filename, path: exportPath };
+  } catch (err: any) {
+    log.error(`JSON export failed: ${err.message}`);
+    throw err;
   }
-
-  if (options.personas !== false) {
-    exportData.personas = dbAll('SELECT * FROM personas');
-  }
-
-  if (options.settings !== false) {
-    exportData.settings = dbAll('SELECT * FROM settings');
-  }
-
-  if (options.qaDatabase !== false) {
-    try {
-      exportData.qaDatabase = dbAll('SELECT * FROM qa_database');
-    } catch (err) { log.debug('qa_database table not found during export', { error: String(err) }); }
-  }
-
-  if (options.activityLogs !== false) {
-    exportData.activityLogs = dbAll('SELECT * FROM activity_log ORDER BY created_at DESC LIMIT 5000');
-  }
-
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
-  const filename = `export_${timestamp}.json`;
-  const exportPath = path.join(BACKUP_DIR, filename);
-
-  fs.writeFileSync(exportPath, JSON.stringify(exportData, null, 2));
-  log.info(`JSON export created: ${filename}`);
-
-  return { data: exportData, filename, path: exportPath };
 }
 
 /**
@@ -113,15 +118,20 @@ export function exportConversation(chatId: string): {
   messages: unknown[];
   memoryFacts: unknown[];
 } {
-  const conversation = dbAll('SELECT * FROM conversations WHERE chat_id = ?', [chatId]);
-  const messages = dbAll('SELECT * FROM messages WHERE chat_id = ? ORDER BY created_at ASC', [chatId]);
-
-  let memoryFacts: unknown[] = [];
   try {
-    memoryFacts = dbAll('SELECT * FROM archival_memory WHERE chat_id = ?', [chatId]);
-  } catch (err) { log.debug('archival_memory table not found during export', { chatId, error: String(err) }); }
+    const conversation = dbAll('SELECT * FROM conversations WHERE chat_id = ?', [chatId]);
+    const messages = dbAll('SELECT * FROM messages WHERE chat_id = ? ORDER BY created_at ASC', [chatId]);
 
-  return { conversation: conversation[0] || null, messages, memoryFacts };
+    let memoryFacts: unknown[] = [];
+    try {
+      memoryFacts = dbAll('SELECT * FROM archival_memory WHERE chat_id = ?', [chatId]);
+    } catch (err) { log.debug('archival_memory table not found during export', { chatId, error: String(err) }); }
+
+    return { conversation: conversation[0] || null, messages, memoryFacts };
+  } catch (err: any) {
+    log.error(`Conversation export failed for chat_id ${chatId}: ${err.message}`);
+    throw err;
+  }
 }
 
 /**

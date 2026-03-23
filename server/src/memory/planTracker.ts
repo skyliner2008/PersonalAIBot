@@ -29,10 +29,10 @@ export interface AgentPlan {
  */
 export function createPlan(chatId: string, objective: string, steps: string[]): AgentPlan {
     const db = getDb();
-    db.exec('BEGIN EXCLUSIVE;');
     let plan: AgentPlan;
 
     try {
+        db.exec('BEGIN EXCLUSIVE;');
         // Auto-pause any existing active plans for this chat to prevent confusion
         db.prepare(`UPDATE agent_plans SET status = 'paused', updated_at = CURRENT_TIMESTAMP WHERE chat_id = ? AND status = 'active'`).run(chatId);
 
