@@ -148,7 +148,25 @@ router.post('/scan', asyncHandler(async (_req, res) => {
 
 // POST /api/upgrade/implement-all — สั่ง implement ทุกรายการที่ approved
 import { setSetting } from '../database/db.js';
-import { implementProposalById, ensureUpgradeTable } from '../evolution/selfUpgrade.js';
+import { implementProposalById, ensureUpgradeTable, approveAllPendingProposals, stopBatchImplementation } from '../evolution/selfUpgrade.js';
+
+// POST /api/upgrade/approve-all — อนุมัติ proposals ที่เป็น pending ทั้งหมด
+router.post('/approve-all', asyncHandler(async (_req, res) => {
+  const count = approveAllPendingProposals();
+  log.info(`[upgradeRoutes] Approved all pending proposals: ${count} items`);
+  res.json({ ok: true, count, message: `${count} pending proposals approved.` });
+}));
+
+// POST /api/upgrade/stop-batch — หยุดการดำเนินการแบบชุด
+router.post('/stop-batch', asyncHandler(async (_req, res) => {
+  const success = stopBatchImplementation();
+  if (success) {
+    log.info(`[upgradeRoutes] Batch implementation stop requested by user`);
+    res.json({ ok: true, message: 'Batch implementation will stop after the current proposal finishes.' });
+  } else {
+    res.status(500).json({ ok: false, error: 'Failed to stop batch implementation' });
+  }
+}));
 
 router.post('/implement-all', asyncHandler(async (_req, res) => {
   const rootDir = path.resolve(process.cwd(), 'src');
@@ -169,6 +187,7 @@ router.post('/implement-all', asyncHandler(async (_req, res) => {
     }
   });
 }));
+
 
 // POST /api/upgrade/implement/:id — สั่ง implement proposal เฉพาะตัว
 

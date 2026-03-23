@@ -562,6 +562,10 @@ export const api = {
     request(`/upgrade/implement/${id}`, { method: 'POST', timeoutMs: 600000 }),
   implementAllApprovedProposals: () =>
     request(`/upgrade/implement-all`, { method: 'POST', timeoutMs: 600000 }),
+  approveAllPendingProposals: () =>
+    request('/upgrade/approve-all', { method: 'POST' }),
+  stopBatchImplementation: () =>
+    request('/upgrade/stop-batch', { method: 'POST' }),
   notifyUpgradeActivity: () =>
     request('/upgrade/activity', { method: 'POST' }),
   getUpgradeProposalDiff: (id: number) =>

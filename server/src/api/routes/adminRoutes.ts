@@ -60,22 +60,27 @@ adminRoutes.use('/backup', requireAuth('admin'));
 
 adminRoutes.get('/health/detailed', (_req, res) => {
   const memUsage = process.memoryUsage();
-  const dbSize = (() => {
-    try {
-      const row = dbGet<{ size: number }>(
-        `SELECT page_count * page_size as size FROM pragma_page_count(), pragma_page_size()`,
-      );
-      return row?.size || 0;
-    } catch {
-      return 0;
-    }
-  })();
+  let dbSize = 0;
+  let messageCount = { c: 0 };
+  let conversationCount = { c: 0 };
+  let episodeCount = { c: 0 };
+  let knowledgeCount = { c: 0 };
+  let logCount = { c: 0 };
 
-  const messageCount = dbGet<{ c: number }>('SELECT COUNT(*) as c FROM messages');
-  const conversationCount = dbGet<{ c: number }>('SELECT COUNT(*) as c FROM conversations');
-  const episodeCount = dbGet<{ c: number }>('SELECT COUNT(*) as c FROM episodes');
-  const knowledgeCount = dbGet<{ c: number }>('SELECT COUNT(*) as c FROM knowledge');
-  const logCount = dbGet<{ c: number }>('SELECT COUNT(*) as c FROM activity_logs');
+  try {
+    const row = dbGet<{ size: number }>(
+      `SELECT page_count * page_size as size FROM pragma_page_count(), pragma_page_size()`,
+    );
+    dbSize = row?.size || 0;
+
+    messageCount = dbGet<{ c: number }>('SELECT COUNT(*) as c FROM messages') || { c: 0 };
+    conversationCount = dbGet<{ c: number }>('SELECT COUNT(*) as c FROM conversations') || { c: 0 };
+    episodeCount = dbGet<{ c: number }>('SELECT COUNT(*) as c FROM episodes') || { c: 0 };
+    knowledgeCount = dbGet<{ c: number }>('SELECT COUNT(*) as c FROM knowledge') || { c: 0 };
+    logCount = dbGet<{ c: number }>('SELECT COUNT(*) as c FROM activity_logs') || { c: 0 };
+  } catch (error) {
+    addLog('system', 'Health check DB query failed', `Error: ${(error as Error).message}`, 'error');
+  }
 
   res.json({
     status: 'ok',
@@ -88,11 +93,11 @@ adminRoutes.get('/health/detailed', (_req, res) => {
     database: {
       sizeBytes: dbSize,
       sizeMB: Math.round(dbSize / 1024 / 1024 * 100) / 100,
-      messages: messageCount?.c || 0,
-      conversations: conversationCount?.c || 0,
-      episodes: episodeCount?.c || 0,
-      knowledge: knowledgeCount?.c || 0,
-      logs: logCount?.c || 0,
+      messages: messageCount.c,
+      conversations: conversationCount.c,
+      episodes: episodeCount.c,
+      knowledge: knowledgeCount.c,
+      logs: logCount.c,
     },
     bots: {
       browser: isRunning(),
@@ -119,21 +124,26 @@ adminRoutes.post('/maintenance/cleanup-logs', (_req, res) => {
 });
 
 adminRoutes.post('/maintenance/cleanup-episodes', (_req, res) => {
-  const chatIds = dbAll<{ chat_id: string }>('SELECT DISTINCT chat_id FROM episodes');
-  let totalCleaned = 0;
-  for (const { chat_id } of chatIds) {
-    const countRow = dbGet<{ c: number }>('SELECT COUNT(*) as c FROM episodes WHERE chat_id = ?', [chat_id]);
-    if (countRow && countRow.c > 500) {
-      const excess = countRow.c - 500;
-      dbRun(
-        'DELETE FROM episodes WHERE id IN (SELECT id FROM episodes WHERE chat_id = ? ORDER BY id ASC LIMIT ?)',
-        [chat_id, excess],
-      );
-      totalCleaned += excess;
+  try {
+    const chatIds = dbAll<{ chat_id: string }>('SELECT DISTINCT chat_id FROM episodes');
+    let totalCleaned = 0;
+    for (const { chat_id } of chatIds) {
+      const countRow = dbGet<{ c: number }>('SELECT COUNT(*) as c FROM episodes WHERE chat_id = ?', [chat_id]);
+      if (countRow && countRow.c > 500) {
+        const excess = countRow.c - 500;
+        dbRun(
+          'DELETE FROM episodes WHERE id IN (SELECT id FROM episodes WHERE chat_id = ? ORDER BY id ASC LIMIT ?)',
+          [chat_id, excess],
+        );
+        totalCleaned += excess;
+      }
     }
+    addLog('system', 'Episode cleanup', `Removed ${totalCleaned} old episodes`, 'info');
+    res.json({ success: true, cleaned: totalCleaned });
+  } catch (error) {
+    addLog('system', 'Episode cleanup failed', `Error: ${(error as Error).message}`, 'error');
+    res.status(500).json({ success: false, error: 'Failed to cleanup episodes' });
   }
-  addLog('system', 'Episode cleanup', `Removed ${totalCleaned} old episodes`, 'info');
-  res.json({ success: true, cleaned: totalCleaned });
 });
 
 adminRoutes.get('/agent/runs', (req, res) => {
@@ -209,18 +219,29 @@ adminRoutes.get('/goals', (req, res) => {
   const chatId = String(req.query.chatId || '');
   if (!chatId) return res.status(400).json({ error: 'chatId required' });
   const status = req.query.status ? String(req.query.status) : undefined;
-  res.json({ goals: getGoals(chatId, status), stats: getGoalStats(chatId) });
+
+  try {
+    res.json({ goals: getGoals(chatId, status), stats: getGoalStats(chatId) });
+  } catch (error) {
+    addLog('system', 'Get goals failed', `Error: ${(error as Error).message}`, 'error');
+    res.status(500).json({ success: false, error: 'Failed to retrieve goals' });
+  }
 });
 
 adminRoutes.post('/goals', validateBody(goalCreateSchema), (req, res) => {
-  const { chatId, title, description, priority, subGoals } = req.body;
-  const enrichedSubGoals = (subGoals as SubGoal[]).map((sg, i) => ({
-    ...sg,
-    id: sg.id || `sg_${Date.now()}_${i}`,
-    order: sg.order ?? i + 1,
-  }));
-  const goal = createGoal(chatId, title, description, priority, enrichedSubGoals);
-  res.json({ success: true, goal });
+  try {
+    const { chatId, title, description, priority, subGoals } = req.body;
+    const enrichedSubGoals = (subGoals as SubGoal[]).map((sg, i) => ({
+      ...sg,
+      id: sg.id || `sg_${Date.now()}_${i}`,
+      order: sg.order ?? i + 1,
+    }));
+    const goal = createGoal(chatId, title, description, priority, enrichedSubGoals);
+    res.json({ success: true, goal });
+  } catch (error) {
+    addLog('system', 'Create goal failed', `Error: ${(error as Error).message}`, 'error');
+    res.status(500).json({ success: false, error: 'Failed to create goal' });
+  }
 });
 
 adminRoutes.patch('/goals/:id/progress', (req, res) => {

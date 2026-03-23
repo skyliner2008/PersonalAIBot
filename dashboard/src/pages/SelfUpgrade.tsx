@@ -3,7 +3,8 @@ import { api } from '../services/api';
 import { 
   Zap, Bug, Shield, Wrench, Sparkles, RefreshCcw, 
   Trash2, CheckCircle2, XCircle, Clock, Rocket, FileCode,
-  Info, AlertTriangle, Search, ChevronRight, Activity, Bot, Eye, X
+  Info, AlertTriangle, Search, ChevronRight, Activity, Bot, Eye, X,
+  Square, CheckCheck
 } from 'lucide-react';
 
 // ── Types ──
@@ -18,6 +19,7 @@ interface UpgradeStatus {
   dryRun: boolean;
   isContinuousActive: boolean;
   isManualScanActive: boolean;
+  isBatchActive: boolean;
 }
 
 interface ProposalStats {
@@ -159,6 +161,32 @@ export default function SelfUpgrade() {
     } catch (err) {
       console.error('Failed to implement all:', err);
       alert('เกิดข้อผิดพลาดในการสั่งการแบบชุด');
+    }
+  };
+
+  const approveAllPending = async () => {
+    const pendingCount = proposals.filter(p => p.status === 'pending').length;
+    if (pendingCount === 0) return;
+    if (!confirm(`ยืนยันการอนุมัติ proposals ที่รอดำเนินการทั้งหมด ${pendingCount} รายการ?`)) return;
+    
+    try {
+      await api.approveAllPendingProposals();
+      await fetchData();
+    } catch (err) {
+      console.error('Failed to approve all:', err);
+      alert('เกิดข้อผิดพลาดในการอนุมัติทั้งหมด');
+    }
+  };
+
+  const stopBatch = async () => {
+    if (!confirm('ยืนยันหยุดดำเนินการ? ระบบจะหยุดหลังจากทำ proposal ที่กำลังดำเนินการอยู่เสร็จ')) return;
+    
+    try {
+      await api.stopBatchImplementation();
+      await fetchData();
+    } catch (err) {
+      console.error('Failed to stop batch:', err);
+      alert('เกิดข้อผิดพลาดในการหยุดดำเนินการ');
     }
   };
 
@@ -442,14 +470,33 @@ export default function SelfUpgrade() {
               <span className="text-[11px] font-normal text-gray-500 ml-2">พบ {proposals.length} รายการ</span>
             </h2>
             <div className="flex items-center gap-3">
-              {proposals.some(p => p.status === 'approved') && (
+              {proposals.some(p => p.status === 'pending') && (
                 <button
-                  onClick={implementAllApproved}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-fuchsia-600 hover:bg-fuchsia-500 text-white text-xs font-bold rounded-lg shadow-lg shadow-fuchsia-500/20 transition-all duration-300 hover:scale-105 active:scale-95"
+                  onClick={approveAllPending}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg shadow-lg shadow-emerald-500/20 transition-all duration-300 hover:scale-105 active:scale-95"
                 >
-                  <Rocket className="w-3.5 h-3.5" />
-                  ดำเนินการทันที (ทั้งหมด)
+                  <CheckCheck className="w-3.5 h-3.5" />
+                  อนุมัติทั้งหมด ({proposals.filter(p => p.status === 'pending').length})
                 </button>
+              )}
+              {status?.isBatchActive ? (
+                <button
+                  onClick={stopBatch}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-lg shadow-lg shadow-rose-500/20 transition-all duration-300 hover:scale-105 active:scale-95 animate-pulse"
+                >
+                  <Square className="w-3.5 h-3.5" />
+                  หยุดดำเนินการ
+                </button>
+              ) : (
+                proposals.some(p => p.status === 'approved') && (
+                  <button
+                    onClick={implementAllApproved}
+                    className="flex items-center gap-2 px-3 py-1.5 bg-fuchsia-600 hover:bg-fuchsia-500 text-white text-xs font-bold rounded-lg shadow-lg shadow-fuchsia-500/20 transition-all duration-300 hover:scale-105 active:scale-95"
+                  >
+                    <Rocket className="w-3.5 h-3.5" />
+                    ดำเนินการทันที (ทั้งหมด)
+                  </button>
+                )
               )}
               {proposals.some(p => p.status === 'rejected') && (
                 <>

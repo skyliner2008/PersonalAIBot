@@ -13,7 +13,7 @@ import { dbRun, dbGet, dbAll, getDb } from '../database/db.js';
 import { createLogger } from './logger.js';
 
 const log = createLogger('UsageTracker');
-log.info('UsageTracker initialized');
+log.info('UsageTracker initialized (v2)');
 
 // ============ Types ============
 

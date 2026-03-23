@@ -802,6 +802,9 @@ Use this section as the first read before continuing development in a new chat/t
   - Fixed `DRY_RUN` logic in `selfUpgrade.ts` to default to `ENABLED` (propose+fix) if the DB value is null.
   - Moved `resumeBatchImplementation` logic out of the `evolutionEnabled` toggle in `index.ts`, ensuring batch upgrades survive server restarts regardless of the global evolution setting.
   - Added a 3-second stabilization buffer and stuck-proposal recovery wait to prevent race conditions during `tsx watch` restarts.
+  - **Approve All Button**: Added `POST /api/upgrade/approve-all` endpoint and "อนุมัติทั้งหมด" button in Dashboard to approve all pending proposals at once.
+  - **Stop Batch Button**: Added `POST /api/upgrade/stop-batch` endpoint and dynamic button toggle — "ดำเนินการทันที (ทั้งหมด)" switches to "หยุดดำเนินการ" when batch is active.
+  - Added `isBatchActive` field to `getUpgradeStatus()` for frontend state management.
 - **JarvisCall UX Fix (2026-03-23)**:
   - Implemented `autostart` URL parameter cleanup using `window.history.replaceState()` to prevent unintended repeated calls on page reload or navigation.
 

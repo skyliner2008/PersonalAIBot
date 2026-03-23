@@ -2948,9 +2948,18 @@ export function getUpgradeStatus(): {
   dryRun: boolean;
   isContinuousActive: boolean;
   isManualScanActive: boolean;
+  isBatchActive: boolean;
 } {
   const idleMs = getOsIdleTimeMs();
   const total = _fileIndex.length || 1;
+
+  // Check if batch implementation is currently active
+  let batchActive = false;
+  try {
+    const { getSetting } = require('../database/db.js');
+    batchActive = getSetting('upgrade_implement_all') === 'true';
+  } catch { /* ignore */ }
+
   return {
     running: !!upgradeInterval || !!_continuousScanTimeout,
     isContinuousActive: !!_continuousScanTimeout,
@@ -2966,7 +2975,34 @@ export function getUpgradeStatus(): {
       percent: Math.round((_scanCursor / total) * 100),
     },
     dryRun: DRY_RUN,
+    isBatchActive: batchActive,
   };
+}
+
+/** Approve all pending proposals in one go */
+export function approveAllPendingProposals(): number {
+  try {
+    ensureUpgradeTable();
+    const db = require('../database/db.js').getDb();
+    const result = db.prepare(`UPDATE upgrade_proposals SET status = 'approved', reviewed_at = datetime('now') WHERE status = 'pending'`).run();
+    return result.changes || 0;
+  } catch (err: any) {
+    console.error('[SelfUpgrade] approveAllPendingProposals error:', err.message);
+    return 0;
+  }
+}
+
+/** Stop any active batch implementation by clearing the DB flag */
+export function stopBatchImplementation(): boolean {
+  try {
+    const { setSetting } = require('../database/db.js');
+    setSetting('upgrade_implement_all', 'false');
+    console.log('\x1b[33m[SelfUpgrade] Batch implementation stop requested by user.\x1b[0m');
+    return true;
+  } catch (err: any) {
+    console.error('[SelfUpgrade] stopBatchImplementation error:', err.message);
+    return false;
+  }
 }
 
 /** Update scan configuration and restart loop if needed */
