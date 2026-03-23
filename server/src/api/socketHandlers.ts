@@ -559,13 +559,13 @@ function handleVoiceEvents(io: SocketServer, socket: Socket) {
                                 const result = await executeVoiceAgentCommandWithPolicy(command, socket.id, true, sessionChatId);
                                 const output = normalizeBridgeOutput(result);
                                 
-                                socket.emit('voice:agent_reply', { input: command, reply: output, source: 'tool-bridge' });
+                                socket.emit('voice:agent_reply', { input: command, reply: output, source: 'tool-bridge', method: 'voice' });
                                 saveVoiceToMemory(sessionChatId, 'assistant', output);
                                 functionResponses.push({ id: callId, name: LIVE_AGENT_TOOL_NAME, response: { output } });
                             }
                         } catch (err: any) {
                             const message = err?.message || String(err);
-                            socket.emit('voice:agent_reply', { reply: `Voice tool error: ${message}` });
+                            socket.emit('voice:agent_reply', { reply: `Voice tool error: ${message}`, method: 'voice' });
                             if (functionResponses.length === 0) {
                                 functionResponses.push({ name: LIVE_AGENT_TOOL_NAME, response: { error: `Tool bridge error: ${message}` } });
                             }
@@ -605,6 +605,7 @@ function handleVoiceEvents(io: SocketServer, socket: Socket) {
         
         socket.on('voice:text_input', (data: any) => {
             notifyUserActivity();
+            const method = String(data?.method || 'typing').toLowerCase() === 'voice' ? 'voice' : 'typing';
             const rawText = String(data?.text || '').trim();
             const textWithEscapedPaths = autoEscapeWindowsPaths(rawText);
             const text = textWithEscapedPaths.replace(/\\s+/g, ' ').trim().slice(0, 4000);
@@ -648,8 +649,8 @@ function handleVoiceEvents(io: SocketServer, socket: Socket) {
                             userId: buildVoiceUserId(socket.id),
                             maxReviewRounds: 1,
                         });
-                        socket.emit('voice:agent_reply', { input: text, reply: summary });
-                        socket.emit('voice:text_recv', { text: `👑 **Meeting Room สรุป:**\n\n${summary}`, source: 'agent' });
+                            socket.emit('voice:agent_reply', { input: text, reply: summary, method });
+                            socket.emit('voice:text_recv', { text: `👑 **Meeting Room สรุป:**\n\n${summary}`, source: 'agent' });
                         saveVoiceToMemory(socket.id, 'assistant', summary);
                     } catch (err: any) {
                         socket.emit('voice:agent_reply', { input: text, reply: `Meeting Room error: ${err?.message || String(err)}` });
@@ -695,7 +696,7 @@ function handleVoiceEvents(io: SocketServer, socket: Socket) {
                             }
                         }
                         const fullReply = parts.join('\n\n---\n\n') || 'ไม่มี CLI ตอบกลับ';
-                        socket.emit('voice:agent_reply', { input: text, reply: fullReply });
+                        socket.emit('voice:agent_reply', { input: text, reply: fullReply, method });
                         socket.emit('voice:text_recv', { text: fullReply, source: 'agent' });
                         saveVoiceToMemory(socket.id, 'assistant', fullReply);
                     } catch (err: any) {
@@ -714,7 +715,7 @@ function handleVoiceEvents(io: SocketServer, socket: Socket) {
                         const result = await executeCommand(`@${target} ${message}`, 'web', buildVoiceUserId(socket.id));
                         const reply = String(result || '').trim() || `@${target} ไม่มีการตอบกลับ`;
                         socket.emit('voice:cli_reply', { agent: target, reply, status: 'success' });
-                        socket.emit('voice:agent_reply', { input: text, reply });
+                        socket.emit('voice:agent_reply', { input: text, reply, method });
                         socket.emit('voice:text_recv', { text: reply, source: 'agent' });
                         saveVoiceToMemory(socket.id, 'assistant', reply);
                     } catch (err: any) {
@@ -734,7 +735,7 @@ function handleVoiceEvents(io: SocketServer, socket: Socket) {
                         const nowTs = new Date().toISOString();
                         const result = await executeVoiceAgentCommandWithPolicy(`[TS:${nowTs}] [USER_TEXT_INPUT] ${text}`, socket.id, true, sessionChatId);
                         const reply = String(result || '').trim() || 'No response from Jarvis.';
-                        socket.emit('voice:agent_reply', { input: text, reply });
+                        socket.emit('voice:agent_reply', { input: text, reply, method });
                         socket.emit('voice:text_recv', { text: reply, source: 'agent' });
                         saveVoiceToMemory(sessionChatId, 'assistant', reply);
                     } catch (err: any) {

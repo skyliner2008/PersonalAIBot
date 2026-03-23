@@ -319,7 +319,7 @@ export function JarvisCall() {
         // If agent is still processing previous request, queue but don't block display
         if (awaitingAgentReplyRef.current) {
           // Still send — server will queue it; user sees their text in chat
-          emit('voice:text_input', { text });
+          emit('voice:text_input', { text, method: 'voice' });
           return;
         }
 
@@ -329,7 +329,7 @@ export function JarvisCall() {
           awaitingAgentReplyRef.current = false;
         }, 65000);
 
-        emit('voice:text_input', { text });
+        emit('voice:text_input', { text, method: 'voice' });
       };
 
       recognition.onerror = (event: { error?: string }) => {
@@ -710,16 +710,18 @@ export function JarvisCall() {
       pushLog('assistant', text);
     });
 
-    const offVoiceAgentReply = on('voice:agent_reply', (data: { reply?: string }) => {
+    const offVoiceAgentReply = on('voice:agent_reply', (data: { reply?: string; method?: string }) => {
       markVoiceActivity();
       const reply = String(data?.reply || '').trim();
       if (!reply) return;
       awaitingAgentReplyRef.current = false;
       clearAgentReplyWatchdog();
       pushLog('assistant', reply);
-      // Use browser TTS if we are in STT transport, 
-      // OR if we are in agent-tools mode and no audio-recv has happened (Gemini key missing)
-      if (voiceTransportRef.current === 'stt' || voiceTransport === 'stt') {
+      
+      const method = String(data?.method || 'typing').toLowerCase();
+
+      // Only speak if this was originated from a voice command
+      if (method === 'voice' && (voiceTransportRef.current === 'stt' || voiceTransport === 'stt')) {
         speakAssistantReply(reply);
       }
     });
@@ -1095,7 +1097,7 @@ export function JarvisCall() {
     const text = String(rawText || '').trim();
     if (!text) return;
     pushLog('user', text);
-    emit('voice:text_input', { text });
+    emit('voice:text_input', { text, method: 'typing' });
   }, [emit, pushLog]);
 
   const uploadAndSendFile = useCallback(async (file: File) => {
@@ -1113,7 +1115,7 @@ export function JarvisCall() {
       const uploaded = result.file;
       pushLog('user', `[แนบไฟล์] ${uploaded.originalName} (${uploaded.sizeKB}KB)`);
       const command = buildAttachmentCommand(uploaded).slice(0, 3900);
-      emit('voice:text_input', { text: command });
+      emit('voice:text_input', { text: command, method: 'typing' });
     } catch (err: any) {
       const message = String(err?.message || err || 'unknown error').trim();
       pushLog('system', `แนบไฟล์ไม่สำเร็จ: ${message}`);
