@@ -5,6 +5,7 @@
     - **Gemini 3 Unlock**: ปลดล็อกการเลือกใช้รุ่น `gemini-3-flash-preview` และ `gemini-3.1` อย่างถาวร โดยการแก้ปัญหา Alias Persistence และลบเงื่อนไขการดีดกลับ (Stale Model Map) เพื่อให้ใช้งานรุ่นพรีเมียมล่าสุดได้จริง 🔓🛰️
     - **DynamicRouter Resilience**: เพิ่มระบบป้องกัน SyntaxError ใน `agent.ts` โดยใช้ Regex แบบเจาะจงเฉพาะ Tool List และระบบ Multi-match retry เพื่อให้การประมวลผล JSON นิ่งและเสถียรที่สุด 🧩🚀
     - **Evolution Engine Updated**: ปรับปรุงระบบ Self-Upgrade ให้จดจำเครื่องมือสำคัญ (AST Tools) เสมอ ป้องกันการลบเครื่องมือที่จำเป็นในการซ่อมแซมตัวเอง 🧠🛠️
+    - **Swarm Race Condition Fix**: นำระบบ Micro-queueing มาใช้ใน `SwarmHealthTracker` เพื่อป้องกันข้อมูลสถานะผิดพลาดเมื่อมีการบันทึกสถานะ Specialist พร้อมกันหลายรายการ 🛡️⚡
   </p>
 
   <p>

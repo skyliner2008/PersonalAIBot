@@ -8,6 +8,8 @@ import type { SpecialistRuntimeHealth } from './swarmTypes.js';
 
 export class SwarmHealthTracker {
   private specialistRuntime: Map<string, SpecialistRuntimeHealth> = new Map();
+  private specialistUpdateQueue: Map<string, Array<() => void>> = new Map();
+  private specialistProcessing: Set<string> = new Set();
 
   /**
    * Get or create health tracking for a specialist
@@ -34,63 +36,108 @@ export class SwarmHealthTracker {
    * Record a successful task execution
    */
   recordSuccess(specialistName: string, latencyMs?: number): void {
-    const health = this.getOrCreateRuntimeHealth(specialistName);
-    health.totalTasks += 1;
-    health.successes += 1;
-    health.consecutiveFailures = 0;
-    health.lastError = undefined;
-    health.lastSuccessAt = new Date().toISOString();
+    this.queueUpdate(specialistName, () => {
+      const health = this.getOrCreateRuntimeHealth(specialistName);
+      health.totalTasks += 1;
+      health.successes += 1;
+      health.consecutiveFailures = 0;
+      health.lastError = undefined;
+      health.lastSuccessAt = new Date().toISOString();
 
-    if (Number.isFinite(latencyMs) && latencyMs! >= 0) {
-      const priorSamples = Math.max(0, health.successes - 1);
-      const priorTotal = (health.averageLatencyMs || 0) * priorSamples;
-      health.averageLatencyMs = Math.round((priorTotal + latencyMs!) / Math.max(1, health.successes));
-    }
-    this.recomputeRuntimeState(health);
+      if (Number.isFinite(latencyMs) && latencyMs! >= 0) {
+        const priorSamples = Math.max(0, health.successes - 1);
+        const priorTotal = (health.averageLatencyMs || 0) * priorSamples;
+        health.averageLatencyMs = Math.round((priorTotal + latencyMs!) / Math.max(1, health.successes));
+      }
+      this.recomputeRuntimeState(health);
+    });
   }
 
   /**
    * Record a failed task execution
    */
   recordFailure(specialistName: string, errorMsg: string, latencyMs?: number): void {
-    const health = this.getOrCreateRuntimeHealth(specialistName);
-    health.totalTasks += 1;
-    health.failures += 1;
-    health.consecutiveFailures += 1;
-    health.lastError = errorMsg;
-    health.lastFailureAt = new Date().toISOString();
-    if (/timeout/i.test(errorMsg)) {
-      health.timeouts += 1;
-    }
-    if (Number.isFinite(latencyMs) && latencyMs! >= 0 && !health.averageLatencyMs) {
-      health.averageLatencyMs = Math.round(latencyMs!);
-    }
-    this.recomputeRuntimeState(health);
+    this.queueUpdate(specialistName, () => {
+      const health = this.getOrCreateRuntimeHealth(specialistName);
+      health.totalTasks += 1;
+      health.failures += 1;
+      health.consecutiveFailures += 1;
+      health.lastError = errorMsg;
+      health.lastFailureAt = new Date().toISOString();
+      if (/timeout/i.test(errorMsg)) {
+        health.timeouts += 1;
+      }
+      if (Number.isFinite(latencyMs) && latencyMs! >= 0 && !health.averageLatencyMs) {
+        health.averageLatencyMs = Math.round(latencyMs!);
+      }
+      this.recomputeRuntimeState(health);
+    });
   }
 
   /**
    * Record a timeout for a specialist
    */
   recordTimeout(specialistName: string, latencyMs?: number): void {
-    const health = this.getOrCreateRuntimeHealth(specialistName);
-    health.totalTasks += 1;
-    health.timeouts += 1;
-    health.consecutiveFailures += 1;
-    health.lastError = 'timeout';
-    health.lastFailureAt = new Date().toISOString();
-    if (Number.isFinite(latencyMs) && latencyMs! >= 0 && !health.averageLatencyMs) {
-      health.averageLatencyMs = Math.round(latencyMs!);
-    }
-    this.recomputeRuntimeState(health);
+    this.queueUpdate(specialistName, () => {
+      const health = this.getOrCreateRuntimeHealth(specialistName);
+      health.totalTasks += 1;
+      health.timeouts += 1;
+      health.consecutiveFailures += 1;
+      health.lastError = 'timeout';
+      health.lastFailureAt = new Date().toISOString();
+      if (Number.isFinite(latencyMs) && latencyMs! >= 0 && !health.averageLatencyMs) {
+        health.averageLatencyMs = Math.round(latencyMs!);
+      }
+      this.recomputeRuntimeState(health);
+    });
   }
 
   /**
    * Record a reroute occurred for a specialist
    */
   recordReroute(specialistName: string): void {
-    const health = this.getOrCreateRuntimeHealth(specialistName);
-    health.reroutes += 1;
-    this.recomputeRuntimeState(health);
+    this.queueUpdate(specialistName, () => {
+      const health = this.getOrCreateRuntimeHealth(specialistName);
+      health.reroutes += 1;
+      this.recomputeRuntimeState(health);
+    });
+  }
+
+  /**
+   * Core micro-queue logic to prevent race conditions
+   */
+  private queueUpdate(specialistName: string, updateFn: () => void): void {
+    const queue = this.specialistUpdateQueue.get(specialistName) || [];
+    queue.push(updateFn);
+    this.specialistUpdateQueue.set(specialistName, queue);
+
+    if (!this.specialistProcessing.has(specialistName)) {
+      process.nextTick(() => this.processQueue(specialistName));
+    }
+  }
+
+  private processQueue(specialistName: string): void {
+    const queue = this.specialistUpdateQueue.get(specialistName);
+    if (!queue || queue.length === 0) {
+      this.specialistProcessing.delete(specialistName);
+      return;
+    }
+
+    this.specialistProcessing.add(specialistName);
+    
+    // Process all currently queued updates for this specialist
+    while (queue.length > 0) {
+      const update = queue.shift();
+      if (update) {
+        try {
+          update();
+        } catch (e) {
+          console.error(`[HealthTracker] Error processing queue for ${specialistName}:`, e);
+        }
+      }
+    }
+
+    this.specialistProcessing.delete(specialistName);
   }
 
   /**

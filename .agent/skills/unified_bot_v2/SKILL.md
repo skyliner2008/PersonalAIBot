@@ -6,6 +6,7 @@ description: "Complete architecture reference for PersonalAIBotV2 — Agentic AI
 ### [Update 2026-03-24] Gemini Model & Dynamic Router Patch 🛰️🛠️
 - **Unlock Gemini 3 Series**: แก้ไขปัญหา Model Selection Lockdown โดยปรับปรุง `geminiProvider.ts` (Alias Persistence) และ `configManager.ts` (STALE_MODEL_MAP Removal) ทำให้เลือกใช้ `gemini-3-flash-preview` ได้ถาวร
 - **Resilient Tool Selection**: ปรับปรุง `agent.ts` เพื่อจัดการกับ `JSON parsing failed` โดยเน้นการดักจับ JSON Array ของ String ที่แม่นยำขึ้น ป้องกัน SyntaxError จากข้อความรบกวนของ LLM
+- **Swarm Health Protection**: แก้ไข Race Condition ใน `SwarmHealthTracker` โดยใช้ระบบ Micro-queueing จัดการการอัปเดตสถานะแบบอะซิงโครนัส
 - **AST Protection**: ปรับปรุงให้ระบบ Self-Upgrade ปกป้องเครื่องมือกลุ่ม AST (ast_rename, find_references) เสมอ เพื่อรักษาความสามารถในการแก้ไขโค้ดที่ซับซ้อน
 
 # PersonalAIBotV2 — Complete Architecture Reference
