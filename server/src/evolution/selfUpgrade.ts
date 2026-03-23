@@ -358,6 +358,7 @@ async function buildFileIndex(rootDir: string): Promise<string[]> {
     'evolution/selfUpgrade.ts',
     'evolution/selfReflection.ts',
     'terminal/terminalGateway.ts',
+    'api/routes.ts',
     'api/socketHandlers.ts',
     'api/upgradeRoutes.ts',
     'automation/chatBot.ts',
@@ -976,7 +977,7 @@ async function mapProtectedCoresToSecondBrain(rootDir: string): Promise<void> {
   const PROTECTED_CORE_FILES = new Set([
     'index.ts', 'config.ts', 'configValidator.ts',
     'database/db.ts', 'evolution/selfUpgrade.ts', 'evolution/selfReflection.ts',
-    'terminal/terminalGateway.ts', 'api/socketHandlers.ts', 'api/upgradeRoutes.ts',
+    'terminal/terminalGateway.ts', 'api/routes.ts', 'api/socketHandlers.ts', 'api/upgradeRoutes.ts',
     'automation/chatBot.ts', 'automation/browser.ts',
     'bot_agents/tools/index.ts', 'bot_agents/agent.ts',
   ]);
@@ -1823,7 +1824,7 @@ export async function implementProposalById(id: number, rootDir: string): Promis
     'index.ts', 'config.ts', 'configValidator.ts', 'queue.js',
     'database/db.ts', 'database/db.js',
     'evolution/selfUpgrade.ts', 'evolution/selfReflection.ts',
-    'terminal/terminalGateway.ts', 'api/socketHandlers.ts', 'api/upgradeRoutes.ts',
+    'terminal/terminalGateway.ts', 'api/routes.ts', 'api/socketHandlers.ts', 'api/upgradeRoutes.ts',
     'bot_agents/tools/index.ts', 'bot_agents/agent.ts',
     'automation/chatBot.ts', 'automation/browser.ts',
   ]);

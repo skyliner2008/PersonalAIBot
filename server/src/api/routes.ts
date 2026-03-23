@@ -633,6 +633,7 @@ router.post('/files/upload', upload.single('file'), asyncHandler(async (req, res
     return res.status(500).json({ error: `Failed to rename uploaded file: ${err.message}` });
   }
 
+
   const processed = await processFile(newPath);
   const geminiPart = fileToGeminiPart(processed);
 

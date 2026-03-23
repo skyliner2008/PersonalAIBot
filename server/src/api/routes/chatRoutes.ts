@@ -72,9 +72,9 @@ chatRoutes.post('/chat/reply', validateBody(chatReplySchema), asyncHandler(async
   }
 
   const personaConfig = personaManager.loadPersona('web' as any);
-  if (!personaConfig) {
-    addLog('chat', 'Error', 'Web persona configuration not found', 'error');
-    return res.status(500).json({ success: false, error: 'Persona configuration missing' });
+  if (!personaConfig || typeof personaConfig.systemInstruction !== 'string' || personaConfig.systemInstruction.trim() === '') {
+    addLog('chat', 'Error', 'Web persona configuration or system instruction not found/invalid', 'error');
+    return res.status(500).json({ success: false, error: 'Persona configuration or system instruction missing' });
   }
   const chatMemId = `dash_${convId}`;
   umAddMessage(chatMemId, 'user', message);
@@ -226,8 +226,8 @@ chatRoutes.post('/chat/stream', validateBody(chatReplySchema), asyncHandler(asyn
     }
 
     const personaConfig = personaManager.loadPersona('fb-extension');
-    if (!personaConfig) {
-      writer.sendError('Persona configuration missing for streaming chat');
+    if (!personaConfig || !personaConfig.systemInstruction) {
+      writer.sendError('Persona configuration or system instruction missing for streaming chat');
       return;
     }
     const aiMessages = buildChatMessages(personaConfig.systemInstruction, memCtx, message);

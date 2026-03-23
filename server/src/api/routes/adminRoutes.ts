@@ -245,29 +245,49 @@ adminRoutes.post('/goals', validateBody(goalCreateSchema), (req, res) => {
 });
 
 adminRoutes.patch('/goals/:id/progress', (req, res) => {
-  const { progress, status } = req.body;
-  const goal = updateGoalProgress(req.params.id, progress ?? 0, status);
-  if (!goal) return res.status(404).json({ error: 'Goal not found' });
-  res.json({ success: true, goal });
+  try {
+    const { progress, status } = req.body;
+    const goal = updateGoalProgress(req.params.id, progress ?? 0, status);
+    if (!goal) return res.status(404).json({ error: 'Goal not found' });
+    res.json({ success: true, goal });
+  } catch (error) {
+    addLog('system', 'Update goal progress failed', `Error: ${(error as Error).message}`, 'error');
+    res.status(500).json({ success: false, error: 'Failed to update goal progress' });
+  }
 });
 
 adminRoutes.patch('/goals/:goalId/subgoals/:subGoalId', (req, res) => {
-  const goal = updateSubGoal(req.params.goalId, req.params.subGoalId, req.body);
-  if (!goal) return res.status(404).json({ error: 'Goal or sub-goal not found' });
-  res.json({ success: true, goal });
+  try {
+    const goal = updateSubGoal(req.params.goalId, req.params.subGoalId, req.body);
+    if (!goal) return res.status(404).json({ error: 'Goal or sub-goal not found' });
+    res.json({ success: true, goal });
+  } catch (error) {
+    addLog('system', 'Update sub-goal failed', `Error: ${(error as Error).message}`, 'error');
+    res.status(500).json({ success: false, error: 'Failed to update sub-goal' });
+  }
 });
 
 adminRoutes.post('/goals/:id/subgoals', (req, res) => {
-  const { title, order } = req.body;
-  if (!title) return res.status(400).json({ error: 'title required' });
-  const goal = addSubGoal(req.params.id, title, order);
-  if (!goal) return res.status(404).json({ error: 'Goal not found' });
-  res.json({ success: true, goal });
+  try {
+    const { title, order } = req.body;
+    if (!title) return res.status(400).json({ error: 'title required' });
+    const goal = addSubGoal(req.params.id, title, order);
+    if (!goal) return res.status(404).json({ error: 'Goal not found' });
+    res.json({ success: true, goal });
+  } catch (error) {
+    addLog('system', 'Add sub-goal failed', `Error: ${(error as Error).message}`, 'error');
+    res.status(500).json({ success: false, error: 'Failed to add sub-goal' });
+  }
 });
 
 adminRoutes.delete('/goals/:id', (req, res) => {
-  const deleted = deleteGoal(req.params.id);
-  res.json({ success: deleted });
+  try {
+    const deleted = deleteGoal(req.params.id);
+    res.json({ success: deleted });
+  } catch (error) {
+    addLog('system', 'Delete goal failed', `Error: ${(error as Error).message}`, 'error');
+    res.status(500).json({ success: false, error: 'Failed to delete goal' });
+  }
 });
 
 export default adminRoutes;
