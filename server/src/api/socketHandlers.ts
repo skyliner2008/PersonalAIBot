@@ -11,6 +11,8 @@ import { resolveProviderApiKey } from '../config/settingsSecurity.js';
 import { personaManager } from '../ai/personaManager.js';
 import { getBot } from '../bot_agents/registries/botRegistry.js';
 import { executeCommand } from '../terminal/terminalGateway.js';
+import { configManager } from '../bot_agents/config/configManager.js';
+import { TaskType } from '../bot_agents/config/aiConfig.js';
 import * as os from 'os';
 import * as path from 'path';
 import { getAvailableBackends } from '../terminal/commandRouter.js';
@@ -509,7 +511,14 @@ function handleVoiceEvents(io: SocketServer, socket: Socket) {
                     return;
                 }
                 
-                const liveModel = await resolveGeminiLiveModel(apiKey);
+                // Prioritize model from ai_routing_config.json if it's a Gemini model
+                const supportConfig = configManager.resolveModelConfig(TaskType.SYSTEM).config;
+                let liveModel = (supportConfig.active.provider === 'gemini') ? supportConfig.active.modelName : '';
+                
+                // If no specific Gemini model in SYSTEM, or it's not a Gemini model, use smart discovery
+                if (!liveModel) {
+                    liveModel = await resolveGeminiLiveModel(apiKey);
+                }
                 const liveApiVersion = process.env.GEMINI_LIVE_API_VERSION || 'v1beta';
                 
                 // Create a unique Chat ID for THIS specific voice session

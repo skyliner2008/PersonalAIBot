@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { TaskType, ModelConfig, MultiModelConfig, modelRouting as defaultMultiConfig } from './aiConfig.js';
+import { TaskType, ModelConfig, MultiModelConfig, modelRouting as defaultMultiConfig, getBestModelForTask } from './aiConfig.js';
 import { getAgentCompatibleProvider, getAgentProviderDefaultModel } from '../../providers/agentRuntime.js';
 import { createLogger } from '../../utils/logger.js';
 
@@ -196,6 +196,20 @@ export class ConfigManager {
     }
     
     logger.info(`Promoted ${successfulModel.provider}/${successfulModel.modelName} to active for ${taskType}${botId ? ` (Bot: ${botId})` : ''}`);
+  }
+
+  public resolveModelConfig(taskType: TaskType, botId?: string): { config: MultiModelConfig; autoRouting: boolean } {
+    if (botId) {
+      const botRouteCfg = this.getBotConfig(botId);
+      if (botRouteCfg?.routes[taskType]) return { config: botRouteCfg.routes[taskType], autoRouting: botRouteCfg.autoRouting };
+    }
+    const routes = this.currentConfig.routes;
+    const config = routes[taskType] ?? routes[TaskType.GENERAL];
+    if (this.currentConfig.autoRouting) {
+      const best = getBestModelForTask(taskType);
+      if (best) return { config: { active: best, fallbacks: [config.active, ...(config.fallbacks || [])] }, autoRouting: true };
+    }
+    return { config, autoRouting: this.currentConfig.autoRouting };
   }
 
   public removeBotConfig(botId: string) {

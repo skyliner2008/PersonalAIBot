@@ -169,9 +169,10 @@ export class Agent {
     }).catch(e => console.error("Failed to inject embedding provider", e));
 
     setSummarizeProvider(async (prompt: string) => {
-      const p = createAgentRuntimeProvider('gemini');
+      const { config } = configManager.resolveModelConfig(TaskType.SYSTEM, undefined);
+      const p = createAgentRuntimeProvider(config.active.provider);
       if (p) {
-        const res = await p.generateResponse('gemini-2.0-flash-lite', 'สรุปบทสนทนาให้กระชับ ไม่เกิน 3 บรรทัด ภาษาไทย', [{ role: 'user', parts: [{ text: prompt }] }]);
+        const res = await p.generateResponse(config.active.modelName, 'สรุปบทสนทนาให้กระชับ ไม่เกิน 3 บรรทัด ภาษาไทย', [{ role: 'user', parts: [{ text: prompt }] }]);
         return res.text?.trim() || '';
       }
       return '';
@@ -268,9 +269,10 @@ export class Agent {
       if (activeTools.length > 5) {
         try {
           const routerPrompt = `You are a tool selector. User said: "${cleanMessage}". Available tools: ${activeTools.map(t => t.name).join(', ')}. Return ONLY a JSON array of max 5 tool names needed. Return [] if none needed. Do NOT use markdown code blocks, just the JSON array.`;
-          const p = createAgentRuntimeProvider('gemini');
+          const supportConfig = configManager.resolveModelConfig(TaskType.SYSTEM, ctx?.botId).config;
+          const p = createAgentRuntimeProvider(supportConfig.active.provider);
           if (p) {
-            const routerRes = await p.generateResponse('gemini-2.0-flash-lite', 'You are a tool selector.', [{ role: 'user', parts: [{ text: routerPrompt }] }]);
+            const routerRes = await p.generateResponse(supportConfig.active.modelName, 'You are a tool selector.', [{ role: 'user', parts: [{ text: routerPrompt }] }]);
             if (routerRes.text) {
              const match = routerRes.text.match(/\[.*?\]/s);
              if (match) {
@@ -415,18 +417,7 @@ export class Agent {
   }
 
   private resolveModelConfig(botId: string | undefined, taskType: TaskType): { config: MultiModelConfig; autoRouting: boolean } {
-    const globalConfig = configManager.getConfig();
-    if (botId) {
-      const botRouteCfg = configManager.getBotConfig(botId);
-      if (botRouteCfg?.routes[taskType]) return { config: botRouteCfg.routes[taskType], autoRouting: botRouteCfg.autoRouting };
-    }
-    const routes = globalConfig.routes;
-    const config = routes[taskType] ?? routes[TaskType.GENERAL];
-    if (globalConfig.autoRouting) {
-      const best = getBestModelForTask(taskType);
-      if (best) return { config: { active: best, fallbacks: [config.active, ...(config.fallbacks || [])] }, autoRouting: true };
-    }
-    return { config, autoRouting: globalConfig.autoRouting };
+    return configManager.resolveModelConfig(taskType, botId);
   }
 
   private resolveProvider(config: { provider: string; modelName: string }): { provider: AIProvider | null; providerName: string; modelName: string } {
@@ -465,9 +456,11 @@ export class Agent {
       }
     } catch {}
     // Improved default fallback — prefer modern models
+    // Improved default fallback — prefer models from config if possible
+    const routes = configManager.getConfig().routes;
     return [
-      { provider: 'gemini', model: 'gemini-2.5-flash' },
-      { provider: 'gemini', model: 'gemini-2.0-flash' },
+      { provider: routes[TaskType.GENERAL].active.provider, model: routes[TaskType.GENERAL].active.modelName },
+      { provider: 'gemini', model: 'gemini-1.5-flash' },
       { provider: 'minimax', model: 'MiniMax-M2.7' },
     ];
   }
@@ -478,9 +471,10 @@ export class Agent {
 
   private async extractFact(chatId: string, userMsg: string, aiMsg: string) {
     try {
-      const p = createAgentRuntimeProvider('gemini');
+      const { config } = configManager.resolveModelConfig(TaskType.SYSTEM, undefined);
+      const p = createAgentRuntimeProvider(config.active.provider);
       if (p) {
-        const res = await p.generateResponse('gemini-2.0-flash-lite', 'Extract one fact about the user.', [{ role: 'user', parts: [{ text: `U:${userMsg}\nA:${aiMsg}` }] }]);
+        const res = await p.generateResponse(config.active.modelName, 'Extract one fact about the user.', [{ role: 'user', parts: [{ text: `U:${userMsg}\nA:${aiMsg}` }] }]);
         if (res.text && res.text !== 'NONE') await saveArchivalFact(chatId, res.text);
       }
     } catch {}
@@ -488,9 +482,10 @@ export class Agent {
 
   private async extractCoreProfile(chatId: string, userMsg: string, aiMsg: string) {
     try {
-      const p = createAgentRuntimeProvider('gemini');
+      const { config } = configManager.resolveModelConfig(TaskType.SYSTEM, undefined);
+      const p = createAgentRuntimeProvider(config.active.provider);
       if (p) {
-        const res = await p.generateResponse('gemini-2.0-flash-lite', 'Summarize user profile.', [{ role: 'user', parts: [{ text: `U:${userMsg}\nA:${aiMsg}` }] }]);
+        const res = await p.generateResponse(config.active.modelName, 'Summarize user profile.', [{ role: 'user', parts: [{ text: `U:${userMsg}\nA:${aiMsg}` }] }]);
         if (res.text) setCoreMemory(chatId, 'human', res.text);
       }
     } catch {}
