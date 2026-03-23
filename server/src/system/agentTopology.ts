@@ -95,7 +95,10 @@ function cloneAgent(definition: CoreAgentDefinition): CoreAgentDefinition {
   };
 
   if (cloned.id === 'jarvis-root-admin') {
-    cloned.name = getRootAdminIdentity().botName;
+    const adminIdentity = getRootAdminIdentity();
+    if (adminIdentity) {
+      cloned.name = adminIdentity.botName;
+    }
   }
 
   return cloned;
@@ -131,7 +134,7 @@ export function getCoreAgent(agentId: CoreAgentId): CoreAgentDefinition | null {
   }
   
   if (agentId.endsWith('-cli')) {
-    const backends = getAvailableBackends();
+    const backends = getAvailableBackends() ?? [];
     const match = backends.find(b => b.id === agentId);
     if (match) {
       return {

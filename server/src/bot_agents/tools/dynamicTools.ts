@@ -167,9 +167,9 @@ async function loadToolFromFile(filePath: string): Promise<{ tool?: DynamicToolD
  * Scans for .json files only
  */
 export async function loadDynamicTools(): Promise<void> {
-  ensureDynamicToolsDir();
-
   try {
+    ensureDynamicToolsDir();
+
     const files = fs.readdirSync(DYNAMIC_TOOLS_DIR);
     const toolFiles = files.filter((f) => f.endsWith('.json'));
 

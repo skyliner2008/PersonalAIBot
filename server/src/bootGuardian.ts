@@ -83,6 +83,10 @@ export function initBootGuardian() {
           console.error(`[BootGuardian] Backup file not found at ${backupFile}. Cannot rollback!`);
           process.exit(1);
         }
+        if (!latestUpgrade.filePath) {
+          console.error(`[BootGuardian] Target file path not found in upgrade record. Cannot rollback!`);
+          process.exit(1);
+        }
         const originalContent = fs.readFileSync(backupFile, 'utf-8');
         fs.writeFileSync(latestUpgrade.filePath, originalContent, 'utf-8');
         rolledBackCount = 1;
@@ -96,11 +100,14 @@ export function initBootGuardian() {
       const dbPath = process.env.DB_PATH || path.resolve(process.cwd(), '../data/fb-agent.db');
       if (fs.existsSync(dbPath)) {
         const db = new sqlite3(dbPath);
-        db.prepare(`UPDATE upgrade_proposals SET status = 'rejected', description = description || ? WHERE id = ?`)
-          .run(`\n\nAuto-Rollback Triggered: Server crashed during boot with error: ${error.message}`, latestUpgrade.id);
-        // Force WAL checkpoint so the status update persists across rapid restart cycles
-        try { db.pragma('wal_checkpoint(TRUNCATE)'); } catch { /* best effort */ }
-        db.close();
+        try {
+          db.prepare(`UPDATE upgrade_proposals SET status = 'rejected', description = description || ? WHERE id = ?`)
+            .run(`\n\nAuto-Rollback Triggered: Server crashed during boot with error: ${error.message}`, latestUpgrade.id);
+          // Force WAL checkpoint so the status update persists across rapid restart cycles
+          try { db.pragma('wal_checkpoint(TRUNCATE)'); } catch { /* best effort */ }
+        } finally {
+          db.close();
+        }
         console.error(`[BootGuardian] ✔️ Database status updated to Rejected.`);
       }
 

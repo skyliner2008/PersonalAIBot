@@ -28,6 +28,7 @@ function ensureBackupDir(): void {
  * Create a full SQLite database backup
  */
 export function createBackup(label?: string): { filename: string; path: string; sizeKB: number } {
+  // test match
   ensureBackupDir();
 
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').substring(0, 19);
@@ -127,6 +128,7 @@ export function exportConversation(chatId: string): {
  * List available backups
  */
 export function listBackups(): Array<{
+  // test
   filename: string;
   sizeKB: number;
   createdAt: string;

@@ -393,7 +393,22 @@ export class Agent {
     } catch (error: any) {
       console.error('[Agent Error]:', error);
       finishRun(agentRun, stats, undefined, error.message);
-      return `❌ Error: ${error.message}`;
+
+      // Friendly error messages for common issues
+      const msg = error.message || String(error);
+      const status = error.status || error.code;
+
+      if (status === 401 || /unauthorized|user not found|invalid.*key|authentication/i.test(msg)) {
+        return '❌ API Key ไม่ถูกต้อง หรือหมดอายุ — กรุณาตรวจสอบ API Key ในหน้า Settings ของ Dashboard';
+      }
+      if (status === 429 || /rate.?limit|quota|too many/i.test(msg)) {
+        return '⏳ API ถูกจำกัดการใช้งาน (Rate Limit) — กรุณารอสักครู่แล้วลองใหม่';
+      }
+      if (/no.*provider|no.*key|all models failed/i.test(msg)) {
+        return '⚙️ ยังไม่ได้ตั้งค่า AI Provider — กรุณาเพิ่ม API Key ในหน้า Settings ของ Dashboard';
+      }
+
+      return `❌ Error: ${msg}`;
     } finally {
       clearTimeout(timeoutId);
     }

@@ -104,13 +104,18 @@ adminRoutes.get('/health/detailed', (_req, res) => {
 });
 
 adminRoutes.post('/maintenance/cleanup-logs', (_req, res) => {
-  const cutoffDays = 30;
-  const result = getDb()
-    .prepare(`DELETE FROM activity_logs WHERE created_at < datetime('now', '-' || ? || ' days')`)
-    .run(cutoffDays);
-  const cleaned = (result as any).changes || 0;
-  addLog('system', 'Log cleanup', `Removed ${cleaned} logs older than ${cutoffDays} days`, 'info');
-  res.json({ success: true, cleaned });
+  try {
+    const cutoffDays = 30;
+    const result = getDb()
+      .prepare(`DELETE FROM activity_logs WHERE created_at < datetime('now', '-' || ? || ' days')`)
+      .run(cutoffDays);
+    const cleaned = (result as any).changes || 0;
+    addLog('system', 'Log cleanup', `Removed ${cleaned} logs older than ${cutoffDays} days`, 'info');
+    res.json({ success: true, cleaned });
+  } catch (error) {
+    addLog('system', 'Log cleanup failed', `Error: ${(error as Error).message}`, 'error');
+    res.status(500).json({ success: false, error: 'Failed to cleanup logs' });
+  }
 });
 
 adminRoutes.post('/maintenance/cleanup-episodes', (_req, res) => {

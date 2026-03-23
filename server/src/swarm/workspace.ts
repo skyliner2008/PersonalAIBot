@@ -96,6 +96,12 @@ export class ProjectWorkspace {
 
     this.isRunning = false;
     this.logger.info(`[Workspace ${this.state.id}] Loop ended. Final status: ${this.state.status}`);
+
+    // Remove workspace from active map once it reaches a final state
+    if (this.state.status === 'completed' || this.state.status === 'failed') {
+      activeWorkspaces.delete(this.state.id);
+      this.logger.info(`[Workspace ${this.state.id}] Removed from active workspaces due to final status: ${this.state.status}`);
+    }
   }
 
   private async doPlanningTurn(): Promise<void> {

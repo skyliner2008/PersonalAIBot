@@ -60,11 +60,17 @@ fbRouter.get('/webhook', (req, res) => {
 function verifyFacebookSignature(req: any): boolean {
   const cfg = getFBConfig();
   const xHubSignature = req.get('x-hub-signature');
-  const rawBody = req.rawBody || JSON.stringify(req.body);
+  const rawBody = req.rawBody;
 
   if (!xHubSignature) {
     console.warn('[Webhook] Missing x-hub-signature header');
     addLog('webhook', 'Unverified webhook', 'Missing signature header', 'warning');
+    return false;
+  }
+
+  if (!rawBody) {
+    console.warn('[Webhook] Missing rawBody for signature verification');
+    addLog('webhook', 'Unverified webhook', 'Missing raw body', 'warning');
     return false;
   }
 
@@ -148,6 +154,9 @@ fbRouter.get('/status', (req, res) => {
 });
 
 fbRouter.post('/config', (req, res) => {
+  if (!req.body) {
+    return res.status(400).json({ error: 'Request body is missing' });
+  }
   const { appId, appSecret, pageAccessToken, pageId, verifyToken, apiVersion } = req.body;
   if (appId !== undefined) setManagedSetting('fb_app_id', appId);
   if (appSecret !== undefined) setManagedSetting('fb_app_secret', appSecret);

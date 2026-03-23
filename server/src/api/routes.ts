@@ -174,7 +174,7 @@ router.post('/ai/generate-post', validateBody(generatePostSchema), asyncHandler(
   res.json({ content: result.text, usage: result.usage });
 }));
 
-// ============ Personas ============
+// ============ Personas (Async) ============
 router.get('/personas', (req, res) => {
   res.json(getAllPersonas());
 });
@@ -626,7 +626,12 @@ router.post('/files/upload', upload.single('file'), asyncHandler(async (req, res
   const ext = getFileExtension(file.originalname);
   const newPath = file.path + ext;
 
-  fs.renameSync(file.path, newPath);
+  try {
+    fs.renameSync(file.path, newPath);
+  } catch (err: any) {
+    fs.unlink(file.path, () => {}); // Clean up the partially uploaded file
+    return res.status(500).json({ error: `Failed to rename uploaded file: ${err.message}` });
+  }
 
   const processed = await processFile(newPath);
   const geminiPart = fileToGeminiPart(processed);
@@ -654,7 +659,7 @@ router.post('/files/upload-multi', upload.array('files', 10), asyncHandler(async
     return res.status(400).json({ error: 'No files provided' });
   }
 
-  const fs = await import('fs');
+
   const results = [];
 
   for (const file of files) {

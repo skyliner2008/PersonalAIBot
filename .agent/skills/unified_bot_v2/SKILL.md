@@ -911,3 +911,17 @@ Outcome:
 
 Outcome:
 - The Self-Upgrade system is now fully resilient against server restarts and provides improved manual control and visibility through the Dashboard UI.
+### 18.10 Modular Installation & Fresh Start Resilience (2026-03-23)
+
+- **Modular Installer** (`install.bat` & `install.sh` [NEW]):
+  - Added support for Unix-based systems (Linux/macOS) with a dedicated shell script.
+  - Refactored the Windows installer for a cleaner, more modular experience during setup.
+- **Server Entry Point Refactor** (`server/src/index.ts`):
+  - Streamlined the `main()` function to better manage swarm coordinator, idle loops, and agent initialization.
+  - Improved signal handling for robust process termination across different environments.
+- **Fresh Start Optimization** (`embeddingProvider.ts` & `subconscious.ts`):
+  - Implemented **Graceful Fallbacks** for `EmbeddingProvider`; if API keys are missing on first boot, the system now skips embedding tasks instead of crashing.
+  - Resolved TypeScript build errors in `subconscious.ts`, `botsRouter.ts`, and `goalRoutes.ts` to ensure 100% build stability.
+
+Outcome:
+- The system is now easier to deploy across diverse OS environments and is significantly more stable during the initial configuration phase.

@@ -46,10 +46,17 @@ export class RestApiProvider implements AIProvider {
       ...options
     };
 
+    let serializedBody: string;
+    try {
+      serializedBody = JSON.stringify(bodyPayload);
+    } catch (e) {
+      throw new Error(`Failed to serialize request body to JSON: ${e instanceof Error ? e.message : String(e)}`);
+    }
+
     const res = await fetch(endpoint, {
       method: 'POST',
       headers,
-      body: JSON.stringify(bodyPayload)
+      body: serializedBody
     });
 
     if (!res.ok) {

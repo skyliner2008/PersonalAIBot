@@ -9,6 +9,8 @@ import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('Summarizer');
 
+const activeSummarizations = new Map<string, Promise<void>>();
+
 // Threshold: summarize when new messages exceed this count since last summary
 export const SUMMARY_THRESHOLD = 20;
 

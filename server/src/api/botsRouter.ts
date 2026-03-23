@@ -152,10 +152,16 @@ router.get('/', (req, res) => {
 });
 
 const platforms: BotPlatform[] = ['telegram', 'line', 'facebook', 'discord', 'custom'];
-const platformCredentialFields = platforms.map(p => ({
-  platform: p,
-  credentialFields: getPlatformCredentialFields(p),
-}));
+let platformCredentialFields: { platform: BotPlatform; credentialFields: { key: string; label: string; secret: boolean }[] }[] = [];
+
+try {
+  platformCredentialFields = platforms.map(p => ({
+    platform: p,
+    credentialFields: getPlatformCredentialFields(p),
+  }));
+} catch (error) {
+  console.error('[BotsRouter] Failed to initialize platform credential fields:', error);
+}
 
 /**
  * GET /api/bots/platforms
@@ -210,16 +216,13 @@ router.put('/:id', (req, res) => {
     const updates = req.body;
 
     if (updates.credentials && typeof updates.credentials === 'object' && !Array.isArray(updates.credentials)) {
-      const existingBot = getBot(req.params.id);
-      if (existingBot) {
-        const mergedCredentials = { ...existingBot.credentials };
-        for (const [key, val] of Object.entries(updates.credentials)) {
-          if (val && val !== '********') {
-            mergedCredentials[key] = val as string;
-          }
+      const newPartialCredentials: Record<string, string> = {};
+      for (const [key, val] of Object.entries(updates.credentials)) {
+        if (val && val !== '********') {
+          newPartialCredentials[key] = val as string;
         }
-        updates.credentials = mergedCredentials;
       }
+      updates.credentials = newPartialCredentials;
     }
 
     const bot = updateBot(req.params.id, updates);
@@ -323,7 +326,7 @@ router.get('/:id/models', (req, res) => {
       let entry: { active: ModelConfig; fallbacks?: ModelConfig[]; source: string };
       if (modelOverrides[tt]?.active) {
         entry = { ...modelOverrides[tt], source: 'bot-override' };
-      } else if (globalConfig.routes[tt]) {
+      } else if (globalConfig.routes && globalConfig.routes[tt]) {
         entry = { ...globalConfig.routes[tt], source: 'global' };
       } else {
         continue;

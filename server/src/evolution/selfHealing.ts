@@ -68,6 +68,9 @@ export function detectIssues(): Issue[] {
         taskPerf[tt].push(run.durationMs!);
     }
     for (const [tt, durations] of Object.entries(taskPerf)) {
+        if (durations.length === 0) {
+            continue; // Skip calculation if no durations to avoid NaN
+        }
         const avg = durations.reduce((s, d) => s + d, 0) / durations.length;
         if (avg > 20000 && durations.length >= 3) {
             issues.push({

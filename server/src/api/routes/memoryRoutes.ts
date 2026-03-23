@@ -249,8 +249,9 @@ memoryRoutes.delete('/memory/:chatId', asyncHandler(async (req, res) => {
     const { getVectorStore } = await import('../../memory/vectorStore.js');
     const vs = await getVectorStore();
     await vs.deleteByFilter({ chatId });
-  } catch {
-    // Vector store may not be ready.
+  } catch (err: any) {
+    console.error(`Failed to delete vector store entries for chatId ${chatId}:`, err);
+    addLog('system', 'Vector Store Deletion Failed', `Chat ID: ${chatId}, Error: ${err.message}`, 'error');
   }
 
   addLog('system', 'Memory cleared', chatId, 'info');

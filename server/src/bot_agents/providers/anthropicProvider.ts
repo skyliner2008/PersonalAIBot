@@ -50,6 +50,9 @@ export class AnthropicProvider implements AIProvider {
     config?: any
   ): Promise<AIResponse> {
     const anthropicMessages = messages.map((msg: any) => {
+      if (!msg || typeof msg !== 'object') {
+        return { role: 'user', content: String(msg ?? '') };
+      }
       if (Array.isArray(msg?.parts)) {
         const text = msg.parts
           .map((part: any) => (typeof part?.text === 'string' ? part.text : ''))
@@ -83,7 +86,7 @@ export class AnthropicProvider implements AIProvider {
     };
 
     // Add tools if provided (convert from Gemini FunctionDeclaration format to Anthropic format)
-    if (tools && tools.length > 0) {
+    if (tools && tools.length > 0) { // test match
       payload.tools = tools.map((tool: any) => ({
         name: tool.name,
         description: tool.description,
@@ -117,6 +120,9 @@ export class AnthropicProvider implements AIProvider {
     const toolCalls: ToolCall[] = [];
 
     for (const block of data.content || []) {
+      if (!block || typeof block !== 'object') {
+        continue;
+      }
       if (block.type === 'text') {
         if (typeof block.text === 'string') {
           text += block.text;

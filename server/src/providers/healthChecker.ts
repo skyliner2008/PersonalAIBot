@@ -114,7 +114,11 @@ export async function checkProviderHealth(provider: ProviderDefinition): Promise
     healthMap.set(provider.id, health);
 
     // Broadcast healthy event
-    broadcast('provider:health', { providerId: provider.id, status: health.status, responseTimeMs });
+    try {
+      broadcast('provider:health', { providerId: provider.id, status: health.status, responseTimeMs });
+    } catch (broadcastErr) {
+      log.error('Failed to broadcast health event after success', { providerId: provider.id, error: String(broadcastErr) });
+    }
 
     return health;
   } catch (err: any) {
@@ -141,11 +145,23 @@ export async function checkProviderHealth(provider: ProviderDefinition): Promise
       } catch (toggleErr) {
         log.error('Failed to toggle provider status', { providerId: provider.id, error: String(toggleErr) });
       }
-      addLog('system', 'Provider auto-disabled', `${provider.name}: ${failures} consecutive failures — ${err.message}`, 'warning');
-      broadcast('provider:disabled', { providerId: provider.id, reason: err.message, failures });
+      try {
+        addLog('system', 'Provider auto-disabled', `${provider.name}: ${failures} consecutive failures — ${err.message}`, 'warning');
+      } catch (logErr) {
+        log.error('Failed to add system log for auto-disable', { providerId: provider.id, error: String(logErr) });
+      }
+      try {
+        broadcast('provider:disabled', { providerId: provider.id, reason: err.message, failures });
+      } catch (broadcastErr) {
+        log.error('Failed to broadcast provider disabled event', { providerId: provider.id, error: String(broadcastErr) });
+      }
     }
 
-    broadcast('provider:health', { providerId: provider.id, status: health.status, error: err.message });
+    try {
+      broadcast('provider:health', { providerId: provider.id, status: health.status, error: err.message });
+    } catch (broadcastErr) {
+      log.error('Failed to broadcast health event after failure', { providerId: provider.id, error: String(broadcastErr) });
+    }
 
     return health;
   }

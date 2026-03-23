@@ -52,7 +52,7 @@ export async function withRetry<T>(
     context = 'Provider',
   } = opts;
 
-  let lastError: unknown;
+  let lastError: unknown = new Error(`withRetry: Operation was not attempted because maxRetries (${maxRetries}) was 0 or negative.`);
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {

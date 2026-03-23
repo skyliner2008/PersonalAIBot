@@ -21,7 +21,13 @@ const rl = readline.createInterface({
 
 async function main() {
     logger.info('🤖 Initializing CLI Bot...');
-    await initDb();
+    try {
+        await initDb();
+    } catch (err: any) {
+        logger.error(`❌ Failed to initialize database: ${err.message}`);
+        rl.close();
+        process.exit(1);
+    }
 
     // Use telegram bot's persona for CLI testing
     const botId = 'env-telegram';
@@ -72,7 +78,7 @@ async function main() {
 
             // Call internal agent logic
             logger.info('⏳ Thinking...');
-            upsertConversation(chatId, 'local', 'CLI User');
+            await upsertConversation(chatId, 'local', 'CLI User');
             const response = await aiAgent.processMessage(chatId, input, ctx);
 
             console.log(`\n🤖 Bot:\n${response}`);

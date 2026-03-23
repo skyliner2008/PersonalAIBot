@@ -107,15 +107,18 @@ export function getGoalById(goalId: string): Goal | null {
   return row ? rowToGoal(row) : null;
 }
 
-export function updateGoalProgress(goalId: string, progress: number, status?: Goal['status']): Goal | null {
+export function updateGoalProgress(goalId: string, progress?: number, status?: Goal['status']): Goal | null {
   const db = getDb();
   const now = new Date().toISOString();
   const completedAt = status === 'completed' ? now : null;
 
-  if (status) {
+  if (status !== undefined && progress !== undefined) {
     db.prepare(`UPDATE goals SET progress = ?, status = ?, updated_at = ?, completed_at = COALESCE(?, completed_at) WHERE id = ?`)
       .run(progress, status, now, completedAt, goalId);
-  } else {
+  } else if (status !== undefined) {
+    db.prepare(`UPDATE goals SET status = ?, updated_at = ?, completed_at = COALESCE(?, completed_at) WHERE id = ?`)
+      .run(status, now, completedAt, goalId);
+  } else if (progress !== undefined) {
     db.prepare(`UPDATE goals SET progress = ?, updated_at = ? WHERE id = ?`)
       .run(progress, now, goalId);
   }
@@ -124,17 +127,17 @@ export function updateGoalProgress(goalId: string, progress: number, status?: Go
 }
 
 export function updateSubGoal(goalId: string, subGoalId: string, updates: Partial<SubGoal>): Goal | null {
-  const goal = getGoalById(goalId); // TEST MATCH
+  const goal = getGoalById(goalId);
   if (!goal) return null;
 
-  const subGoals = goal.subGoals.map(sg => {
+  const subGoals = goal.subGoals.map((sg: SubGoal) => {
     if (sg.id === subGoalId) return { ...sg, ...updates };
     return sg;
   });
 
   // Recalculate progress from sub-goals
-  const completedCount = subGoals.filter(sg => sg.status === 'completed').length;
-  const totalCount = subGoals.filter(sg => sg.status !== 'skipped').length;
+  const completedCount = subGoals.filter((sg: SubGoal) => sg.status === 'completed').length;
+  const totalCount = subGoals.filter((sg: SubGoal) => sg.status !== 'skipped').length;
   const progress = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
   const allDone = totalCount > 0 && completedCount === totalCount;
 

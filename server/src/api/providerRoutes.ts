@@ -471,8 +471,8 @@ router.post('/oauth/register', async (req: Request, res: Response) => {
       name: cred.name,
       category: cred.category,
       type: cred.providerType,
-      baseUrl: cred.baseUrl,
-      defaultModel: cred.defaultModel,
+      baseUrl: cred.baseUrl || '',
+      defaultModel: cred.defaultModel || '',
       models: cred.models || [],
       capabilities: {
         chat: cred.category === 'llm',

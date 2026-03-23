@@ -1,5 +1,5 @@
 import cron from 'node-cron';
-import { addLog, dbAll, dbRun, cleanupOldLogs, cleanupOldProcessedMessages } from '../database/db.js';
+import { addLog, dbAll, dbRun, cleanupOldLogs, cleanupOldProcessedMessages, getDb } from '../database/db.js';
 import { processPendingPosts } from '../automation/postManager.js';
 import type { Server as SocketServer } from 'socket.io';
 import { createLogger } from '../utils/logger.js';

@@ -159,7 +159,13 @@ export const SPECIALISTS: Specialist[] = [
 ];
 
 function resolveSpecialistsRuntime(): Specialist[] {
-  const rootAdminSpecialist = getRootAdminSpecialistName();
+  let rootAdminSpecialist: string;
+  try {
+    rootAdminSpecialist = getRootAdminSpecialistName();
+  } catch (error) {
+    console.error("Failed to retrieve root admin specialist name, falling back to default. Error:", error);
+    rootAdminSpecialist = 'jarvis-root-admin'; // Fallback to the original name to avoid further issues
+  }
   return SPECIALISTS.map((specialist) => {
     if (!specialist.tags?.includes(ROOT_ADMIN_RUNTIME_TAG)) return specialist;
     return {

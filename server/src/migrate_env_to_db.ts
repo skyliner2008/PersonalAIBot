@@ -25,7 +25,7 @@ async function migrate() {
     const value = process.env[key];
     if (value) {
       console.log(`📦 Migrating ${key}...`);
-      setCredential(key, value);
+      await setCredential(key, value);
       count++;
     } else {
       console.log(`⏭️  ${key} not found in .env, skipping.`);

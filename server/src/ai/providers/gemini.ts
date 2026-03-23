@@ -79,7 +79,12 @@ export class GeminiProvider implements AIProvider {
       throw new Error(`Gemini error: ${lastError}`);
     }
 
-    const data = await res.json();
+    let data: any;
+    try {
+      data = await res.json();
+    } catch (e) {
+      throw new Error(`Gemini API returned malformed JSON: ${String(e)}`);
+    }
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
     const usage = data.usageMetadata ? {
       promptTokens: data.usageMetadata.promptTokenCount || 0,

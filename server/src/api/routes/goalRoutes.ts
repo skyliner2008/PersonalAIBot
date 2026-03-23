@@ -65,7 +65,9 @@ router.post('/goals', requireAuth, asyncHandler(async (req, res) => {
 router.patch('/goals/:id/progress', requireAuth, asyncHandler(async (req, res) => {
   const goalId = String(req.params.id);
   const { progress, status } = req.body;
-  const goal = updateGoalProgress(goalId, progress, status);
+  const parsedProgress = (progress !== undefined && !isNaN(Number(progress))) ? Number(progress) : undefined;
+  const parsedStatus = status !== undefined ? status as any : undefined;
+  const goal = updateGoalProgress(goalId, parsedProgress, parsedStatus);
   if (!goal) return handleGoalNotFound(res);
   res.json({ success: true, goal });
 }));
@@ -86,7 +88,8 @@ router.post('/goals/:id/subgoals', requireAuth, asyncHandler(async (req, res) =>
   const goalId = String(req.params.id);
   const { title, order } = req.body;
   if (!title) return res.status(400).json({ success: false, error: 'title is required' });
-  const goal = addSubGoal(goalId, title, order);
+  const parsedOrder = (order !== undefined && !isNaN(Number(order))) ? Number(order) : undefined;
+  const goal = addSubGoal(goalId, title, parsedOrder);
   if (!goal) return handleGoalNotFound(res);
   res.json({ success: true, goal });
 }));

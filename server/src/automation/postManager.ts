@@ -159,7 +159,11 @@ export async function processPendingPosts(io: SocketServer): Promise<void> {
           dbRun('UPDATE scheduled_posts SET status = ? WHERE id = ?', [POST_STATUS_POSTING, post.id]);
           io.emit('post:status', { id: post.id, status: POST_STATUS_POSTING, attempt: attempts + 1 });
 
-          const success = await createPost(post.content, post.target || 'profile', post.target_id);
+          const success = await createPost(
+            post.content,
+            post.target || 'profile',
+            post.target_id === null ? undefined : post.target_id
+          );
           if (!success) throw new Error('Facebook API returned failure');
 
           dbRun('UPDATE scheduled_posts SET status = ? WHERE id = ?', [POST_STATUS_POSTED, post.id]);

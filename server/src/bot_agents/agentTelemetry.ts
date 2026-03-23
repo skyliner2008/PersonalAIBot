@@ -113,7 +113,7 @@ export function startRun(chatId: string, message: string, taskType: string): Age
   const run: AgentRun = {
     id: `run_${++_runCounter}_${Date.now()}`,
     chatId,
-    message: message.substring(0, 200),
+    message: (message ?? '').substring(0, 200),
     startTime: Date.now(),
     turns: 0,
     toolCalls: [],

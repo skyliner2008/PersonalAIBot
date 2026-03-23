@@ -77,14 +77,18 @@ export class MiniMaxProvider implements AIProvider {
       return { text: fullText, usage: undefined };
     }
 
-    const data = await res.json();
-    const text = data.choices?.[0]?.message?.content?.trim() || '';
-    const usage = data.usage ? {
-      promptTokens: data.usage.prompt_tokens || 0,
-      completionTokens: data.usage.completion_tokens || 0,
-      totalTokens: data.usage.total_tokens || 0,
-    } : undefined;
-    return { text, usage };
+    try {
+      const data = await res.json();
+      const text = data.choices?.[0]?.message?.content?.trim() || '';
+      const usage = data.usage ? {
+        promptTokens: data.usage.prompt_tokens || 0,
+        completionTokens: data.usage.completion_tokens || 0,
+        totalTokens: data.usage.total_tokens || 0,
+      } : undefined;
+      return { text, usage };
+    } catch (e) {
+      throw new Error(`MiniMax API returned invalid JSON for successful response: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 
   async testConnection(): Promise<boolean> {

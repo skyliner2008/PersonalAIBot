@@ -280,40 +280,52 @@ export async function executeViaSwarmPersistentLane(
       .then(() => {
         return new Promise<void>((qResolve) => {
           const cmdPrompt = buildSwarmLanePrompt(prompt, marker);
+          let checkIntervalId: NodeJS.Timeout | null = null;
+          let innerTimeoutId: NodeJS.Timeout | null = null;
+
+          // Function to clean up inner timers and resolve the queue step
+          const finishInnerExecution = () => {
+            if (checkIntervalId) clearInterval(checkIntervalId);
+            if (innerTimeoutId) clearTimeout(innerTimeoutId);
+            qResolve(); // Always resolve inner promise to unblock queue
+          };
 
           try {
             if (lane.process && lane.process.process.stdin && !lane.process.process.stdin.destroyed) {
               lane.process.write(cmdPrompt + '\n');
 
               // Check output periodically
-              const checkInterval = setInterval(() => {
-                checkOutput();
+              checkIntervalId = setInterval(() => {
+                checkOutput(); // This will eventually set foundMarker and resolve outer promise.
                 if (foundMarker) {
-                  clearInterval(checkInterval);
-                  qResolve();
+                  finishInnerExecution(); // Clear inner timers, resolve inner promise
                 }
               }, 100);
 
               // Resolve after timeout or marker found
-              setTimeout(() => {
-                clearInterval(checkInterval);
-                if (foundMarker) {
-                  qResolve();
-                } else {
-                  reject(new Error(`No marker found after ${timeoutMs}ms`));
+              innerTimeoutId = setTimeout(() => {
+                if (!foundMarker) { // If outer promise wasn't resolved yet
+                  cleanup(); // Ensure outer timer is cleared
+                  reject(new Error(`No marker found after ${timeoutMs}ms`)); // Reject outer promise
                 }
+                finishInnerExecution(); // Clear inner timers, resolve inner promise
               }, timeoutMs);
             } else {
-              reject(new Error('Lane process stdin not available'));
-              qResolve();
+              cleanup(); // Ensure outer timer is cleared
+              reject(new Error('Lane process stdin not available')); // Reject outer promise
+              finishInnerExecution(); // Clear inner timers, resolve inner promise
             }
           } catch (err) {
-            reject(err);
-            qResolve();
+            cleanup(); // Ensure outer timer is cleared
+            reject(err); // Reject outer promise
+            finishInnerExecution(); // Clear inner timers, resolve inner promise
           }
         });
       })
-      .catch(reject);
+      .catch((err) => {
+        cleanup(); // Ensure outer timer is cleared if an error propagates through the queue
+        reject(err);
+      });
   });
 }
 

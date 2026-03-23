@@ -23,7 +23,7 @@ router.post('/', async (req, res) => {
   }
 
   const id = uuidv4();
-  const activeInt = is_active !== false ? 1 : 0;
+  const activeInt = is_active ? 1 : 0;
 
   try {
     await dbRun(`

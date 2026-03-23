@@ -179,6 +179,7 @@ export class PersistentQueue<T = any> {
     if (this.activeCount >= this.concurrency) return;
 
     const slotsAvailable = this.concurrency - this.activeCount;
+    // Test replacement
 
     const items = dbAll<PersistentQueueItem>(
       `SELECT * FROM persistent_queue

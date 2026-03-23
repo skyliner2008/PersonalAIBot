@@ -236,7 +236,7 @@ export class CollaborationProtocol extends EventEmitter {
       sessionId,
       proposalId,
       agentId,
-      action: action.substring(0, 50),
+      action: String(action).substring(0, 50),
     });
 
     return proposalId;
@@ -397,14 +397,14 @@ export class CollaborationProtocol extends EventEmitter {
       sessionId,
       fromAgent,
       toAgent,
-      contextKeys: Object.keys(context),
+      contextKeys: Object.keys(context || {}),
     });
 
     log.info('Task handoff executed', {
       sessionId,
       from: fromAgent,
       to: toAgent,
-      contextSize: Object.keys(context).length,
+      contextSize: Object.keys(context || {}).length,
     });
 
     return true;

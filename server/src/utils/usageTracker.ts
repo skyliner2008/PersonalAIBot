@@ -77,7 +77,7 @@ function estimateCost(model: string, promptTokens: number, completionTokens: num
   return (promptTokens * pricing.input + completionTokens * pricing.output) / 1_000_000;
 }
 
-// ============ DB Schema (ensure table exists) ============
+// ============ DB Schema (ensure table exists) ============ (test)
 
 export function ensureUsageTable(): void {
   // test

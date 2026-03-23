@@ -3,7 +3,6 @@
 // ============================================================
 // Safety: ทุก operation มี guardrails — backup ก่อนแก้, จำกัด scope,
 // ห้ามแก้ core files, ทุกการเปลี่ยน log ลง evolution_log
-
 import * as fs from 'fs';
 import * as path from 'path';
 import { Type } from '@google/genai';
@@ -12,20 +11,16 @@ import { logEvolution, getEvolutionLog, getLearnings, addLearning, type Learning
 import { shouldReflect, triggerReflection } from '../../evolution/selfReflection.js';
 import { runHealthCheck } from '../../evolution/selfHealing.js';
 import { createLogger } from '../../utils/logger.js';
-
 const log = createLogger('EvolutionTools');
-
 // ── Safety Constants ──
 const PROJECT_ROOT = path.resolve(process.cwd());
 const PERSONAS_DIR = path.join(PROJECT_ROOT, 'personas');
 const EVOLUTION_DIR = path.join(PROJECT_ROOT, 'evolution_data');
-
 // Files that CANNOT be modified (core system files)
 const PROTECTED_FILES = new Set([
     'agent.ts', 'index.ts', 'db.ts', 'schema.sql',
     'botManager.ts', 'queue.ts', 'unifiedMemory.ts',
 ]);
-
 /**
  * Ensure evolution_data directory exists
  */
@@ -34,7 +29,6 @@ function ensureEvolutionDir(): void {
         fs.mkdirSync(EVOLUTION_DIR, { recursive: true });
     }
 }
-
 /**
  * Create a backup of a file before modifying it
  */
@@ -45,7 +39,6 @@ function backupFile(filePath: string): string {
     }
     return backupPath;
 }
-
 /**
  * Validate that a path is within allowed scope
  */
@@ -58,11 +51,9 @@ function isPathAllowed(filePath: string, scope: 'personas' | 'source' | 'evoluti
         default: return false;
     }
 }
-
 // ============================================================
 // Tool 1: self_read_source — อ่าน source code ของตัวเอง
 // ============================================================
-
 export const selfReadSourceDeclaration: FunctionDeclaration = {
     name: 'self_read_source',
     description: 'อ่าน source code ของตัวเอง เพื่อเข้าใจการทำงานและหาจุดปรับปรุง (read-only, จำกัดเฉพาะ server/src/)',
@@ -77,7 +68,6 @@ export const selfReadSourceDeclaration: FunctionDeclaration = {
         required: ['file_path'],
     },
 };
-
 export async function selfReadSource({ file_path }: { file_path: string }): Promise<string> {
     try {
         const fullPath = path.resolve(PROJECT_ROOT, file_path);
@@ -92,11 +82,9 @@ export async function selfReadSource({ file_path }: { file_path: string }): Prom
         return `❌ อ่านไฟล์ไม่ได้: ${err.message}`;
     }
 }
-
 // ============================================================
 // Tool 2: self_edit_persona — แก้ไข persona files
 // ============================================================
-
 export const selfEditPersonaDeclaration: FunctionDeclaration = {
     name: 'self_edit_persona',
     description: 'แก้ไข persona ของตัวเอง (AGENTS.md, IDENTITY.md, SOUL.md, TOOLS.md) เพื่อปรับปรุงพฤติกรรมและการตอบ (auto-backup ก่อนแก้)',
@@ -123,7 +111,6 @@ export const selfEditPersonaDeclaration: FunctionDeclaration = {
         required: ['platform', 'file_name', 'new_content', 'reason'],
     },
 };
-
 export async function selfEditPersona(
     { platform, file_name, new_content, reason }: { platform: string; file_name: string; new_content: string; reason: string }
 ): Promise<string> {
@@ -131,36 +118,29 @@ export async function selfEditPersona(
     if (!allowedFiles.includes(file_name)) {
         return `🚫 ไม่อนุญาต: ไฟล์ที่แก้ได้มีแค่ ${allowedFiles.join(', ')}`;
     }
-
     const filePath = path.join(PERSONAS_DIR, platform, file_name);
     if (!isPathAllowed(filePath, 'personas')) {
         return '🚫 ไม่อนุญาต: path อยู่นอก personas directory';
     }
-
     try {
         const backupPath = backupFile(filePath);
         const dir = path.dirname(filePath);
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-
         fs.writeFileSync(filePath, new_content, 'utf8');
-
         logEvolution('self_edit', `Edited persona: ${platform}/${file_name} — ${reason}`, {
             platform, file_name, reason,
             backup: backupPath,
             newContentLength: new_content.length,
         });
-
         log.info('Persona edited', { platform, file_name, reason });
         return `✅ แก้ไข ${platform}/${file_name} สำเร็จ!\nBackup: ${backupPath}\nReason: ${reason}`;
     } catch (err: any) {
         return `❌ แก้ไขไม่ได้: ${err.message}`;
     }
 }
-
 // ============================================================
 // Tool 3: self_add_learning — บันทึกสิ่งที่เรียนรู้
 // ============================================================
-
 export const selfAddLearningDeclaration: FunctionDeclaration = {
     name: 'self_add_learning',
     description: 'บันทึกสิ่งที่เรียนรู้จากการทำงาน เช่น error solution, user pattern, prompt improvement — จะถูกนำไปใช้ปรับปรุงการตอบในอนาคต',
@@ -179,7 +159,6 @@ export const selfAddLearningDeclaration: FunctionDeclaration = {
         required: ['category', 'insight'],
     },
 };
-
 export async function selfAddLearning(
     { category, insight }: { category: string; insight: string }
 ): Promise<string> {
@@ -194,11 +173,9 @@ export async function selfAddLearning(
         return `❌ Error: ${err.message}`;
     }
 }
-
 // ============================================================
 // Tool 4: self_view_evolution — ดู history การ evolve ตัวเอง
 // ============================================================
-
 export const selfViewEvolutionDeclaration: FunctionDeclaration = {
     name: 'self_view_evolution',
     description: 'ดู history การ evolve ตัวเอง: การแก้ไข, การเรียนรู้, การซ่อมตัวเอง ทั้งหมด',
@@ -216,13 +193,11 @@ export const selfViewEvolutionDeclaration: FunctionDeclaration = {
         },
     },
 };
-
 export async function selfViewEvolution(
     { view_type, limit }: { view_type?: string; limit?: number }
 ): Promise<string> {
     try {
         const n = limit || 10;
-
         switch (view_type) {
             case 'learnings': {
                 const learnings = getLearnings(undefined, n);
@@ -247,22 +222,18 @@ export async function selfViewEvolution(
         return `❌ Error: ${err.message}`;
     }
 }
-
 // ============================================================
 // Tool 5: self_reflect — บังคับทำ self-reflection ตอนนี้
 // ============================================================
-
 export const selfReflectDeclaration: FunctionDeclaration = {
     name: 'self_reflect',
     description: 'วิเคราะห์ตัวเอง: error patterns, performance, tool usage แล้วสร้าง insights เพื่อปรับปรุง',
     parameters: { type: Type.OBJECT, properties: {} },
 };
-
 export async function selfReflect(): Promise<string> {
     try {
         const report = await triggerReflection();
         if (!report) return '📊 ข้อมูลไม่เพียงพอสำหรับการวิเคราะห์ (ต้องมี >= 5 runs)';
-
         let output = `🧠 Self-Reflection Report:\n\n`;
         output += `📋 Findings (${report.findings.length}):\n`;
         output += report.findings.map(f => `  ${f}`).join('\n');
@@ -274,24 +245,20 @@ export async function selfReflect(): Promise<string> {
         return `❌ Error: ${err.message}`;
     }
 }
-
 // ============================================================
 // Tool 6: self_heal — บังคับทำ health check + auto-fix
 // ============================================================
-
 export const selfHealDeclaration: FunctionDeclaration = {
     name: 'self_heal',
     description: 'ตรวจสอบสุขภาพระบบและซ่อมแซมปัญหาที่พบอัตโนมัติ: auto-switch model, clear stuck queues',
     parameters: { type: Type.OBJECT, properties: {} },
 };
-
 export async function selfHeal(): Promise<string> {
     try {
         const result = runHealthCheck();
         if (result.issues.length === 0) {
             return '✅ ระบบสุขภาพดี — ไม่พบปัญหาที่ต้องแก้ไข';
         }
-
         let output = `🔧 Self-Healing Report:\n`;
         output += `Issues: ${result.issues.length} | Fixed: ${result.fixed} | Skipped: ${result.skipped}\n\n`;
         for (const issue of result.issues) {
@@ -303,13 +270,10 @@ export async function selfHeal(): Promise<string> {
         return `❌ Error: ${err.message}`;
     }
 }
-
 // ============================================================
 // Tool 7: create_tool — Create new dynamic tools
 // ============================================================
-
 import { registerDynamicTool, unregisterDynamicTool, listDynamicTools, getDynamicTool } from './dynamicTools.js';
-
 export const createToolDeclaration: FunctionDeclaration = {
     name: 'create_tool',
     description: 'สร้างเครื่องมือใหม่ที่ฉันสามารถใช้ได้ ให้ระบุชื่อ, คำอธิบาย, schema ของ parameter, และ code implementation',
@@ -336,7 +300,6 @@ export const createToolDeclaration: FunctionDeclaration = {
         required: ['name', 'description', 'code'],
     },
 };
-
 export async function createTool({
     name,
     description,
@@ -350,7 +313,6 @@ export async function createTool({
 }): Promise<string> {
     try {
         const result = await registerDynamicTool(name, description, code, parameters);
-
         if (!result.valid) {
             let errorMsg = `❌ ไม่สามารถสร้างเครื่องมือได้:\n`;
             errorMsg += result.errors.map((e) => `  • ${e}`).join('\n');
@@ -360,7 +322,6 @@ export async function createTool({
             }
             return errorMsg;
         }
-
         let successMsg = `✅ สร้างเครื่องมือ '${name}' สำเร็จแล้ว!`;
         if (result.warnings.length > 0) {
             successMsg += `\n\n⚠️ Warnings:\n`;
@@ -371,24 +332,20 @@ export async function createTool({
         return `❌ Error: ${err.message}`;
     }
 }
-
 // ============================================================
 // Tool 8: list_dynamic_tools — List all custom tools
 // ============================================================
-
 export const listDynamicToolsDeclaration: FunctionDeclaration = {
     name: 'list_dynamic_tools',
     description: 'แสดงรายการเครื่องมือที่เราสร้างขึ้นเองทั้งหมด',
     parameters: { type: Type.OBJECT, properties: {} },
 };
-
 export async function listDynamicToolsHandler(): Promise<string> {
     try {
         const tools = listDynamicTools();
         if (tools.length === 0) {
             return '📋 ยังไม่มีเครื่องมือที่สร้างขึ้นเอง';
         }
-
         let output = `📋 Custom Tools (${tools.length}):\n\n`;
         for (const tool of tools) {
             output += `• ${tool.name}\n`;
@@ -409,11 +366,9 @@ export async function listDynamicToolsHandler(): Promise<string> {
         return `❌ Error: ${err.message}`;
     }
 }
-
 // ============================================================
 // Tool 9: delete_dynamic_tool — Delete a custom tool
 // ============================================================
-
 export const deleteDynamicToolDeclaration: FunctionDeclaration = {
     name: 'delete_dynamic_tool',
     description: 'ลบเครื่องมือที่สร้างขึ้นเอง (ไม่สามารถคืนได้)',
@@ -428,29 +383,24 @@ export const deleteDynamicToolDeclaration: FunctionDeclaration = {
         required: ['name'],
     },
 };
-
 export async function deleteDynamicTool({ name }: { name: string }): Promise<string> {
     try {
         const tool = getDynamicTool(name);
         if (!tool) {
             return `❌ ไม่พบเครื่องมือ: ${name}`;
         }
-
         const result = await unregisterDynamicTool(name);
         if (!result.valid) {
             return `❌ ไม่สามารถลบเครื่องมือได้: ${result.errors.join(', ')}`;
         }
-
         return `✅ ลบเครื่องมือ '${name}' สำเร็จแล้ว`;
     } catch (err: any) {
         return `❌ Error: ${err.message}`;
     }
 }
-
 // ============================================================
 // Export all declarations and handlers
 // ============================================================
-
 export const evolutionToolDeclarations: FunctionDeclaration[] = [
     selfReadSourceDeclaration,
     selfEditPersonaDeclaration,
@@ -462,7 +412,6 @@ export const evolutionToolDeclarations: FunctionDeclaration[] = [
     listDynamicToolsDeclaration,
     deleteDynamicToolDeclaration,
 ];
-
 export function getEvolutionToolHandlers(): Record<string, (args: any) => Promise<string>> {
     return {
         self_read_source: selfReadSource,

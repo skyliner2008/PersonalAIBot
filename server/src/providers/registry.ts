@@ -93,6 +93,11 @@ class RegistryLoader {
       if (!parsed || typeof parsed !== 'object') {
         throw new Error('Provider registry must be a JSON object');
       }
+      // ADDED VALIDATION START
+      if (!('providers' in parsed) || !('fallbackOrder' in parsed) || !('categories' in parsed)) {
+        throw new Error('Provider registry must be a JSON object with "providers", "fallbackOrder", and "categories" properties');
+      }
+      // ADDED VALIDATION END
       this.registry = parsed as ProviderRegistry;
       log.info('✓ Provider registry loaded', {
         providerCount: Object.keys(this.registry.providers).length,
@@ -170,7 +175,9 @@ class RegistryLoader {
     try {
       const registry = this.getRegistry();
       registry.lastUpdated = new Date().toISOString().split('T')[0];
-      fs.writeFileSync(this.configPath, JSON.stringify(registry, null, 2), 'utf-8');
+      const tempPath = this.configPath + '.tmp';
+      fs.writeFileSync(tempPath, JSON.stringify(registry, null, 2), 'utf-8');
+      fs.renameSync(tempPath, this.configPath);
     } catch (error) {
       log.error('Failed to save registry', { error: String(error) });
     }

@@ -143,7 +143,7 @@ export class ToolDiscoveryEngine {
     }
 
     // Tag match
-    for (const tag of tool.tags) {
+    for (const tag of tool.tags || []) {
       if (keywords.has(tag.toLowerCase())) score += 1.5;
     }
 
@@ -188,7 +188,7 @@ export class ToolDiscoveryEngine {
     const matchedKeywords = Array.from(keywords).filter(
       k => tool.name.toLowerCase().includes(k) ||
            tool.displayName.toLowerCase().includes(k) ||
-           tool.tags.some(t => t.toLowerCase().includes(k))
+           (tool.tags || []).some(t => t.toLowerCase().includes(k))
     );
 
     if (matchedKeywords.length > 0) {
@@ -278,7 +278,7 @@ export class ToolDiscoveryEngine {
     const allTools = getAllTools();
 
     for (const tool of allTools) {
-      for (const tag of tool.tags) {
+      for (const tag of tool.tags || []) {
         if (!capabilityMap.has(tag)) {
           capabilityMap.set(tag, []);
         }

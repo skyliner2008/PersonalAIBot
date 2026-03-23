@@ -375,11 +375,21 @@ export function getDefaultEmbeddingProvider(): EmbeddingProvider {
   return defaultProvider;
 }
 
+/** Returns true if a default embedding provider has been initialized */
+export function isEmbeddingReady(): boolean {
+  return defaultProvider !== null;
+}
+
 /**
  * Convenience wrapper for embedding a single text using a provided instance (or singleton).
+ * Returns empty array if no provider is configured (graceful fallback for fresh installs).
  */
 export async function embedText(text: string, provider?: EmbeddingProvider): Promise<number[]> {
-  const p = provider || getDefaultEmbeddingProvider();
+  const p = provider || defaultProvider;
+  if (!p) {
+    log.debug('embedText skipped — no EmbeddingProvider configured yet');
+    return [];
+  }
   try {
     return await p.embed(text);
   } catch (err) {
@@ -390,9 +400,14 @@ export async function embedText(text: string, provider?: EmbeddingProvider): Pro
 
 /**
  * Convenience wrapper for embedding multiple texts using a provided instance (or singleton).
+ * Returns nulls if no provider is configured (graceful fallback for fresh installs).
  */
 export async function embedTexts(texts: string[], provider?: EmbeddingProvider): Promise<(number[] | null)[]> {
-  const p = provider || getDefaultEmbeddingProvider();
+  const p = provider || defaultProvider;
+  if (!p) {
+    log.debug('embedTexts skipped — no EmbeddingProvider configured yet');
+    return texts.map(() => null);
+  }
   try {
     return await p.embedBatch(texts);
   } catch (err) {
@@ -403,8 +418,20 @@ export async function embedTexts(texts: string[], provider?: EmbeddingProvider):
 
 /**
  * Retrieves stats from an EmbeddingProvider instance (or singleton).
+ * Returns default empty stats if no provider is configured.
  */
 export function getEmbeddingStats(provider?: EmbeddingProvider): EmbeddingProviderStats {
-  const p = provider || getDefaultEmbeddingProvider();
+  const p = provider || defaultProvider;
+  if (!p) {
+    return {
+      cacheSize: 0,
+      maxCacheSize: 0,
+      queuedRequests: 0,
+      configuredModels: [],
+      activeModel: 'none (not configured)',
+      failoverCount: 0,
+      modelErrors: {},
+    };
+  }
   return p.getStats();
 }

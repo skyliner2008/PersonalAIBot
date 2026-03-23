@@ -45,7 +45,8 @@ export class ConfigManager {
       if (fs.existsSync(CONFIG_PATH)) {
         const raw = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
         const isNewFormat = raw && typeof raw === 'object' && 'routes' in raw;
-        const configRoutes = isNewFormat ? raw.routes : raw;
+        const configRoutesCandidate = isNewFormat ? raw.routes : raw;
+        const configRoutes = (configRoutesCandidate && typeof configRoutesCandidate === 'object') ? configRoutesCandidate : {};
         const autoRouting = isNewFormat ? !!raw.autoRouting : true;
         const botOverrides: Record<string, BotRoutingConfig> = {};
 
@@ -54,10 +55,10 @@ export class ConfigManager {
             if (botCfg && typeof botCfg === 'object') {
               const bCfg = botCfg as any;
               const validatedBotRoutes = { ...defaultMultiConfig };
-              const inputBotRoutes = bCfg.routes || {};
+              const inputBotRoutes = (bCfg.routes && typeof bCfg.routes === 'object') ? bCfg.routes : {};
               
               for (const key of Object.values(TaskType)) {
-                const normalized = this.normalizeMultiModelConfig(inputBotRoutes[key]);
+                const normalized = this.normalizeMultiModelConfig((inputBotRoutes as any)[key]);
                 if (normalized) {
                   validatedBotRoutes[key] = normalized;
                 }

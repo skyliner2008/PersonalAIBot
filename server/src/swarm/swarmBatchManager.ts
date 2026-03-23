@@ -90,8 +90,8 @@ export class SwarmBatchManager {
   cloneBatch(batch: SwarmBatch): SwarmBatch {
     return {
       ...batch,
-      taskIds: [...batch.taskIds],
-      assignments: batch.assignments.map((assignment) => ({ ...assignment })),
+      taskIds: batch.taskIds ? [...batch.taskIds] : [],
+      assignments: batch.assignments ? batch.assignments.map((assignment) => ({ ...assignment })) : [],
       progress: { ...batch.progress },
       metadata: batch.metadata ? { ...batch.metadata } : undefined,
     };

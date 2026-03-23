@@ -233,28 +233,36 @@ export function addMessage(chatId: string, role: string, content: string): void 
     // 2. Update RAM cache (with LRU check)
     if (!ramCache[chatId]) {
         evictLRU(); // ป้องกัน cache โตไม่มีขีดจำกัด
-        ramCache[chatId] = { messages: [], lastActive: Date.now(), messageCount: 0 };
         // Load recent from DB to prime cache
         const rows = getDb()
             .prepare('SELECT role, content FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT ?')
             .all(chatId, workingMemoryLimit) as any[];
-        ramCache[chatId].messages = rows.reverse().map(r => ({
-            chatId,
-            role: r.role,
-            content: r.content,
-        }));
         // Initialize messageCount from DB to keep extraction triggers aligned
         const countRow = getDb().prepare('SELECT COUNT(*) as c FROM messages WHERE conversation_id = ?').get(chatId) as any;
-        ramCache[chatId].messageCount = countRow?.c || 0;
-    } else {
-        ramCache[chatId].messages.push({ chatId, role: role as any, content: cleanContent });
-        // Trim to limit
-        if (ramCache[chatId].messages.length > workingMemoryLimit) {
-            ramCache[chatId].messages = ramCache[chatId].messages.slice(-workingMemoryLimit);
+
+        // Double-check: if it became defined concurrently during DB load, use that one.
+        if (!ramCache[chatId]) {
+            ramCache[chatId] = {
+                messages: rows.reverse().map(r => ({ chatId, role: r.role, content: r.content })),
+                lastActive: Date.now(),
+                messageCount: countRow?.c || 0,
+            };
         }
     }
-    ramCache[chatId].lastActive = Date.now();
-    ramCache[chatId].messageCount++;
+
+    const entry = ramCache[chatId]; // Get a local reference to the cache entry
+    if (!entry) {
+        log.warn(`[addMessage] RAM cache entry for ${chatId} was concurrently removed. Message saved to DB but not cached.`);
+        return; // Gracefully exit, DB write succeeded, but cache update failed.
+    }
+
+    entry.messages.push({ chatId, role: role as any, content: cleanContent });
+    // Trim to limit
+    if (entry.messages.length > workingMemoryLimit) {
+        entry.messages = entry.messages.slice(-workingMemoryLimit);
+    }
+    entry.lastActive = Date.now();
+    entry.messageCount++;
 }
 
 export function getWorkingMemory(chatId: string): MemoryMessage[] {
@@ -264,17 +272,30 @@ export function getWorkingMemory(chatId: string): MemoryMessage[] {
         const rows = getDb()
             .prepare('SELECT role, content FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT ?')
             .all(chatId, workingMemoryLimit) as any[];
-        ramCache[chatId] = {
-            messages: rows.reverse().map(r => ({ chatId, role: r.role, content: r.content })),
-            lastActive: Date.now(),
-            messageCount: 0,
-        };
+        // Initialize messageCount from DB to keep extraction triggers aligned
+        const countRow = getDb().prepare('SELECT COUNT(*) as c FROM messages WHERE conversation_id = ?').get(chatId) as any;
+
+        // Double-check: if it became defined concurrently during DB load, use that one.
+        if (!ramCache[chatId]) {
+            ramCache[chatId] = {
+                messages: rows.reverse().map(r => ({ chatId, role: r.role, content: r.content })),
+                lastActive: Date.now(),
+                messageCount: countRow?.c || 0,
+            };
+        }
     }
-    if (ramCache[chatId].messages.length > workingMemoryLimit) {
-        ramCache[chatId].messages = ramCache[chatId].messages.slice(-workingMemoryLimit);
+
+    const entry = ramCache[chatId]; // Get a local reference to the cache entry
+    if (!entry) {
+        log.warn(`[getWorkingMemory] RAM cache entry for ${chatId} was concurrently removed. Returning empty.`);
+        return []; // Gracefully return empty, cache entry was concurrently removed.
     }
-    ramCache[chatId].lastActive = Date.now();
-    return ramCache[chatId].messages;
+
+    if (entry.messages.length > workingMemoryLimit) {
+        entry.messages = entry.messages.slice(-workingMemoryLimit);
+    }
+    entry.lastActive = Date.now();
+    return entry.messages;
 }
 
 // Also save to episodes table for backward compatibility with Telegram/LINE

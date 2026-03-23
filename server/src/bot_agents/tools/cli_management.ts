@@ -106,14 +106,19 @@ function updateMessagingBridge(cli: string, displayName: string, logs: string[])
       );
       // Add to isSummoning regex
       content = content.replace(
-        /const isSummoning = \/\^@(jarvis|gemini|claude|codex|kilo|all|opencode)/i,
-        (match) => match.includes(cli) ? match : `${match.slice(0, -1)}|${cli})`
+        /(const isSummoning = \/\^@\((.*?)\)\/i)/,
+        (match, fullMatch, groupContent) => {
+          if (groupContent.includes(cli)) return fullMatch;
+          return `const isSummoning = /^@(${groupContent}|${cli})/i`;
+        }
       );
       // Add to bossModeLabel
-      content = content.replace(
-        /case '(.*?)': return '(.*?)';/g,
-        (match, p1, p2) => match + (p1 === 'opencode' ? `\n    case '${cli}': return '${displayName}';` : '')
-      );
+      if (!content.includes(`case '${cli}':`)) {
+        content = content.replace(
+          /(case 'opencode': return '(?:.*?)';)/,
+          `$1\n    case '${cli}': return '${displayName}';`
+        );
+      }
       fs.writeFileSync(bridgePath, content, 'utf8');
       logs.push(`✅ Updated messagingBridge.ts for @${cli} support`);
     }

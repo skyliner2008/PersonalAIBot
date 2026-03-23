@@ -132,7 +132,7 @@ export const createMediaHandlers = (ctx: BotContext) => {
             const deliveryPayload = await prepareFileReply(ctx, fp);
             await ctx.replyWithFile(deliveryPayload, `🎨 ${prompt}`);
             messages.push(`[System: จัดส่งรูปภาพ ${i+1} เรียบร้อย]`);
-          } else if (r.b64_json) {
+          } else if (typeof r.b64_json === 'string') {
             fs.writeFileSync(fp, Buffer.from(r.b64_json, 'base64'));
             const deliveryPayload = await prepareFileReply(ctx, fp);
             await ctx.replyWithFile(deliveryPayload, `🎨 ${prompt}`);
@@ -160,7 +160,11 @@ export const createMediaHandlers = (ctx: BotContext) => {
         }
         const fileName = `voice_${Date.now()}.mp3`;
         const fp = path.join(config.uploadsDir, fileName);
-        fs.writeFileSync(fp, buffer);
+        if (buffer) {
+          fs.writeFileSync(fp, buffer);
+        } else {
+          throw new Error('Speech generation returned an empty or invalid buffer.');
+        }
 
         const deliveryPayload = await prepareFileReply(ctx, fp);
         await ctx.replyWithFile(deliveryPayload);

@@ -141,4 +141,4 @@ class PersonaManager {
   }
 }
 
-export const personaManager = new PersonaManager();
+export const personaManager = new PersonaManager(); // Test

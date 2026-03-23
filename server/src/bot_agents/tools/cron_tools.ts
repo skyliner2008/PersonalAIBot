@@ -64,7 +64,20 @@ export function createCronHandlers(context: any) {
   return {
     create_cron_job: async (args: any) => {
       try {
+        if (!args || typeof args !== 'object') {
+          return `ล้มเหลว: รูปแบบคำสั่งไม่ถูกต้อง (args ต้องเป็น object)`;
+        }
         const { name, cron_expression, prompt } = args;
+        
+        if (typeof name !== 'string' || !name.trim()) {
+          return `ล้มเหลว: 'name' ต้องเป็นข้อความที่ไม่ว่างเปล่า`;
+        }
+        if (typeof cron_expression !== 'string' || !cron_expression.trim()) {
+          return `ล้มเหลว: 'cron_expression' ต้องเป็นข้อความที่ไม่ว่างเปล่า`;
+        }
+        if (typeof prompt !== 'string' || !prompt.trim()) {
+          return `ล้มเหลว: 'prompt' ต้องเป็นข้อความที่ไม่ว่างเปล่า`;
+        }
         
         // Basic cron validation
         const parts = cron_expression.trim().split(/\s+/);
@@ -122,7 +135,14 @@ ID อ้างอิง: ${id}`;
 
     delete_cron_job: async (args: any) => {
       try {
+        if (!args || typeof args !== 'object') {
+          return `ล้มเหลว: รูปแบบคำสั่งไม่ถูกต้อง (args ต้องเป็น object)`;
+        }
         const { job_id } = args;
+        
+        if (typeof job_id !== 'string' || !job_id.trim()) {
+          return `ล้มเหลว: 'job_id' ต้องเป็นข้อความที่ไม่ว่างเปล่า`;
+        }
         const chatId = context.session_id || 'unknown';
         
         // Ensure user only deletes their own jobs

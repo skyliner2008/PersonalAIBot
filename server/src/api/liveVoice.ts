@@ -330,7 +330,7 @@ export class LiveVideoClient extends EventEmitter {
       const parts = message.serverContent.modelTurn.parts;
       if (Array.isArray(parts)) {
         for (const part of parts) {
-          if (part.inlineData && part.inlineData.mimeType.startsWith('audio/pcm')) {
+          if (part.inlineData?.mimeType?.startsWith('audio/pcm')) {
             this.emit('audioPart', part.inlineData.data);
           }
         }

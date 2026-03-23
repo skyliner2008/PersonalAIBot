@@ -69,7 +69,9 @@ export class GeminiProvider implements AIProvider {
         project: options.project || '',
         location: options.location || 'us-central1',
         googleAuthOptions: {
-          credentials: { client_email: '', private_key: '' },
+          // The `apiKey` is used as a Bearer token in httpOptions.headers,
+          // so explicit, empty credentials are not needed and can cause errors.
+          // credentials: { client_email: '', private_key: '' },
           // Override with access token
         } as any,
         httpOptions: {

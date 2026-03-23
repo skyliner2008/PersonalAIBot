@@ -401,13 +401,12 @@ cd PersonalAIBotV2
 install.bat
 ```
 
-**Linux / macOS:**
+**Linux / macOS / WSL:**
 ```bash
 git clone https://github.com/your-repo/PersonalAIBotV2.git
 cd PersonalAIBotV2
-npm install
-cd server && npm install && npm run build
-cd ../dashboard && npm install && npm run build
+chmod +x install.sh
+./install.sh
 ```
 
 **Docker:**
@@ -519,7 +518,8 @@ PersonalAIBotV2/
 ├── ai_routing_config.json           # AI model routing config
 ├── docker-compose.yml               # Docker deployment
 ├── Dockerfile                       # Container image
-├── install.bat                      # Windows installer
+├── install.bat                      # Windows modular installer
+├── install.sh                       # Linux/macOS modular installer [NEW]
 ├── start.bat                        # Start script
 └── start_unified.bat                # Unified launcher
 ```
@@ -576,5 +576,5 @@ PersonalAIBotV2/
 <div align="center">
   <i>"I am Jarvis. What are we building today, sir?"</i>
   <br/><br/>
-  <sub>Built with ❤️ — PersonalAIBotV2 v2.0 | Last updated: March 2026</sub>
+  <sub>Built with ❤️ — PersonalAIBotV2 v2.0 | Last updated: 23 March 2026</sub>
 </div>

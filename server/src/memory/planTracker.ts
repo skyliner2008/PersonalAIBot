@@ -121,14 +121,19 @@ export function updatePlanStep(chatId: string, stepId: string, status: StepStatu
     const newStatus = allCompleted ? 'completed' : 'active';
 
     const db = getDb();
-    db.prepare(`
-        UPDATE agent_plans 
-        SET steps_json = ?, status = ?, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-    `).run(JSON.stringify(plan.steps), newStatus, plan.id);
+    try {
+        db.prepare(`
+            UPDATE agent_plans 
+            SET steps_json = ?, status = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        `).run(JSON.stringify(plan.steps), newStatus, plan.id);
 
-    log.info(`Plan step updated`, { planId: plan.id, stepId, status });
-    return true;
+        log.info(`Plan step updated`, { planId: plan.id, stepId, status });
+        return true;
+    } catch (e) {
+        log.error(`Failed to update plan step in DB for chat ${chatId}`, { planId: plan.id, stepId, status, error: e });
+        return false;
+    }
 }
 
 /**

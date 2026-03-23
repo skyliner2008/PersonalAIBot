@@ -59,9 +59,17 @@ export class ProviderFactory {
           });
 
         case 'openai-compatible':
+          if (!provider.baseUrl) {
+            log.warn('Missing baseUrl for OpenAI-compatible provider', { providerId: provider.id });
+            return null;
+          }
           return new OpenAICompatibleProvider(key, provider.baseUrl, providerId);
 
         case 'anthropic':
+          if (!provider.baseUrl) {
+            log.warn('Missing baseUrl for Anthropic provider', { providerId: provider.id });
+            return null;
+          }
           return new AnthropicProvider(key, provider.baseUrl);
 
         case 'rest-api':

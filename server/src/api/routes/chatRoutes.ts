@@ -163,7 +163,7 @@ chatRoutes.post('/chat/reply', validateBody(chatReplySchema), asyncHandler(async
   reply = reply
     .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '[removed script]')
     .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '[removed iframe]')
-    .replace(/on\w+="[^"]*"/gi, ''); // Remove inline event handlers like onclick
+    .replace(/on\w+=\x22[^\x22]*\x22/gi, ''); // Remove inline event handlers like onclick
 
   const usage = aiResult.usage;
 
@@ -274,7 +274,7 @@ chatRoutes.post('/chat/stream', validateBody(chatReplySchema), asyncHandler(asyn
     addMessage(convId, 'assistant', reply);
     umAddMessage(fbChatId, 'assistant', reply);
 
-    writer.sendDone(reply, result.usage);
+    writer.sendDone(reply, result?.usage);
   } catch (err: any) {
     writer.sendError(err.message || 'Unknown error');
   }

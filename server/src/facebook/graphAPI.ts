@@ -43,13 +43,13 @@ async function graphFetch<T>(
   const token = customToken || cfg.pageAccessToken;
   const baseUrl = `https://graph.facebook.com/${cfg.apiVersion}`;
 
-  const url = new URL(`${baseUrl}${endpoint}`);
-
-  if (method === 'GET' && token) {
-    url.searchParams.set('access_token', token);
-  }
-
   try {
+    const url = new URL(`${baseUrl}${endpoint}`);
+
+    if (method === 'GET' && token) {
+      url.searchParams.set('access_token', token);
+    }
+
     const options: RequestInit = {
       method,
       headers: { 'Content-Type': 'application/json' },
@@ -63,7 +63,9 @@ async function graphFetch<T>(
     const data = await res.json();
 
     if (data.error) {
-      addLog('fb-api', 'Graph API Error', `${data.error.message} (code: ${data.error.code})`, 'error');
+      const errorMessage = data.error?.message || 'Unknown Graph API error';
+      const errorCode = data.error?.code || 'N/A';
+      addLog('fb-api', 'Graph API Error', `${errorMessage} (code: ${errorCode})`, 'error');
       return null;
     }
 
