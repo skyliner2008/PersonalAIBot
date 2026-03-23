@@ -294,6 +294,7 @@ Strict Rules:
               text = text.trim();
               
               let selected: string[] = [];
+              let isValidResult = false;
               
               // Try standard parsing
               const matches = text.match(/\[\s*".*?"\s*(?:,\s*".*?"\s*)*\]/gs) || text.match(/\[[\s\S]*?\]/gs);
@@ -306,37 +307,45 @@ Strict Rules:
                      const parsed = JSON.parse(jsonStr);
                      if (Array.isArray(parsed)) {
                        selected = parsed.filter(s => typeof s === 'string');
-                       if (selected.length > 0) break;
+                       isValidResult = true;
+                       break;
                      }
                    } catch {}
                 }
               }
               
               // Fallback: More aggressive extraction if JSON.parse failed to produce results
-              if (selected.length === 0) {
+              if (!isValidResult) {
                  const bracketContentMatches = text.match(/\[([\s\S]*?)\]/g);
                  if (bracketContentMatches) {
                    for (const content of bracketContentMatches) {
-                      // Find all double or single quoted strings
                       const strings = content.match(/(?:"|')([^"']+)(?:"|')/g);
                       if (strings) {
                         selected = strings.map(s => s.replace(/["']/g, '').trim());
-                        if (selected.length > 0) break;
+                        isValidResult = true;
+                        break;
+                      }
+                      // If it's just [], it's also valid
+                      if (content.trim() === '[]') {
+                        isValidResult = true;
+                        break;
                       }
                    }
                  }
               }
 
-              if (selected.length > 0) {
+              if (isValidResult) {
                 const essential = [
                   'memory_save', 'search_knowledge', 'replace_code_block', 'run_command', 'read_file', 'system_terminal',
                   'read_file_content', 'write_file_content', 'search_codebase', 'ast_replace_function', 'ast_add_import', 
                   'find_references', 'ast_rename', 'list_files', 'get_current_time', 'system_info', 'view_file', 'multi_replace_file_content', 'notify_user'
                 ];
                 activeTools = activeTools.filter(t => t.name && (selected.includes(t.name) || essential.includes(t.name)));
-                console.log(`[DynamicRouter] Handled ${selected.length} selections. Active tools: ${activeTools.length}`);
+                if (selected.length > 0) {
+                   console.log(`[DynamicRouter] Optimized to ${activeTools.length} tools. Selected: ${selected.join(', ')}`);
+                }
               } else {
-                console.warn('[DynamicRouter] Could not find tool names in response. Raw snippet:', text.substring(0, 100));
+                console.warn('[DynamicRouter] Could not find valid tool names in response. Raw snippet:', text.substring(0, 100));
               }
             }
           }
