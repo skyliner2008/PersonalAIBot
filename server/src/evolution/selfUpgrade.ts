@@ -1245,6 +1245,8 @@ async function verifyUpgrade(rootDir: string, proposalId: number): Promise<void>
   }
 
   // New errors were introduced — reject the upgrade
+  // Also invalidate baseline so next check recaptures the true state
+  _baselineErrors = null;
   const errorMsg = `New TypeScript errors introduced (${newErrors.length}):\n${newErrors.join('\n')}`;
   throw { stdout: errorMsg, message: errorMsg };
 }
@@ -1321,6 +1323,28 @@ function quickStructuralCheck(filePath: string): { ok: boolean; errors: string[]
           errors.push(`${basename}: Duplicate declaration "${name}" at lines ${declaredNames.get(name)! + 1} and ${ln + 1}`);
         }
         declaredNames.set(name, ln);
+      }
+    }
+
+    // 3. Detect `continue` or `break` outside of loop/switch context
+    //    This catches the exact crash that killed routes.ts
+    let loopDepth = 0;
+    let switchDepth = 0;
+    for (let ln = 0; ln < lines.length; ln++) {
+      const trimmed = lines[ln].trim();
+      // Skip comments
+      if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) continue;
+      // Approximate loop/switch tracking via keywords at line start
+      if (/^(for|while|do)\b/.test(trimmed)) loopDepth++;
+      if (/^switch\b/.test(trimmed)) switchDepth++;
+      // Track closing braces (very rough — better than nothing)
+      if (trimmed === '}' || trimmed.startsWith('})')) {
+        if (loopDepth > 0) loopDepth--;
+        else if (switchDepth > 0) switchDepth--;
+      }
+      // Check for bare continue/break
+      if (/^\s*(continue|break)\s*;/.test(lines[ln]) && loopDepth === 0 && switchDepth === 0) {
+        errors.push(`${basename}:${ln + 1}: "${trimmed}" outside of loop/switch — will crash esbuild`);
       }
     }
 

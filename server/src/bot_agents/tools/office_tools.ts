@@ -12,7 +12,7 @@ let mammoth: any;
 let docx: any;
 let xlsx: any;
 
-const fileLocks = new Map<string, Promise<void>>();
+const fileOperationLocks = new Map<string, Promise<void>>();
 
 async function loadDependencies() {
   const pParse: any = await import('pdf-parse');
@@ -207,12 +207,25 @@ export const createOfficeHandlers = (ctx: BotContext) => {
     },
 
     edit_document: async ({ file_path, json_data }: { file_path: string, json_data: string }) => {
+      let resolveLock: (() => void) | undefined;
+      let newLockPromise: Promise<void> | undefined;
+
       try {
         if (!fs.existsSync(file_path)) return `❌ Error: ไม่พบไฟล์ที่ ${file_path}`;
         const ext = path.extname(file_path).toLowerCase();
         
         if (ext === '.xlsx' || ext === '.csv') {
           await loadDependencies();
+
+          // Acquire lock for this file path
+          let currentOperationPromise = Promise.resolve();
+          if (fileOperationLocks.has(file_path)) {
+            currentOperationPromise = fileOperationLocks.get(file_path)!;
+          }
+          newLockPromise = new Promise<void>(resolve => { resolveLock = resolve; });
+          fileOperationLocks.set(file_path, newLockPromise);
+          await currentOperationPromise; // Wait for previous operations on this file to complete
+
           const workbook = xlsx.readFile(file_path);
           if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
             return `❌ Error: ไฟล์ Excel/CSV ไม่มี Sheet ให้แก้ไข`;
@@ -238,6 +251,14 @@ export const createOfficeHandlers = (ctx: BotContext) => {
         return `❌ Error: edit_document รองรับเฉพาะไฟล์ Excel (.xlsx, .csv) เท่านั้นในตอนนี้ ส่วนไฟล์รูปแบบอื่นกรุณาอ่านแล้วสร้างไฟล์ใหม่ขึ้นมาแทน`;
       } catch (err: any) {
         return `❌ Edit Error: ${err.message}`;
+      } finally {
+        // Release lock
+        if (resolveLock && newLockPromise) {
+          resolveLock();
+          if (fileOperationLocks.get(file_path) === newLockPromise) {
+            fileOperationLocks.delete(file_path);
+          }
+        }
       }
     },
 
