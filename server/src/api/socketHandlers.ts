@@ -504,6 +504,12 @@ function handleVoiceEvents(io: SocketServer, socket: Socket) {
                 }
                 
                 // ─── Gemini Live Mode (default): real-time voice + tool bridge to Agent ───
+                const geminiDef = getProvider('gemini');
+                if (!geminiDef || !geminiDef.enabled) {
+                    socket.emit('voice:error', { message: 'Gemini Provider is disabled in Settings. Please enable it to use Live Call.' });
+                    return;
+                }
+
                 const keyResolution = resolveProviderApiKey('gemini');
                 const apiKey = keyResolution.key || process.env.GEMINI_API_KEY;
                 if (!apiKey) {

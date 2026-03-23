@@ -37,6 +37,7 @@ export function isAgentCompatibleProviderDef(
   provider: ProviderDefinition | undefined | null
 ): provider is ProviderDefinition {
   return !!provider
+    && provider.enabled === true
     && provider.category === 'llm'
     && SUPPORTED_AGENT_PROVIDER_TYPES.has(provider.type);
 }
