@@ -2,5 +2,10 @@
   "dependencies": {
     "express-rate-limit": "^8.2.1",
     "typescript": "^5.9.3"
+  },
+  "scripts": {
+    "lint": "eslint . --max-warnings 0",
+    "lint:fix": "eslint . --fix",
+    "seed-export": "tsx server/src/database/export_seed.ts"
   }
 }
