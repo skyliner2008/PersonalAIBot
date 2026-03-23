@@ -264,6 +264,8 @@ export function JarvisCall() {
   const startSpeechRecognition = useCallback((): boolean => {
     const Ctor = getSpeechRecognitionCtor();
     if (!Ctor) return false;
+    // CRITICAL: NEVER start browser STT if we are in Gemini Live mode
+    if (voiceTransportRef.current === 'live') return false;
     if (speechRecognitionRef.current) return true;
 
     try {
@@ -720,8 +722,8 @@ export function JarvisCall() {
       
       const method = String(data?.method || 'typing').toLowerCase();
 
-      // Only speak if this was originated from a voice command
-      if (method === 'voice' && (voiceTransportRef.current === 'stt' || voiceTransport === 'stt')) {
+      // Use browser TTS ONLY if we are in 'stt' (fallback) mode and this is a voice command
+      if (voiceTransportRef.current === 'stt' && method === 'voice') {
         speakAssistantReply(reply);
       }
     });
