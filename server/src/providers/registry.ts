@@ -146,17 +146,26 @@ class RegistryLoader {
   addProvider(provider: ProviderDefinition): void {
     const registry = this.getRegistry();
     registry.providers[provider.id] = provider;
+    if (isDbInitialized()) {
+      setSetting(`provider_enabled_${provider.id}`, provider.enabled ? '1' : '0');
+    }
     this.saveRegistry();
-    log.info('Provider added', { id: provider.id });
+    log.info('Provider added (DB + JSON)', { id: provider.id });
   }
 
   updateProvider(providerId: string, updates: Partial<ProviderDefinition>): boolean {
     const registry = this.getRegistry();
     const existing = registry.providers[providerId];
     if (!existing) return false;
+    
     registry.providers[providerId] = { ...existing, ...updates, id: providerId };
+    
+    if (updates.enabled !== undefined && isDbInitialized()) {
+      setSetting(`provider_enabled_${providerId}`, updates.enabled ? '1' : '0');
+    }
+    
     this.saveRegistry();
-    log.info('Provider updated', { id: providerId });
+    log.info('Provider updated (DB + JSON)', { id: providerId });
     return true;
   }
 
