@@ -970,3 +970,16 @@ Outcome:
 
 Outcome:
 - The system is now safer for new users and significantly easier to configure, while remaining fully performant and autonomous.
+
+### 18.15 Gemini 2.0 & Paid Tier Optimization (2026-03-24)
+
+- **Stable Model Routing** (`ai_routing_config.json` & `geminiProvider.ts`):
+  - Updated all routes to use stable API IDs (e.g., `gemini-2.0-flash`, `gemini-1.5-pro`).
+  - Removed experimental/legacy names like `gemini-2.5-flash` or `gemini-3-flash` that cause 404/429 errors.
+- **Paid Tier Compatibility**:
+  - Refined `MODEL_ALIAS_MAP` in `GeminiProvider` to handle `gemini-2.0-flash-lite` renaming by Google (mapped to `gemini-2.0-flash-lite-preview-02-05`).
+  - Standardized pricing and detection in `usageTracker.ts` and `oauthDetector.ts`.
+
+Outcome:
+- Fixed "Model Not Found" (404) and "Quota Exceeded" (429) errors for users on Gemini Paid Tier 1.
+- Ensured the bot always uses the most reliable and cost-effective models available.

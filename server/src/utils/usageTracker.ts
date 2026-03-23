@@ -60,8 +60,8 @@ export interface UsageSummary {
 const PRICING: Record<string, { input: number; output: number }> = {
   'gemini-2.0-flash':       { input: 0.10, output: 0.40 },
   'gemini-2.0-flash-lite':  { input: 0.025, output: 0.10 },
-  'gemini-2.5-flash':       { input: 0.15, output: 0.60 },
-  'gemini-2.5-pro':         { input: 1.25, output: 10.0 },
+  'gemini-1.5-flash':       { input: 0.15, output: 0.60 },
+  'gemini-1.5-pro':         { input: 1.25,  output: 5.00  },
   'gemini-embedding-001':   { input: 0.00, output: 0.00 }, // Free in Pro plan
   'gemini-embedding-002':   { input: 0.00, output: 0.00 }, // Configure if pricing changes
   'text-embedding-004':     { input: 0.00, output: 0.00 }, // Legacy Gemini embedding fallback

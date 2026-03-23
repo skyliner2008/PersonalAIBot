@@ -28,14 +28,12 @@ const API_VERSIONS = ['v1beta', 'v1'] as const;
  * requires "gemini-3.1-pro-preview" (preview suffix).
  */
 const MODEL_ALIAS_MAP: Record<string, string> = {
-  'gemini-3.1-pro': 'gemini-3.1-pro-preview',
-  'gemini-3.1-flash': 'gemini-3.1-flash-lite-preview',
-  'gemini-3-pro': 'gemini-3-pro-preview',
-  'gemini-3-flash': 'gemini-3-flash-preview',
-  'gemini-2.0-flash-lite': 'gemini-2.0-flash-lite',
+  'gemini-2.0-flash-lite': 'gemini-2.0-flash-lite-preview-02-05',
+  'gemini-2.5-flash': 'gemini-1.5-flash',
+  'gemini-2.5-pro': 'gemini-1.5-pro',
   'gemini-2.0-flash': 'gemini-2.0-flash',
-  'gemini-1.5-flash': 'gemini-2.0-flash',
-  'gemini-1.5-pro': 'gemini-2.5-pro',
+  'gemini-1.5-flash': 'gemini-1.5-flash',
+  'gemini-1.5-pro': 'gemini-1.5-pro',
 };
 
 /** Resolve a model name — expand short aliases to full API names. */
@@ -369,11 +367,8 @@ export class GeminiProvider implements AIProvider {
       }
       // Fallback list for LLM mode if the API call entirely fails
       return [
-        'gemini-2.5-pro',
-        'gemini-2.5-flash',
-        'gemini-2.0-pro-exp-02-05',
         'gemini-2.0-flash',
-        'gemini-2.0-flash-lite',
+        'gemini-2.0-flash-lite-preview-02-05',
         'gemini-1.5-pro',
         'gemini-1.5-flash'
       ];
