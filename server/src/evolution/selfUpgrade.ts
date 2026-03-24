@@ -8,7 +8,7 @@
 // 4. เสนอแผนอัพเกรด (ช่วงทดสอบ: เสนอเท่านั้น ไม่ลงมือทำ)
 // 5. ใช้ dynamic model switching ตาม task
 
-import { getDb, addLog, trackUpgradeTokens, getSetting, upsertCodebaseNode, searchCodebaseMapByDependencies } from '../database/db.js';
+import { getDb, addLog, trackUpgradeTokens, getSetting, setSetting, upsertCodebaseNode, searchCodebaseMapByDependencies } from '../database/db.js';
 import * as diff from 'diff';
 import { createLogger } from '../utils/logger.js';
 import { logEvolution, addLearning } from './learningJournal.js';
@@ -49,6 +49,8 @@ const SCAN_BATCH_SIZE = 3;                      // อ่านทีละ 3 �
 const MAX_FILE_SIZE_BYTES = 100 * 1024;         // ข้ามไฟล์ > 100KB
 const ANALYSIS_DELAY_MS = 2000;                 // delay ระหว่างไฟล์
 const MAX_LLM_CALLS_PER_CYCLE = 5;              // จำกัด LLM call ต่อรอบ
+const CHUNK_TOKEN_THRESHOLD = 2000;             // ไฟล์ที่มี token > threshold จะถูก chunk
+const APPROX_CHARS_PER_TOKEN = 3.5;             // ค่าประมาณ chars/token สำหรับ TypeScript
 let DRY_RUN = false;                            // true = เสนอเท่านั้น, false = แก้ไขอัตโนมัติ
 
 function refreshConfig() {
@@ -64,7 +66,9 @@ function refreshConfig() {
     const autoFixSetting = getSetting('upgrade_auto_fix');
     DRY_RUN = autoFixSetting === 'false';  // Only disable if explicitly set to 'false'
 
-    _paused = getSetting('upgrade_paused') === 'true';
+    // Default to paused=true (OFF) unless explicitly set to 'false' in DB
+    const pausedSetting = getSetting('upgrade_paused');
+    _paused = pausedSetting !== 'false';  // null/undefined/'true' → paused; only 'false' → running
   } catch (err) {
     log.error('Failed to refresh config from DB', { error: err });
   }
@@ -118,13 +122,12 @@ let isUpgrading = false;
 let upgradeInterval: NodeJS.Timeout | null = null;
 let _continuousScanTimeout: NodeJS.Timeout | null = null;
 export let _isManualScanActive = false; // Expose manual scan state
-let _paused = false;
+let _paused = true;  // Default: OFF on first start — user must explicitly enable
 let _scanCursor = 0;     // ตำแหน่งที่สแกนถึง
 let _fileIndex: string[] = [];
 let _initialized = false;
 export async function resumeBatchImplementation(rootDir: string): Promise<void> {
-  const dbModule = await import('../database/db.js');
-  const db = dbModule.getDb();
+  const db = getDb();
 
   // Get total approved tasks to show progress
   const totalApproved = db.prepare(`SELECT COUNT(*) as count FROM upgrade_proposals WHERE status = 'approved'`).get() as { count: number };
@@ -143,7 +146,7 @@ export async function resumeBatchImplementation(rootDir: string): Promise<void> 
     console.log(`\x1b[36m╚══════════════════════════════════════════════════════════╝\x1b[0m`);
   }
 
-  while (dbModule.getSetting('upgrade_implement_all') === 'true') {
+  while (getSetting('upgrade_implement_all') === 'true') {
     const nextProposal = db.prepare(`
       SELECT id, title FROM upgrade_proposals
       WHERE status = 'approved'
@@ -163,7 +166,7 @@ export async function resumeBatchImplementation(rootDir: string): Promise<void> 
         continue; 
       }
       
-      dbModule.setSetting('upgrade_implement_all', 'false');
+      setSetting('upgrade_implement_all', 'false');
       console.log(`\x1b[32m  └─ No more approved proposals found. Batch mode deactivated.\x1b[0m`);
       break;
     }
@@ -763,7 +766,6 @@ async function scanBatch(rootDir: string, ignoreIdle: boolean = false): Promise<
   if (!_initialized || _fileIndex.length === 0) {
     _fileIndex = await buildFileIndex(rootDir);
     try {
-      const { getSetting } = await import('../database/db.js');
       const savedCursor = getSetting('upgrade_scan_cursor');
       _scanCursor = savedCursor ? parseInt(savedCursor, 10) : 0;
       if (isNaN(_scanCursor) || _scanCursor >= _fileIndex.length) _scanCursor = 0;
@@ -781,9 +783,7 @@ async function scanBatch(rootDir: string, ignoreIdle: boolean = false): Promise<
   }
 
   // Persist cursor dynamically ahead of processing
-  import('../database/db.js').then(({ setSetting }) => {
-    setSetting('upgrade_scan_cursor', String(_scanCursor));
-  }).catch(() => {});
+  try { setSetting('upgrade_scan_cursor', String(_scanCursor)); } catch { /* ignore */ }
 
   const batch = _fileIndex.slice(_scanCursor, _scanCursor + SCAN_BATCH_SIZE);
   let totalFindings = 0;
@@ -837,6 +837,97 @@ async function scanBatch(rootDir: string, ignoreIdle: boolean = false): Promise<
   return { totalFindings, newFindings, batchProcessed: batch };
 }
 
+// ── File Chunking for Large Files ──
+
+/**
+ * Split a large file into function-level chunks for LLM analysis.
+ * Uses regex-based extraction (fast) instead of full AST parsing.
+ * Each chunk includes file header (imports) + one function/class body.
+ */
+function chunkFileByFunctions(content: string, filePath: string): Array<{ chunkLabel: string; code: string }> {
+  const lines = content.split('\n');
+
+  // Extract import section (always included in every chunk as context)
+  const importLines: string[] = [];
+  let bodyStartLine = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    if (trimmed.startsWith('import ') || trimmed.startsWith('import{') || trimmed.startsWith('from ') ||
+        (trimmed === '' && importLines.length > 0 && i < 30)) {
+      importLines.push(lines[i]);
+      bodyStartLine = i + 1;
+    } else if (importLines.length > 0 && !trimmed.startsWith('//') && !trimmed.startsWith('/*') && !trimmed.startsWith('*') && trimmed !== '') {
+      break;
+    }
+  }
+  const importHeader = importLines.join('\n');
+
+  // Find function/class boundaries using brace counting
+  const chunks: Array<{ chunkLabel: string; code: string }> = [];
+  let currentChunkStart = -1;
+  let currentChunkLabel = '';
+  let braceDepth = 0;
+  let inChunk = false;
+
+  for (let i = bodyStartLine; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    // Detect function/class/interface/type declaration at top-level (braceDepth 0)
+    if (!inChunk && braceDepth === 0) {
+      const declMatch = trimmed.match(
+        /^(?:export\s+)?(?:async\s+)?(?:function|class|interface|type|enum|const|let)\s+(\w+)/
+      );
+      if (declMatch) {
+        currentChunkStart = i;
+        currentChunkLabel = declMatch[1];
+        inChunk = true;
+      }
+    }
+
+    // Count braces
+    for (const ch of line) {
+      if (ch === '{') braceDepth++;
+      else if (ch === '}') braceDepth--;
+    }
+
+    // When braces close back to 0, this function/class is complete
+    if (inChunk && braceDepth <= 0) {
+      const chunkCode = lines.slice(currentChunkStart, i + 1).join('\n');
+      chunks.push({ chunkLabel: currentChunkLabel, code: chunkCode });
+      inChunk = false;
+      braceDepth = 0;
+      currentChunkStart = -1;
+    }
+  }
+
+  // If no functions found or only one small chunk, return the whole file
+  if (chunks.length === 0) {
+    return [{ chunkLabel: path.basename(filePath), code: content }];
+  }
+
+  // Group small consecutive chunks together (merge adjacent functions < 500 chars)
+  const mergedChunks: Array<{ chunkLabel: string; code: string }> = [];
+  let pending = { chunkLabel: '', code: '' };
+
+  for (const chunk of chunks) {
+    if (pending.code.length + chunk.code.length < CHUNK_TOKEN_THRESHOLD * APPROX_CHARS_PER_TOKEN) {
+      pending.chunkLabel = pending.chunkLabel ? `${pending.chunkLabel}, ${chunk.chunkLabel}` : chunk.chunkLabel;
+      pending.code = pending.code ? `${pending.code}\n\n${chunk.code}` : chunk.code;
+    } else {
+      if (pending.code) mergedChunks.push(pending);
+      pending = { ...chunk };
+    }
+  }
+  if (pending.code) mergedChunks.push(pending);
+
+  // Prepend import header to each chunk
+  return mergedChunks.map(c => ({
+    chunkLabel: c.chunkLabel,
+    code: `${importHeader}\n\n// ── Chunk: ${c.chunkLabel} ──\n${c.code}`,
+  }));
+}
+
 // ── LLM Deep Analysis ──
 
 async function analyzeBatchWithLLM(rootDir: string, batchFiles: string[]): Promise<number> {
@@ -853,9 +944,25 @@ async function analyzeBatchWithLLM(rootDir: string, batchFiles: string[]): Promi
       const content = fs.readFileSync(filePath, 'utf-8');
       const relPath = path.relative(rootDir, filePath).replace(/\\/g, '/');
 
+      // ── File Chunking: split large files into function-level chunks ──
+      const estimatedTokens = Math.ceil(content.length / APPROX_CHARS_PER_TOKEN);
+      const chunks = estimatedTokens > CHUNK_TOKEN_THRESHOLD
+        ? chunkFileByFunctions(content, filePath)
+        : [{ chunkLabel: path.basename(filePath), code: content }];
+
+      if (chunks.length > 1) {
+        log.info(`[SelfUpgrade] File "${relPath}" (~${estimatedTokens} tokens) split into ${chunks.length} chunks for analysis`);
+      }
+
+      for (const chunk of chunks) {
+      if (llmCalls >= MAX_LLM_CALLS_PER_CYCLE) break;
+
+      const chunkContent = chunk.code;
+      const chunkInfo = chunks.length > 1 ? ` [Chunk: ${chunk.chunkLabel}]` : '';
+
       const prompt = `You are an expert TypeScript code reviewer performing a SAFETY audit. Your goal: find bugs that WILL crash the server or corrupt data at runtime. Nothing else matters.
 
-FILE: "${relPath}"
+FILE: "${relPath}"${chunkInfo}
 
 WHAT TO REPORT (only these):
 - Uncaught exceptions that will crash the process
@@ -900,8 +1007,28 @@ Respond in pure JSON (no markdown wrapping) matching exactly this structure:
 If no real runtime bugs are found, return an empty array for "issues": []
 Be conservative — false negatives are OK, false positives waste resources.
 
+EXAMPLE OUTPUT (for reference — adapt to actual findings):
+{
+  "architecture": {
+    "summary": "Manages WebSocket connections for real-time messaging",
+    "exports": ["WebSocketManager", "broadcastMessage"],
+    "dependencies": ["../database/db", "ws", "../utils/logger"]
+  },
+  "issues": [
+    {
+      "type": "bug",
+      "title": "Uncaught null dereference in broadcastMessage",
+      "description": "client.socket can be null after disconnect, but send() is called without null check at line 45. Will throw TypeError at runtime when broadcasting to disconnected clients.",
+      "line_range": "44-46",
+      "suggested_fix": "if (client.socket && client.socket.readyState === WebSocket.OPEN) { client.socket.send(data); }",
+      "priority": "high",
+      "confidence": 0.9
+    }
+  ]
+}
+
 Code:
-${content}`;
+${chunkContent}`;
 
       const modelName = getScanModel();
       const response = await aiChat('chat', [{ role: 'user', content: prompt }], { model: modelName });
@@ -916,7 +1043,7 @@ ${content}`;
       let matchText = response.text || '';
       const mdMatch = matchText.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
       if (mdMatch) matchText = mdMatch[1];
-      
+
       try {
         let parsed: any = null;
         try {
@@ -927,15 +1054,18 @@ ${content}`;
         }
 
         if (parsed) {
-          // 1. Save Architecture to Second Brain
-          if (parsed.architecture) {
+          // 1. Save Architecture to Second Brain (only on first chunk or whole-file analysis)
+          if (parsed.architecture && chunk === chunks[0]) {
             upsertCodebaseNode(
-              relPath, 
-              parsed.architecture.summary || '', 
-              Array.isArray(parsed.architecture.exports) ? parsed.architecture.exports : [], 
+              relPath,
+              parsed.architecture.summary || '',
+              Array.isArray(parsed.architecture.exports) ? parsed.architecture.exports : [],
               Array.isArray(parsed.architecture.dependencies) ? parsed.architecture.dependencies : []
             );
             log.info(`🧠 Mapped codebase node: ${relPath}`);
+
+            // Static analysis: extract typed exports + call graph (no LLM cost)
+            updateSecondBrainStaticAnalysis(rootDir, relPath, content);
           }
 
           // 2. Process Bug Proposals
@@ -957,12 +1087,17 @@ ${content}`;
               });
               if (result.isNew) llmFindings++;
             }
-            log.debug(`LLM analyzed ${relPath}: ${issues.length} findings`);
+            log.debug(`LLM analyzed ${relPath}${chunkInfo}: ${issues.length} findings`);
           }
         }
       } catch (parseErr: any) {
-        log.warn(`LLM returned invalid JSON for ${relPath}. Parse error: ${parseErr.message}`);
+        log.warn(`LLM returned invalid JSON for ${relPath}${chunkInfo}. Parse error: ${parseErr.message}`);
       }
+
+      // Rate limiting delay between LLM calls
+      await new Promise(r => setTimeout(r, ANALYSIS_DELAY_MS));
+
+      } // end chunk loop
     } catch (err: any) {
       const errMsg = err.message || '';
       if (/429|RESOURCE_EXHAUSTED|quota|rate.limit/i.test(errMsg)) {
@@ -972,9 +1107,6 @@ ${content}`;
       }
       log.warn(`LLM analysis failed for ${filePath}: ${errMsg}`);
     }
-
-    // Rate limiting delay between LLM calls
-    await new Promise(r => setTimeout(r, ANALYSIS_DELAY_MS));
   }
 
   return llmFindings;
@@ -1054,6 +1186,221 @@ async function mapProtectedCoresToSecondBrain(rootDir: string): Promise<void> {
     } catch { /* skip unreadable */ }
   }
   if (mapped > 0) log.info(`🧠 Second Brain: mapped ${mapped} protected core files (read-only architecture)`);
+}
+
+// ── Second Brain: Call Graph + Typed Export Extraction ──
+
+interface TypedExportInfo {
+  name: string;
+  kind: 'function' | 'class' | 'interface' | 'type' | 'enum' | 'const' | 'let' | 'var' | 'unknown';
+  signature?: string;
+}
+
+/**
+ * Extract typed exports from a TypeScript file using regex.
+ * Returns enriched export info with kind and signature.
+ */
+function extractTypedExports(content: string): TypedExportInfo[] {
+  const exports: TypedExportInfo[] = [];
+  const lines = content.split('\n');
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // export function foo(a: string, b: number): ReturnType
+    const fnMatch = line.match(/export\s+(?:async\s+)?function\s+(\w+)\s*(\([^)]*\))\s*(?::\s*([^\s{]+))?/);
+    if (fnMatch) {
+      const sig = fnMatch[3] ? `${fnMatch[2]} => ${fnMatch[3]}` : fnMatch[2];
+      exports.push({ name: fnMatch[1], kind: 'function', signature: sig });
+      continue;
+    }
+
+    // export class Foo { / export class Foo extends Bar {
+    const clsMatch = line.match(/export\s+class\s+(\w+)(?:\s+extends\s+(\w+))?/);
+    if (clsMatch) {
+      exports.push({ name: clsMatch[1], kind: 'class', signature: clsMatch[2] ? `extends ${clsMatch[2]}` : undefined });
+      continue;
+    }
+
+    // export interface Foo {
+    const ifaceMatch = line.match(/export\s+interface\s+(\w+)(?:\s+extends\s+([^{]+))?/);
+    if (ifaceMatch) {
+      exports.push({ name: ifaceMatch[1], kind: 'interface', signature: ifaceMatch[2]?.trim() });
+      continue;
+    }
+
+    // export type Foo = ...
+    const typeMatch = line.match(/export\s+type\s+(\w+)\s*=\s*(.{0,60})/);
+    if (typeMatch) {
+      exports.push({ name: typeMatch[1], kind: 'type', signature: typeMatch[2].trim().replace(/\s*\{[\s\S]*/, '{...}') });
+      continue;
+    }
+
+    // export enum Foo {
+    const enumMatch = line.match(/export\s+enum\s+(\w+)/);
+    if (enumMatch) {
+      exports.push({ name: enumMatch[1], kind: 'enum' });
+      continue;
+    }
+
+    // export const/let/var foo: Type = ... or export const foo = ...
+    const varMatch = line.match(/export\s+(const|let|var)\s+(\w+)\s*(?::\s*([^\s=]+))?/);
+    if (varMatch) {
+      exports.push({ name: varMatch[2], kind: varMatch[1] as 'const' | 'let' | 'var', signature: varMatch[3] });
+      continue;
+    }
+  }
+
+  return exports;
+}
+
+/**
+ * Extract function-level call relationships from a TypeScript file.
+ * Builds a call graph: "function X calls function Y from module Z"
+ *
+ * Uses import resolution + call-site detection via regex.
+ */
+function extractCallGraph(content: string, relPath: string): Array<{
+  callerFunction: string;
+  calleeFile: string;
+  calleeFunction: string;
+  callType: string;
+  lineNumber: number;
+}> {
+  const lines = content.split('\n');
+  const calls: Array<{
+    callerFunction: string;
+    calleeFile: string;
+    calleeFunction: string;
+    callType: string;
+    lineNumber: number;
+  }> = [];
+
+  // Step 1: Map imported symbols to their source file
+  const importMap = new Map<string, string>(); // symbol → source file
+  for (const line of lines) {
+    const m = line.match(/import\s+\{([^}]+)\}\s+from\s+['"]([^'"]+)['"]/);
+    if (m) {
+      const symbols = m[1].split(',').map(s => s.trim().split(/\s+as\s+/).pop()?.trim()).filter(Boolean) as string[];
+      const source = m[2];
+      for (const sym of symbols) {
+        importMap.set(sym, source);
+      }
+    }
+    // import DefaultName from '...'
+    const defaultM = line.match(/import\s+(\w+)\s+from\s+['"]([^'"]+)['"]/);
+    if (defaultM && !defaultM[1].startsWith('{')) {
+      importMap.set(defaultM[1], defaultM[2]);
+    }
+  }
+
+  if (importMap.size === 0) return calls; // No imports = no cross-file calls to track
+
+  // Step 2: Find current function scope at each line
+  let currentFunction = '<module>';
+  let braceDepth = 0;
+  const funcStack: Array<{ name: string; depth: number }> = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // Detect function declarations
+    const funcMatch = line.match(/(?:export\s+)?(?:async\s+)?function\s+(\w+)/);
+    const methodMatch = !funcMatch ? line.match(/(?:async\s+)?(\w+)\s*\([^)]*\)\s*(?::\s*\S+)?\s*\{/) : null;
+    const arrowMatch = !funcMatch && !methodMatch ? line.match(/(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s*)?\([^)]*\)\s*(?::\s*\S+)?\s*=>/) : null;
+
+    if (funcMatch || methodMatch || arrowMatch) {
+      const name = (funcMatch || methodMatch || arrowMatch)![1];
+      funcStack.push({ name, depth: braceDepth });
+      currentFunction = name;
+    }
+
+    // Track brace depth
+    for (const ch of line) {
+      if (ch === '{') braceDepth++;
+      else if (ch === '}') {
+        braceDepth--;
+        // Pop function from stack if we exit its scope
+        while (funcStack.length > 0 && braceDepth <= funcStack[funcStack.length - 1].depth) {
+          funcStack.pop();
+          currentFunction = funcStack.length > 0 ? funcStack[funcStack.length - 1].name : '<module>';
+        }
+      }
+    }
+
+    // Step 3: Detect call sites for imported symbols
+    for (const [symbol, sourceFile] of importMap) {
+      // Match: symbol( or symbol.method( or await symbol(
+      const callRegex = new RegExp(`\\b${symbol}\\s*\\(`, 'g');
+      if (callRegex.test(line)) {
+        const callType = /await\s/.test(line) ? 'await' : 'direct';
+        calls.push({
+          callerFunction: currentFunction,
+          calleeFile: sourceFile,
+          calleeFunction: symbol,
+          callType,
+          lineNumber: i + 1,
+        });
+      }
+    }
+  }
+
+  return calls;
+}
+
+/**
+ * Run static analysis on a scanned file to extract call graph and typed exports.
+ * Called after LLM analysis completes for a file.
+ */
+function updateSecondBrainStaticAnalysis(rootDir: string, relPath: string, content: string): void {
+  try {
+    // 1. Extract typed exports and update codebase_map
+    const typedExports = extractTypedExports(content);
+    if (typedExports.length > 0) {
+      // Read current node to preserve summary and deps
+      const db = getDb();
+      const existing = db.prepare('SELECT summary, dependencies_json FROM codebase_map WHERE file_path = ?').get(relPath) as { summary: string; dependencies_json: string } | undefined;
+      if (existing) {
+        let deps: string[] = [];
+        try { deps = JSON.parse(existing.dependencies_json); } catch { /* ignore */ }
+        upsertCodebaseNode(relPath, existing.summary, typedExports as any, deps);
+      }
+    }
+
+    // 2. Extract call graph and update codebase_calls
+    const dbMod = getDb();
+
+    // Clear old calls and re-build
+    try { dbMod.prepare('DELETE FROM codebase_calls WHERE caller_file = ?').run(relPath); } catch { /* table might not exist yet */ }
+
+    const calls = extractCallGraph(content, relPath);
+    for (const call of calls) {
+      // Resolve relative import path to absolute project path
+      let resolvedCalleeFile = call.calleeFile;
+      if (call.calleeFile.startsWith('.')) {
+        resolvedCalleeFile = path.posix.normalize(
+          path.posix.join(path.posix.dirname(relPath), call.calleeFile)
+        ).replace(/\.js$/, '.ts');
+      }
+
+      try {
+        dbMod.prepare(`
+          INSERT INTO codebase_calls (caller_file, caller_function, callee_file, callee_function, call_type, line_number, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+          ON CONFLICT(caller_file, caller_function, callee_file, callee_function) DO UPDATE SET
+            call_type = excluded.call_type,
+            line_number = excluded.line_number,
+            updated_at = datetime('now')
+        `).run(relPath, call.callerFunction, resolvedCalleeFile, call.calleeFunction, call.callType, call.lineNumber);
+      } catch { /* ignore individual insert errors */ }
+    }
+
+    if (calls.length > 0 || typedExports.length > 0) {
+      log.debug(`[SecondBrain] ${relPath}: ${typedExports.length} typed exports, ${calls.length} call-graph edges`);
+    }
+  } catch (err: any) {
+    log.debug(`[SecondBrain] Static analysis failed for ${relPath}: ${err.message}`);
+  }
 }
 
 // ── Second Brain: Dependency Graph Builder ──
@@ -1145,20 +1492,49 @@ async function updateCodeEmbeddings(rootDir: string): Promise<number> {
   try {
     const { getCodebaseContextMap, upsertCodebaseEmbedding } = await import('../database/db.js');
     const allNodes = getCodebaseContextMap();
-
-    // Check which files already have embeddings
     const db = getDb();
-    const existingPaths = new Set(
-      (db.prepare('SELECT file_path FROM codebase_embeddings').all() as { file_path: string }[])
-        .map(r => r.file_path)
-    );
 
-    // Find files that need embeddings
-    const needsEmbedding = allNodes.filter(n =>
-      n.summary && n.summary.length > 20 && !existingPaths.has(n.file_path)
-    );
+    // ── Staleness Detection: find files whose summary changed since last embedding ──
+    // Build a hash of the current summary to compare with stored hash.
+    // Also detect embeddings older than 7 days for forced refresh.
+    const STALE_DAYS = 7;
+    const existingEmbeddings = db.prepare(
+      'SELECT file_path, updated_at FROM codebase_embeddings'
+    ).all() as { file_path: string; updated_at: string }[];
+
+    const embeddingMap = new Map(existingEmbeddings.map(e => [e.file_path, e.updated_at]));
+
+    // Compute simple hash of summary+exports for staleness check
+    const hashStr = (s: string) => {
+      let h = 0;
+      for (let i = 0; i < s.length; i++) { h = ((h << 5) - h + s.charCodeAt(i)) | 0; }
+      return h.toString(36);
+    };
+
+    const needsEmbedding = allNodes.filter(n => {
+      if (!n.summary || n.summary.length < 20) return false;
+
+      const existingDate = embeddingMap.get(n.file_path);
+      if (!existingDate) return true; // Never embedded
+
+      // Check staleness: summary changed since last scan?
+      // Compare last_scanned (codebase_map) vs updated_at (codebase_embeddings)
+      const mapScanned = new Date(n.last_scanned).getTime();
+      const embUpdated = new Date(existingDate).getTime();
+      if (mapScanned > embUpdated) return true; // Summary updated after embedding
+
+      // Force refresh if older than STALE_DAYS
+      const ageDays = (Date.now() - embUpdated) / (1000 * 60 * 60 * 24);
+      if (ageDays > STALE_DAYS) return true;
+
+      return false;
+    });
 
     if (needsEmbedding.length === 0) return 0;
+
+    const staleCount = needsEmbedding.filter(n => embeddingMap.has(n.file_path)).length;
+    const newCount = needsEmbedding.length - staleCount;
+    log.info(`🧠 Embeddings: ${newCount} new, ${staleCount} stale (of ${allNodes.length} total)`);
 
     // Batch embed: max 10 per cycle to avoid rate limits
     const batch = needsEmbedding.slice(0, 10);
@@ -1171,7 +1547,14 @@ async function updateCodeEmbeddings(rootDir: string): Promise<number> {
         try {
           // Create a rich text representation for embedding
           let exportsStr = '';
-          try { exportsStr = JSON.parse(node.exports_json || '[]').join(', '); } catch {}
+          try {
+            const exports = JSON.parse(node.exports_json || '[]');
+            if (exports.length > 0 && typeof exports[0] === 'object') {
+              exportsStr = exports.map((e: any) => `${e.name}(${e.kind})`).join(', ');
+            } else {
+              exportsStr = exports.join(', ');
+            }
+          } catch {}
           const text = `File: ${node.file_path}\nPurpose: ${node.summary}\nExports: ${exportsStr}`;
 
           const embedding = await embedText(text);
@@ -1186,7 +1569,7 @@ async function updateCodeEmbeddings(rootDir: string): Promise<number> {
       return 0;
     }
 
-    if (indexed > 0) log.info(`🧠 Second Brain Embeddings: indexed ${indexed} new file summaries`);
+    if (indexed > 0) log.info(`🧠 Second Brain Embeddings: indexed/refreshed ${indexed} file summaries`);
   } catch (err: any) {
     log.warn(`[SecondBrain] Embedding update error: ${err.message}`);
   }
@@ -2021,7 +2404,23 @@ export async function implementProposalById(id: number, rootDir: string): Promis
         else label = '📄 RELATED';
 
         let out = `[${label}] ${node.file_path}\n  Purpose: ${node.summary || 'N/A'}\n`;
-        if (exportsList) out += `  Exports: ${exportsList}\n`;
+        // Show typed exports if available (ExportInfo objects)
+        if (exportsList) {
+          try {
+            const exportsData = JSON.parse(node.exports_json || '[]');
+            if (exportsData.length > 0 && typeof exportsData[0] === 'object' && exportsData[0].kind) {
+              // Typed exports available — show with signatures
+              const typedList = exportsData.map((e: any) =>
+                `${e.name}(${e.kind}${e.signature ? ': ' + e.signature : ''})`
+              ).join(', ');
+              out += `  Exports: ${typedList}\n`;
+            } else {
+              out += `  Exports: ${exportsList}\n`;
+            }
+          } catch {
+            out += `  Exports: ${exportsList}\n`;
+          }
+        }
 
         // Show specific imported symbols from graph edges
         if (isUpstream) {
@@ -2076,8 +2475,37 @@ export async function implementProposalById(id: number, rootDir: string): Promis
         for (const n of semantic.slice(0, 3)) codebaseContext += formatNode(n);
       }
 
+      // ── Layer 4: Call Graph (function-level callers/callees) ──
+      let callGraphEntries = 0;
+      try {
+        const db = getDb();
+        // Who calls functions in our target file?
+        const callers = db.prepare(
+          `SELECT DISTINCT caller_file, caller_function, callee_function, call_type, line_number
+           FROM codebase_calls WHERE callee_file = ? ORDER BY caller_file LIMIT 20`
+        ).all(relativePath) as Array<{ caller_file: string; caller_function: string; callee_function: string; call_type: string; line_number: number }>;
+
+        if (callers.length > 0) {
+          codebaseContext += `\n── Call Graph: Who Calls Functions in This File (${callers.length} callers) ──\n`;
+          const grouped = new Map<string, string[]>();
+          for (const c of callers) {
+            const key = c.caller_file;
+            if (!grouped.has(key)) grouped.set(key, []);
+            grouped.get(key)!.push(`${c.caller_function}() calls ${c.callee_function}() [${c.call_type}, line ${c.line_number}]`);
+          }
+          for (const [file, callList] of grouped) {
+            codebaseContext += `  ${file}:\n`;
+            for (const call of callList.slice(0, 5)) {
+              codebaseContext += `    - ${call}\n`;
+            }
+            if (callList.length > 5) codebaseContext += `    ... and ${callList.length - 5} more\n`;
+          }
+          callGraphEntries = callers.length;
+        }
+      } catch { /* call graph table might not exist yet */ }
+
       const totalContext = upstream.length + downstream.length + hop2.length + semantic.length;
-      phaseLog('🧠 Second Brain', `graph context: ${upstream.length} upstream, ${downstream.length} downstream, ${hop2.length} hop-2, ${semantic.length} semantic (${relevantNodes.length} total nodes)`);
+      phaseLog('🧠 Second Brain', `graph context: ${upstream.length} upstream, ${downstream.length} downstream, ${hop2.length} hop-2, ${semantic.length} semantic, ${callGraphEntries} call-graph (${relevantNodes.length} total nodes)`);
     } else {
       phaseLog('🧠 Second Brain', `no architectural map available yet`);
     }
@@ -2160,8 +2588,13 @@ export async function implementProposalById(id: number, rootDir: string): Promis
     }
   }
 
-  // Choose prompt strategy based on impact risk level
-  const isMultiFile = impact.riskLevel !== 'safe' && impact.affectedFiles.length > 0;
+  // Choose prompt strategy: multi-file if plan specifies additional files OR impact analysis shows dependents
+  // plan.filesToEdit comes from the AI planner and may include files the impact analysis missed
+  const planExtraFiles = (plan.filesToEdit || [])
+    .filter(f => f !== relativePath && f !== proposal.file_path)
+    .map(f => f.replace(/\\/g, '/'));
+  const allAffectedFiles = [...new Set([...impact.affectedFiles, ...planExtraFiles])];
+  const isMultiFile = allAffectedFiles.length > 0;
 
   // Common safety rules based on real failure patterns from past AI upgrades
   const commonSafetyRules = `
@@ -2261,12 +2694,16 @@ ${originalContent}
     const historyDir = path.resolve(rootDir, '../data/upgrade_history');
     if (!fs.existsSync(historyDir)) fs.mkdirSync(historyDir, { recursive: true });
     if (isMultiFile) {
-      for (const affectedFile of impact.affectedFiles) {
+      // Use combined list: impact.affectedFiles + plan.filesToEdit (deduplicated)
+      for (const affectedFile of allAffectedFiles) {
         try {
           const affFullPath = path.resolve(rootDir, affectedFile);
           if (fs.existsSync(affFullPath)) {
-            const affContent = fs.readFileSync(affFullPath, 'utf-8');
-            allTargetFiles.push({ path: affectedFile, fullPath: affFullPath, backup: affContent });
+            // Avoid duplicates in allTargetFiles
+            if (!allTargetFiles.some(t => t.path === affectedFile)) {
+              const affContent = fs.readFileSync(affFullPath, 'utf-8');
+              allTargetFiles.push({ path: affectedFile, fullPath: affFullPath, backup: affContent });
+            }
           }
         } catch { /* skip */ }
       }
@@ -3007,16 +3444,42 @@ async function runUpgradeCycle(rootDir: string, forceStart: boolean = false): Pr
     try { await buildDependencyGraph(rootDir); } catch { /* non-critical */ }
     try { await updateCodeEmbeddings(rootDir); } catch { /* non-critical */ }
 
-    // Queue Zero First: Auto-implement approved or pending proposals
-    // Native Bypass: If user is running a Manual Continuous Scan, they
-    // normally start with `_paused=true` so Auto-Implement is skipped.
-    // If they explicitly unpause, we allow Auto-Implement to run.
-    if (!_paused && !DRY_RUN) {
-      const implemented = await implementPendingProposals(rootDir);
-      if (implemented > 0) {
-        log.info(`[SelfUpgrade] Implemented ${implemented} pending tasks. Yielding scan to next cycle to prevent backlog.`);
-        isUpgrading = false;
-        return;
+    // Queue Zero: Auto-implement approved proposals
+    // Req 6: Scan 100% first, then Upgrade — UNLESS there are pending Auto-Fix tasks
+    //   - In Auto-Fix mode (!DRY_RUN): if there are approved tasks pre-existing before scan,
+    //     implement them FIRST, then restart scan from 0%.
+    //   - In Propose mode (DRY_RUN): never auto-implement, just scan.
+    //   - When _paused is true (continuous scan mode): skip auto-implement to let scan complete.
+    const scanComplete = _fileIndex.length > 0 && _scanCursor >= _fileIndex.length;
+
+    if (!DRY_RUN) {
+      // Check if there are pre-existing approved proposals (from before this scan cycle)
+      let approvedCount = 0;
+      try {
+        const db = getDb();
+        const row = db.prepare(`SELECT COUNT(*) as cnt FROM upgrade_proposals WHERE status = 'approved'`).get() as { cnt: number };
+        approvedCount = row?.cnt || 0;
+      } catch { /* ignore */ }
+
+      if (approvedCount > 0 && !_isManualScanActive) {
+        // Auto-Fix with pending approved tasks (from timer-based auto cycle): implement first
+        const implemented = await implementPendingProposals(rootDir);
+        if (implemented > 0) {
+          log.info(`[SelfUpgrade] Implemented ${implemented} pending tasks. Yielding scan to next cycle.`);
+          isUpgrading = false;
+          return;
+        }
+      } else if (scanComplete && approvedCount > 0) {
+        // Scan reached 100% — now implement approved proposals
+        log.info(`[SelfUpgrade] Scan 100% complete. Now implementing ${approvedCount} approved proposals...`);
+        const implemented = await implementPendingProposals(rootDir);
+        if (implemented > 0) {
+          // Reset scan cursor to start fresh after implementation
+          _scanCursor = 0;
+          log.info(`[SelfUpgrade] Implemented ${implemented} tasks post-scan. Resetting scan cursor for next cycle.`);
+          isUpgrading = false;
+          return;
+        }
       }
     }
 
@@ -3075,48 +3538,54 @@ export async function startSelfUpgrade(rootDir: string): Promise<void> {
   // Initial activity stamp
   lastUserActivity = Date.now();
 
-  upgradeInterval = setInterval(() => {
-    runUpgradeCycle(rootDir, false).catch(err => {
-      log.error('Upgrade cycle error', { error: String(err) });
-    });
-  }, CHECK_INTERVAL_MS);
+  // Use self-rescheduling setTimeout so the interval timer starts AFTER cycle completes,
+  // not at a fixed cadence (Req 5: timer restarts after scan+upgrade 100% complete)
+  const scheduleNextCycle = () => {
+    upgradeInterval = setTimeout(async () => {
+      try {
+        await runUpgradeCycle(rootDir, false);
+      } catch (err) {
+        log.error('Upgrade cycle error', { error: String(err) });
+      }
+      // Re-schedule only after current cycle finishes
+      if (upgradeInterval) scheduleNextCycle();
+    }, CHECK_INTERVAL_MS);
+  };
+  scheduleNextCycle();
 
     // --- Persistent State Restoration ---
     try {
-      const dbModule = await import('../database/db.js');
-      
       // 0. Restore Auto-Upgrade Pause State
-      const isPaused = dbModule.getSetting('upgrade_paused');
-      if (isPaused === 'true') {
-        _paused = true;
-        log.info('[SelfUpgrade] Auto-Upgrade is globally PAUSED from previous session.');
-      } else if (isPaused === 'false') {
+      // Default: paused (OFF) unless DB explicitly says 'false'
+      const isPaused = getSetting('upgrade_paused');
+      if (isPaused === 'false') {
         _paused = false;
-        log.info('[SelfUpgrade] Auto-Upgrade is running normally.');
+        log.info('[SelfUpgrade] Auto-Upgrade is running normally (restored from DB).');
+      } else {
+        _paused = true;
+        log.info(`[SelfUpgrade] Auto-Upgrade is PAUSED (db=${isPaused ?? 'not set'}).`);
       }
 
       // 0.5 Restore Auto-Fix State
-      const autoFix = dbModule.getSetting('upgrade_auto_fix');
+      const autoFix = getSetting('upgrade_auto_fix');
       if (autoFix === 'false') {
         DRY_RUN = true;
         log.info('[SelfUpgrade] Auto-Fix is disabled. System will only propose changes.');
       } else {
-        DRY_RUN = false; // By default, Auto-Fix is enabled 
+        DRY_RUN = false; // By default, Auto-Fix is enabled
         log.info('[SelfUpgrade] Auto-Fix is ENABLED. System will autonomously implement pending fixes.');
       }
 
       // 1. Restore Continuous Scan State
-      const isContinuous = dbModule.getSetting('upgrade_continuous_scan');
+      const isContinuous = getSetting('upgrade_continuous_scan');
       if (isContinuous === 'true') {
         log.info('[SelfUpgrade] Resuming Continuous Scan mode after server restart...');
-        // Only flip _paused externally if you want it explicitly paused on boot,
-        // but since they left it ON, it should resume with _paused = true (default for manual scans)
-        _paused = true; 
+        _paused = true;
         executeContinuousStart(rootDir);
       }
-      
+
       // 2. Resume Batch Implementation (Queue Zero)
-      const isBatching = dbModule.getSetting('upgrade_implement_all');
+      const isBatching = getSetting('upgrade_implement_all');
       if (isBatching === 'true') {
         // Delay slightly to allow server to fully boot and recovery logic (ensureUpgradeTable) to finish transactions
         setTimeout(() => {
@@ -3133,7 +3602,7 @@ export async function startSelfUpgrade(rootDir: string): Promise<void> {
 /** Stop the self-upgrade loop */
 export function stopSelfUpgrade(): void {
   if (upgradeInterval) {
-    clearInterval(upgradeInterval);
+    clearTimeout(upgradeInterval);
     upgradeInterval = null;
     log.info('Self-Upgrade System stopped');
   }
@@ -3144,30 +3613,24 @@ export function stopSelfUpgrade(): void {
   _isManualScanActive = false;
 }
 
-/** Toggle pause status of the self-upgrade loop */
+/** Toggle pause status of the self-upgrade loop (Master switch) */
 export function setUpgradePaused(paused: boolean): void {
   _paused = paused;
-  import('../database/db.js').then(({ setSetting }) => {
-    setSetting('upgrade_paused', paused ? 'true' : 'false');
-  });
-  log.info(`Self-Upgrade System ${paused ? 'Paused' : 'Resumed'}`);
+  try { setSetting('upgrade_paused', paused ? 'true' : 'false'); } catch { /* ignore */ }
+  log.info(`Self-Upgrade System ${paused ? 'PAUSED (OFF)' : 'RESUMED (ON)'}`);
 
-  const rootDir = _currentRootDir || path.resolve(process.cwd(), 'src');
+  // When pausing: also stop any active continuous scan
   if (paused) {
     if (_continuousScanTimeout) {
       clearTimeout(_continuousScanTimeout);
       _continuousScanTimeout = null;
       _isManualScanActive = false;
-      import('../database/db.js').then(({ setSetting }) => setSetting('upgrade_continuous_scan', 'false'));
-      log.info('Continuous scan mode stopped explicitly via global Master switch.');
-    }
-  } else {
-    if (!_continuousScanTimeout) {
-      import('../database/db.js').then(({ setSetting }) => setSetting('upgrade_continuous_scan', 'true'));
-      log.info('Continuous scan mode automatically started via global Master switch.');
-      executeContinuousStart(rootDir);
+      try { setSetting('upgrade_continuous_scan', 'false'); } catch { /* ignore */ }
+      log.info('Continuous scan mode stopped via Master switch (OFF).');
     }
   }
+  // When un-pausing: just set _paused=false and let the normal timer-based loop handle cycles.
+  // Do NOT auto-start continuous scan — that's only triggered by the "เริ่ม Scan ทันที" button.
 }
 
 /** Get current upgrade system status */
@@ -3183,6 +3646,7 @@ export function getUpgradeStatus(): {
   isContinuousActive: boolean;
   isManualScanActive: boolean;
   isBatchActive: boolean;
+  isUpgrading: boolean;
 } {
   const idleMs = getOsIdleTimeMs();
   const total = _fileIndex.length || 1;
@@ -3190,7 +3654,6 @@ export function getUpgradeStatus(): {
   // Check if batch implementation is currently active
   let batchActive = false;
   try {
-    const { getSetting } = require('../database/db.js');
     batchActive = getSetting('upgrade_implement_all') === 'true';
   } catch { /* ignore */ }
 
@@ -3198,6 +3661,7 @@ export function getUpgradeStatus(): {
     running: !!upgradeInterval || !!_continuousScanTimeout,
     isContinuousActive: !!_continuousScanTimeout,
     isManualScanActive: _isManualScanActive,
+    isUpgrading,
     paused: _paused,
     isIdle: _isManualScanActive ? false : isSystemIdle(),
     idleMinutes: _isManualScanActive ? 0 : Math.round(idleMs / 60000),
@@ -3217,7 +3681,7 @@ export function getUpgradeStatus(): {
 export function approveAllPendingProposals(): number {
   try {
     ensureUpgradeTable();
-    const db = require('../database/db.js').getDb();
+    const db = getDb();
     const result = db.prepare(`UPDATE upgrade_proposals SET status = 'approved', reviewed_at = datetime('now') WHERE status = 'pending'`).run();
     return result.changes || 0;
   } catch (err: any) {
@@ -3229,7 +3693,6 @@ export function approveAllPendingProposals(): number {
 /** Stop any active batch implementation by clearing the DB flag */
 export function stopBatchImplementation(): boolean {
   try {
-    const { setSetting } = require('../database/db.js');
     setSetting('upgrade_implement_all', 'false');
     console.log('\x1b[33m[SelfUpgrade] Batch implementation stop requested by user.\x1b[0m');
     return true;
@@ -3241,8 +3704,6 @@ export function stopBatchImplementation(): boolean {
 
 /** Update scan configuration and restart loop if needed */
 export async function updateUpgradeConfig(config: { intervalMs?: number, idleThresholdMs?: number, autoFix?: boolean }): Promise<void> {
-  const { setSetting } = await import('../database/db.js');
-  
   if (config.intervalMs) {
     CHECK_INTERVAL_MS = config.intervalMs;
     setSetting('upgrade_scan_interval_ms', String(CHECK_INTERVAL_MS));
@@ -3294,13 +3755,30 @@ function executeContinuousStart(rootDir: string): void {
   const cycle = async () => {
     // Yield to bot interaction safely honoring the user's configured Idle Threshold
     if (Date.now() - lastUserActivity < IDLE_THRESHOLD_MS) {
-      // Schedule next check without running upgrade (preserves the continuous scan loop)
       _continuousScanTimeout = setTimeout(cycle, 5000);
       return;
     }
-    
+
     try {
       await runUpgradeCycle(rootDir, true);
+
+      // Req 8: After scan reaches 100%, check mode condition
+      const scanDone = _fileIndex.length > 0 && _scanCursor >= _fileIndex.length;
+      if (scanDone) {
+        log.info('[SelfUpgrade] Continuous scan reached 100%.');
+
+        if (!DRY_RUN) {
+          // Auto-Fix mode: auto-approve all pending proposals, then implement
+          const approved = approveAllPendingProposals();
+          if (approved > 0) {
+            log.info(`[SelfUpgrade] Auto-Fix: approved ${approved} pending proposals. Starting implementation...`);
+          }
+          // Implementation will happen in the next cycle via runUpgradeCycle's Queue Zero logic
+        } else {
+          // Propose mode: leave proposals as pending for user to manually approve
+          log.info('[SelfUpgrade] Propose mode: scan complete. Proposals are pending for user review.');
+        }
+      }
     } catch (err: any) {
       log.warn(`Continuous scan cycle error: ${err.message}`);
     }
@@ -3318,8 +3796,6 @@ function executeContinuousStart(rootDir: string): void {
  * Starts or stops the native continuous scan batch.
  */
 export async function toggleContinuousScan(rootDir: string): Promise<boolean> {
-  const { setSetting } = await import('../database/db.js');
-
   if (_continuousScanTimeout) {
     clearTimeout(_continuousScanTimeout);
     _continuousScanTimeout = null;

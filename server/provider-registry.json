@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-03-23",
+  "lastUpdated": "2026-03-24",
   "description": "Unified Provider Registry — เพิ่ม provider ใหม่ได้ที่ไฟล์นี้ ไม่ต้องแก้โค้ด",
   "providers": {
     "gemini": {
@@ -12,6 +12,9 @@
       "defaultModel": "gemini-3-flash-preview",
       "models": [
         "deep-research-pro-preview-12-2025",
+        "gemini-1.5-flash",
+        "gemini-1.5-pro",
+        "gemini-2-flash",
         "gemini-2.0-flash",
         "gemini-2.0-flash-001",
         "gemini-2.0-flash-lite",
@@ -29,6 +32,7 @@
         "gemini-3-pro-image-preview",
         "gemini-3-pro-preview",
         "gemini-3.1-flash-image-preview",
+        "gemini-3.1-flash-lite",
         "gemini-3.1-flash-lite-preview",
         "gemini-3.1-pro-preview",
         "gemini-3.1-pro-preview-customtools",
@@ -50,9 +54,7 @@
         "veo-3.0-fast-generate-001",
         "veo-3.0-generate-001",
         "veo-3.1-fast-generate-preview",
-        "veo-3.1-generate-preview",
-        "gemini-1.5-pro",
-        "gemini-1.5-flash"
+        "veo-3.1-generate-preview"
       ],
       "capabilities": {
         "chat": true,
@@ -329,42 +331,6 @@
       "apiKeyEnvVar": "MISTRAL_API_KEY",
       "enabled": false
     },
-    "cohere": {
-      "id": "cohere",
-      "name": "Cohere",
-      "category": "llm",
-      "type": "openai-compatible",
-      "baseUrl": "https://api.cohere.com/v2",
-      "defaultModel": "command-r-plus",
-      "models": [
-        "command-r-plus",
-        "command-r",
-        "command-light"
-      ],
-      "capabilities": {
-        "chat": true,
-        "streaming": true
-      },
-      "requiresAuth": true,
-      "apiKeyEnvVar": "COHERE_API_KEY",
-      "enabled": false
-    },
-    "together": {
-      "id": "together",
-      "name": "Together AI",
-      "category": "llm",
-      "type": "openai-compatible",
-      "baseUrl": "https://api.together.xyz/v1",
-      "defaultModel": "meta-llama/Llama-3-70b-chat-hf",
-      "models": [],
-      "capabilities": {
-        "chat": true,
-        "streaming": true
-      },
-      "requiresAuth": true,
-      "apiKeyEnvVar": "TOGETHER_API_KEY",
-      "enabled": false
-    },
     "perplexity": {
       "id": "perplexity",
       "name": "Perplexity AI",
@@ -385,22 +351,6 @@
       "apiKeyEnvVar": "PERPLEXITY_API_KEY",
       "enabled": false
     },
-    "fireworks": {
-      "id": "fireworks",
-      "name": "Fireworks AI",
-      "category": "llm",
-      "type": "openai-compatible",
-      "baseUrl": "https://api.fireworks.ai/inference/v1",
-      "defaultModel": "accounts/fireworks/models/llama-v3p1-70b-instruct",
-      "models": [],
-      "capabilities": {
-        "chat": true,
-        "streaming": true
-      },
-      "requiresAuth": true,
-      "apiKeyEnvVar": "FIREWORKS_API_KEY",
-      "enabled": false
-    },
     "xai": {
       "id": "xai",
       "name": "xAI (Grok)",
@@ -419,57 +369,6 @@
       },
       "requiresAuth": true,
       "apiKeyEnvVar": "XAI_API_KEY",
-      "enabled": false
-    },
-    "sambanova": {
-      "id": "sambanova",
-      "name": "SambaNova",
-      "category": "llm",
-      "type": "openai-compatible",
-      "baseUrl": "https://api.sambanova.ai/v1",
-      "defaultModel": "Meta-Llama-3.1-70B-Instruct",
-      "models": [],
-      "capabilities": {
-        "chat": true,
-        "streaming": true
-      },
-      "requiresAuth": true,
-      "apiKeyEnvVar": "SAMBANOVA_API_KEY",
-      "enabled": false
-    },
-    "cerebras": {
-      "id": "cerebras",
-      "name": "Cerebras",
-      "category": "llm",
-      "type": "openai-compatible",
-      "baseUrl": "https://api.cerebras.ai/v1",
-      "defaultModel": "llama3.1-70b",
-      "models": [
-        "llama3.1-70b",
-        "llama3.1-8b"
-      ],
-      "capabilities": {
-        "chat": true,
-        "streaming": true
-      },
-      "requiresAuth": true,
-      "apiKeyEnvVar": "CEREBRAS_API_KEY",
-      "enabled": false
-    },
-    "hyperbolic": {
-      "id": "hyperbolic",
-      "name": "Hyperbolic",
-      "category": "llm",
-      "type": "openai-compatible",
-      "baseUrl": "https://api.hyperbolic.xyz/v1",
-      "defaultModel": "meta-llama/Llama-3.3-70B-Instruct",
-      "models": [],
-      "capabilities": {
-        "chat": true,
-        "streaming": true
-      },
-      "requiresAuth": true,
-      "apiKeyEnvVar": "HYPERBOLIC_API_KEY",
       "enabled": false
     },
     "gemini-embedding": {
@@ -887,6 +786,83 @@
       "apiKeyEnvVar": "GEMINI_API_KEY",
       "enabled": false,
       "configured": false
+    },
+    "zai": {
+      "id": "zai",
+      "name": "Z.AI",
+      "category": "llm",
+      "type": "openai-compatible",
+      "baseUrl": "https://api.z.ai/api/paas/v4/",
+      "defaultModel": "glm-5",
+      "models": [
+        "glm-4.5",
+        "glm-4.5-air",
+        "glm-4.6",
+        "glm-4.7",
+        "glm-5",
+        "glm-5-turbo",
+        "glm-4-plus"
+      ],
+      "capabilities": {
+        "chat": true,
+        "streaming": true,
+        "functionCalling": true
+      },
+      "requiresAuth": true,
+      "apiKeyEnvVar": "ZAI_API_KEY",
+      "enabled": true
+    },
+    "opencode": {
+      "id": "opencode",
+      "name": "OpenCode.ai (OpenAI)",
+      "category": "llm",
+      "type": "openai-compatible",
+      "baseUrl": "https://opencode.ai/zen/go/v1",
+      "defaultModel": "opencode-go/kimi-k2.5",
+      "models": [
+        "opencode-go/glm-5",
+        "opencode-go/kimi-k2.5",
+        "opencode-zen/mimo-v2-omni-free",
+        "opencode-zen/mimo-v2-pro-free",
+        "opencode-zen/nemotron-3-super-free",
+        "opencode-zen/gpt-5-nano",
+        "opencode-zen/big-pickle"
+      ],
+      "capabilities": {
+        "chat": true,
+        "streaming": true,
+        "functionCalling": true
+      },
+      "requiresAuth": true,
+      "apiKeyEnvVar": "OPENCODE_API_KEY",
+      "enabled": true
+    },
+    "opencode-anthropic": {
+      "id": "opencode-anthropic",
+      "name": "OpenCode.ai (MiniMax)",
+      "category": "llm",
+      "type": "anthropic",
+      "baseUrl": "https://opencode.ai/zen/go/v1",
+      "defaultModel": "opencode-go/minimax-m2.7",
+      "models": [
+        "claude-opus-4-20250514",
+        "claude-sonnet-4-20250514",
+        "claude-haiku-4-20250414",
+        "claude-3-5-sonnet-20241022",
+        "claude-3-5-haiku-20241022",
+        "claude-3-opus-20240229",
+        "opencode-go/minimax-m2.7",
+        "opencode-go/minimax-m2.5",
+        "opencode-zen/minimax-m2.5-free"
+      ],
+      "capabilities": {
+        "chat": true,
+        "streaming": true,
+        "functionCalling": true
+      },
+      "requiresAuth": true,
+      "apiKeyEnvVar": "OPENCODE_API_KEY",
+      "enabled": true
     }
   },
   "fallbackOrder": {
@@ -897,7 +873,10 @@
       "anthropic",
       "groq",
       "deepseek",
-      "minimax"
+      "minimax",
+      "zai",
+      "opencode",
+      "opencode-anthropic"
     ],
     "embedding": [
       "gemini-embedding",

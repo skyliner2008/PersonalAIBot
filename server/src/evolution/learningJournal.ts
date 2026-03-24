@@ -90,14 +90,37 @@ export function getLearnings(category?: LearningCategory, limit: number = 10): L
 }
 
 /**
- * Increment times_applied and boost confidence when a learning is used
+ * Increment times_applied and boost confidence when a learning is used successfully.
+ * Confidence is now success-based: tracks successful vs failed applications separately.
  */
-export function applyLearning(id: number): void {
+export function applyLearning(id: number, success: boolean = true): void {
     try {
-        getDb().prepare(
-            `UPDATE learning_journal SET times_applied = times_applied + 1, confidence = MIN(confidence + 0.05, 1.0) WHERE id = ?`
-        ).run(id);
+        const db = getDb();
+        if (success) {
+            // Success: increment times_applied, boost confidence moderately
+            db.prepare(
+                `UPDATE learning_journal SET times_applied = times_applied + 1, confidence = MIN(confidence + 0.03, 1.0) WHERE id = ?`
+            ).run(id);
+        } else {
+            // Failure: increment times_applied but REDUCE confidence
+            db.prepare(
+                `UPDATE learning_journal SET times_applied = times_applied + 1, confidence = MAX(confidence - 0.08, 0.05) WHERE id = ?`
+            ).run(id);
+        }
     } catch (err) { log.debug('Failed to apply learning', { id, error: String(err) }); }
+}
+
+/**
+ * Calculate the effective confidence of a learning, applying temporal decay.
+ * Learnings that haven't been applied recently lose relevance over time.
+ * Half-life: 30 days — a learning unused for 30 days has ~50% of its stored confidence.
+ */
+export function getEffectiveConfidence(learning: Learning): number {
+    const HALF_LIFE_DAYS = 30;
+    const createdAt = new Date(learning.created_at).getTime();
+    const daysSinceCreation = (Date.now() - createdAt) / (1000 * 60 * 60 * 24);
+    const decayFactor = Math.exp(-daysSinceCreation * Math.LN2 / HALF_LIFE_DAYS);
+    return learning.confidence * decayFactor;
 }
 
 /**
@@ -134,12 +157,24 @@ export function getEvolutionLog(limit: number = 20): any[] {
 }
 
 /**
- * Build a learnings context string for injection into system prompt
+ * Build a learnings context string for injection into system prompt.
+ * Uses temporal decay to surface the most relevant and recent learnings.
  */
 export function buildLearningsContext(): string {
-    const topLearnings = getLearnings(undefined, 5);
-    if (topLearnings.length === 0) return '';
-    const items = topLearnings.map(l => `• [${l.category}] ${l.insight}`).join('\n');
+    const allLearnings = getLearnings(undefined, 30);
+    if (allLearnings.length === 0) return '';
+
+    // Sort by effective confidence (with temporal decay) instead of raw confidence
+    const ranked = allLearnings
+        .map(l => ({ ...l, effectiveConf: getEffectiveConfidence(l) }))
+        .filter(l => l.effectiveConf > 0.1) // Filter out decayed learnings
+        .sort((a, b) => b.effectiveConf - a.effectiveConf)
+        .slice(0, 5);
+
+    if (ranked.length === 0) return '';
+    const items = ranked.map(l =>
+        `• [${l.category}] (conf: ${(l.effectiveConf * 100).toFixed(0)}%) ${l.insight}`
+    ).join('\n');
     return `\n[Self-Learnings — สิ่งที่เรียนรู้จากประสบการณ์]:\n${items}`;
 }
 

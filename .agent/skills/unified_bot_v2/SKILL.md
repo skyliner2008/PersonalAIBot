@@ -8,6 +8,7 @@ description: "Complete architecture reference for PersonalAIBotV2 — Agentic AI
 - **Resilient Tool Selection**: ปรับปรุง `agent.ts` เพื่อจัดการกับ `JSON parsing failed` โดยเน้นการดักจับ JSON Array ของ String ที่แม่นยำขึ้น ป้องกัน SyntaxError จากข้อความรบกวนของ LLM
 - **Swarm Health Protection**: แก้ไข Race Condition ใน `SwarmHealthTracker` โดยใช้ระบบ Micro-queueing จัดการการอัปเดตสถานะแบบอะซิงโครนัส
 - **AST Protection**: ปรับปรุงให้ระบบ Self-Upgrade ปกป้องเครื่องมือกลุ่ม AST (ast_rename, find_references) เสมอ เพื่อรักษาความสามารถในการแก้ไขโค้ดที่ซับซ้อน
+- **New API Providers**: รองรับโมเดลจาก Z.AI (glm-5) และ OpenCode.ai (kimi-k2.5) ใน `provider-registry.json`
 
 # PersonalAIBotV2 — Complete Architecture Reference
 

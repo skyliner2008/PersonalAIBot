@@ -20,6 +20,7 @@ interface UpgradeStatus {
   isContinuousActive: boolean;
   isManualScanActive: boolean;
   isBatchActive: boolean;
+  isUpgrading: boolean;
 }
 
 interface ProposalStats {
@@ -389,26 +390,48 @@ export default function SelfUpgrade() {
         <div className="flex items-center gap-3">
           <button
             onClick={togglePause}
-            title="ปุ่มนี้ควบคุมทั้งระบบ Auto-Upgrade และ Auto-Scan พร้อมกัน"
+            disabled={status?.isUpgrading || status?.isBatchActive}
+            title={
+              status?.isUpgrading ? 'ระบบกำลัง Upgrade อยู่ ไม่สามารถเปลี่ยนสถานะได้'
+              : status?.isBatchActive ? 'ระบบกำลังดำเนินการแบบชุด ไม่สามารถเปลี่ยนสถานะได้'
+              : 'ปุ่มนี้ควบคุมทั้งระบบ Auto-Upgrade และ Auto-Scan พร้อมกัน'
+            }
             className={`flex items-center gap-2 px-3 py-1.5 rounded-lg font-bold text-xs transition-all duration-300 shadow-sm border ${
-              status?.paused 
-                ? 'bg-rose-500/10 text-rose-400 border-rose-500/20 hover:bg-rose-500/20 shadow-rose-500/10' 
-                : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20 shadow-emerald-500/10'
+              (status?.isUpgrading || status?.isBatchActive)
+                ? 'bg-gray-500/10 text-gray-500 border-gray-500/20 cursor-not-allowed opacity-60'
+                : status?.paused
+                  ? 'bg-rose-500/10 text-rose-400 border-rose-500/20 hover:bg-rose-500/20 shadow-rose-500/10'
+                  : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20 shadow-emerald-500/10'
             }`}
           >
-            {status?.paused ? '▶ เปิด Auto-Upgrade & Scan' : '⏸ พัก Auto-Upgrade & Scan'}
+            {(status?.isUpgrading || status?.isBatchActive)
+              ? '⏳ กำลัง Upgrade...'
+              : status?.paused
+                ? '▶ เปิด Auto-Upgrade & Scan'
+                : '⏸ พัก Auto-Upgrade & Scan'}
           </button>
 
           <button
             onClick={triggerScan}
+            disabled={status?.isBatchActive || status?.isUpgrading}
+            title={
+              status?.isBatchActive ? 'ระบบกำลังดำเนินการแบบชุด'
+              : status?.isUpgrading ? 'ระบบกำลัง Upgrade อยู่'
+              : status?.isManualScanActive ? 'กดเพื่อหยุด Scan'
+              : 'กดเพื่อเริ่ม Scan ทันที'
+            }
             className={`flex items-center gap-2 px-3 py-1.5 rounded-lg font-bold text-xs transition-all duration-300 shadow-sm border ${
-              status?.isManualScanActive
-                ? 'bg-orange-500/10 text-orange-400 border-orange-500/20 hover:bg-orange-500/20 shadow-orange-500/10'
-                : 'bg-blue-600/10 text-blue-400 border-blue-500/20 hover:bg-blue-600/20 shadow-blue-500/10'
+              (status?.isBatchActive || status?.isUpgrading)
+                ? 'bg-gray-500/10 text-gray-500 border-gray-500/20 cursor-not-allowed opacity-60'
+                : status?.isManualScanActive
+                  ? 'bg-orange-500/10 text-orange-400 border-orange-500/20 hover:bg-orange-500/20 shadow-orange-500/10'
+                  : 'bg-blue-600/10 text-blue-400 border-blue-500/20 hover:bg-blue-600/20 shadow-blue-500/10'
             }`}
           >
             <Search className={`w-3.5 h-3.5 ${scanning || status?.isManualScanActive ? 'animate-spin' : ''}`} />
-            {(scanning || status?.isManualScanActive) ? 'หยุด Scan' : 'เริ่ม Scan ทันที'}
+            {(status?.isBatchActive || status?.isUpgrading)
+              ? 'กำลังทำงาน...'
+              : (scanning || status?.isManualScanActive) ? 'หยุด Scan' : 'เริ่ม Scan ทันที'}
           </button>
 
           {/* Check Interval Dropdown */}
@@ -445,11 +468,22 @@ export default function SelfUpgrade() {
       {/* Status Region */}
       {status && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatusCard 
-            label="สถานะเครื่องยนต์" 
-            value={status.running ? (status.paused ? 'หยุดชั่วคราว' : status.isIdle ? 'พร้อมทำงาน' : 'พักเครื่อง (รอ Idle)') : 'ปิดการทำงาน'}
+          <StatusCard
+            label="สถานะเครื่องยนต์"
+            value={
+              status.isBatchActive ? 'กำลัง Upgrade แบบชุด'
+              : status.isUpgrading ? 'กำลัง Upgrade...'
+              : status.isManualScanActive ? 'กำลัง Scan...'
+              : status.running ? (status.paused ? 'หยุดชั่วคราว (OFF)' : status.isIdle ? 'พร้อมทำงาน' : 'พักเครื่อง (รอ Idle)')
+              : 'ปิดการทำงาน'
+            }
             icon={Activity}
-            color={status.running ? (status.isIdle ? 'text-green-400' : 'text-yellow-400') : 'text-gray-500'}
+            color={
+              status.isBatchActive || status.isUpgrading ? 'text-fuchsia-400'
+              : status.isManualScanActive ? 'text-orange-400'
+              : status.running ? (status.isIdle ? 'text-green-400' : 'text-yellow-400')
+              : 'text-gray-500'
+            }
           />
           <StatusCard 
             label="เวลาที่หยุดนิ่ง (Idle)" 

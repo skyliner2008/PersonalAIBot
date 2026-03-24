@@ -39,14 +39,14 @@
     "code": {
       "active": {
         "provider": "gemini",
-        "modelName": "gemini-3-flash-preview"
+        "modelName": "gemini-2.5-flash"
       },
       "fallbacks": []
     },
     "data": {
       "active": {
-        "provider": "minimax",
-        "modelName": "MiniMax-M2.7"
+        "provider": "gemini",
+        "modelName": "gemini-2.5-flash"
       },
       "fallbacks": []
     },

@@ -202,6 +202,24 @@ function runMigrations(dbInstance: SqliteDatabase): void {
       model_used TEXT,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
+
+    // --- Second Brain: Call Graph ---
+    // Tracks function-level call relationships: "function X in file A calls function Y in file B"
+    // Enables precise impact analysis: "if I change Y's signature, who calls it?"
+    dbInstance.exec(`CREATE TABLE IF NOT EXISTS codebase_calls (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      caller_file TEXT NOT NULL,
+      caller_function TEXT NOT NULL,
+      callee_file TEXT NOT NULL,
+      callee_function TEXT NOT NULL,
+      call_type TEXT NOT NULL DEFAULT 'direct',
+      line_number INTEGER,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(caller_file, caller_function, callee_file, callee_function)
+    )`);
+    dbInstance.exec(`CREATE INDEX IF NOT EXISTS idx_codebase_calls_callee ON codebase_calls(callee_file, callee_function)`);
+    dbInstance.exec(`CREATE INDEX IF NOT EXISTS idx_codebase_calls_caller ON codebase_calls(caller_file)`);
+
     // --- Brain Evolution: Upgrade Proposals ---
     try {
       const checkStmt = dbInstance.prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name='upgrade_proposals'`).get() as { sql: string } | undefined;
@@ -666,7 +684,15 @@ export function upsertUserProfile(userId: string, displayName: string, facts: st
 }
 
 // -- Codebase Mapper (Second Brain) --
-export function upsertCodebaseNode(filePath: string, summary: string, exportsArr: string[], depsArr: string[]): void {
+
+/** Typed export info for Second Brain — includes kind and signature */
+export interface ExportInfo {
+  name: string;
+  kind: 'function' | 'class' | 'interface' | 'type' | 'enum' | 'const' | 'let' | 'var' | 'unknown';
+  signature?: string; // e.g. "(key: string, value: string) => void"
+}
+
+export function upsertCodebaseNode(filePath: string, summary: string, exportsArr: (string | ExportInfo)[], depsArr: string[]): void {
   const normalized = filePath.replace(/\\/g, '/');
   runSql(getDb(), `
     INSERT INTO codebase_map (file_path, summary, exports_json, dependencies_json, last_scanned)
@@ -844,6 +870,69 @@ function cosineSim(a: number[], b: number[]): number {
   }
   const denom = Math.sqrt(magA) * Math.sqrt(magB);
   return denom === 0 ? 0 : dot / denom;
+}
+
+// -- Second Brain: Call Graph --
+
+export interface CodebaseCall {
+  id: number;
+  caller_file: string;
+  caller_function: string;
+  callee_file: string;
+  callee_function: string;
+  call_type: string;
+  line_number: number | null;
+}
+
+/**
+ * Upsert a function-level call: callerFunc in callerFile calls calleeFunc in calleeFile
+ */
+export function upsertCodebaseCall(
+  callerFile: string, callerFunction: string,
+  calleeFile: string, calleeFunction: string,
+  callType: string = 'direct', lineNumber: number | null = null
+): void {
+  const cf = callerFile.replace(/\\/g, '/');
+  const tf = calleeFile.replace(/\\/g, '/');
+  runSql(getDb(), `
+    INSERT INTO codebase_calls (caller_file, caller_function, callee_file, callee_function, call_type, line_number, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+    ON CONFLICT(caller_file, caller_function, callee_file, callee_function) DO UPDATE SET
+      call_type = excluded.call_type,
+      line_number = excluded.line_number,
+      updated_at = datetime('now')
+  `, [cf, callerFunction, tf, calleeFunction, callType, lineNumber]);
+}
+
+/**
+ * Get all callers of a specific function in a file.
+ * "Who calls function Y in file B?" — critical for signature change impact.
+ */
+export function getCallersOfFunction(calleeFile: string, calleeFunction: string): CodebaseCall[] {
+  const normalized = calleeFile.replace(/\\/g, '/');
+  return allRows<CodebaseCall>(getDb(),
+    `SELECT * FROM codebase_calls WHERE callee_file = ? AND callee_function = ? ORDER BY caller_file`,
+    [normalized, calleeFunction]
+  );
+}
+
+/**
+ * Get all functions called from a given file.
+ * "What does file A call?" — for understanding file's outgoing dependencies.
+ */
+export function getOutgoingCalls(callerFile: string): CodebaseCall[] {
+  const normalized = callerFile.replace(/\\/g, '/');
+  return allRows<CodebaseCall>(getDb(),
+    `SELECT * FROM codebase_calls WHERE caller_file = ? ORDER BY callee_file`, [normalized]
+  );
+}
+
+/**
+ * Clear all call records for a source file (used before re-building calls during scan).
+ */
+export function clearCodebaseCallsForFile(callerFile: string): void {
+  const normalized = callerFile.replace(/\\/g, '/');
+  runSql(getDb(), `DELETE FROM codebase_calls WHERE caller_file = ?`, [normalized]);
 }
 
 // -- Q&A --

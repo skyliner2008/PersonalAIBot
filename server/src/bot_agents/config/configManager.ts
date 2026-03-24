@@ -19,8 +19,6 @@ const CONFIG_PATH = path.join(process.cwd(), 'ai_routing_config.json');
 // retired or renamed. Format: 'old-model-name' → 'new-model-name'
 // ============================================================
 const STALE_MODEL_MAP: Record<string, string> = {
-  // Gemini models mapping (removed preview-to-stale redirects to allow actual use)
-
   // OpenAI models that don't exist yet / were placeholders
   'gpt-5.2-codex': 'gpt-4o',
   'gpt-5.1-codex': 'gpt-4o',
@@ -114,10 +112,8 @@ export class ConfigManager {
 
         const result: SystemRoutingConfig = { autoRouting, routes: validated, botOverrides };
 
-        // Migration: detect if the persisted config differs after normalization
-        // (stale model names were replaced). If so, re-save with migrated values.
-        const migratedText = JSON.stringify(result, null, 2);
-        const oldNormalized = JSON.stringify({ autoRouting, routes: validated, botOverrides }, null, 2);
+        // Migration: detect if the persisted config contains stale model names.
+        // If so, re-save with the migrated (normalized) values.
         if (this.detectStaleMigration(rawText, result)) {
           logger.info('[Migration] Persisted config had stale model names — re-saving with migrated values');
           this.saveConfig(result);

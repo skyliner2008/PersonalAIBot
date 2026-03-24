@@ -32,6 +32,7 @@
 - **แก้โค้ดตัวเองได้ (v2.1)** พร้อมระบบ rollback ป้องกันการพัง และระบบ **Resilient Batch Implementation** ที่ทำงานต่อเนื่องข้ามการรีสตาร์ท (ปิดเป็นค่าเริ่มต้นเพื่อความปลอดภัย)
 - **Zero-Config Voice Experience**: ระบบสำรองการโทรด้วยเสียง (Automatic STT Fallback) พร้อมระบบล้าง URL Autostart ป้องกันการโทรเองซ้ำซ้อน
 - **Gemini 2.x/3.x Optimized**: รองรับ Gemini 2.5 Flash/Pro และ Gemini 3.1 Pro เต็มรูปแบบ พร้อมระบบ Model Routing ที่เสถียรสำหรับผู้ใช้ Paid Tier 1
+- **New API Providers**: รองรับผู้ให้บริการใหม่ชั้นนำผ่าน OpenAI-compatible APIs ได้แก่ **Z.AI** (GLM-5) และ **OpenCode.ai** (Kimi-k2.5, Deepseek-coder) ผ่าน Unified Registry
 - **Automate Facebook** ตอบแชท/คอมเมนต์/โพสต์อัตโนมัติ
 
 ---
@@ -49,7 +50,7 @@
 | **Styling** | TailwindCSS | 3.4 |
 | **Terminal UI** | xterm.js | 6.0 |
 | **AI Primary** | Google Gemini | gemini-2.0-flash / 2.5-flash / 3.1-pro |
-| **AI Secondary** | OpenAI | SDK 6.25 |
+| **AI Secondary** | OpenAI, Z.AI, OpenCode.ai, OpenRouter | - |
 | **AI CLI** | Gemini CLI, Codex CLI, Claude CLI | - |
 | **Browser Automation** | Playwright (Chromium) | 1.49 |
 | **LINE Bot** | @line/bot-sdk | 10.6 |
