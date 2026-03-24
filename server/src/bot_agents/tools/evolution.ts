@@ -316,19 +316,24 @@ export async function createTool({
 }): Promise<string> {
     try {
         const result = await registerDynamicTool(name, description, code, parameters);
+
+        const errors = Array.isArray(result.errors) ? result.errors : [];
+        const warnings = Array.isArray(result.warnings) ? result.warnings : [];
+
         if (!result.valid) {
             let errorMsg = `❌ ไม่สามารถสร้างเครื่องมือได้:\n`;
-            errorMsg += result.errors.map((e) => `  • ${e}`).join('\n');
-            if (result.warnings.length > 0) {
+            errorMsg += errors.map((e) => `  • ${e}`).join('\n');
+            if (warnings.length > 0) {
                 errorMsg += `\n\n⚠️ Warnings:\n`;
-                errorMsg += result.warnings.map((w) => `  • ${w}`).join('\n');
+                errorMsg += warnings.map((w) => `  • ${w}`).join('\n');
             }
             return errorMsg;
         }
+
         let successMsg = `✅ สร้างเครื่องมือ '${name}' สำเร็จแล้ว!`;
-        if (result.warnings.length > 0) {
+        if (warnings.length > 0) {
             successMsg += `\n\n⚠️ Warnings:\n`;
-            successMsg += result.warnings.map((w) => `  • ${w}`).join('\n');
+            successMsg += warnings.map((w) => `  • ${w}`).join('\n');
         }
         return successMsg;
     } catch (err: any) {

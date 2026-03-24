@@ -960,36 +960,36 @@ async function analyzeBatchWithLLM(rootDir: string, batchFiles: string[]): Promi
       const chunkContent = chunk.code;
       const chunkInfo = chunks.length > 1 ? ` [Chunk: ${chunk.chunkLabel}]` : '';
 
-      const prompt = `You are an expert TypeScript code reviewer performing a SAFETY audit. Your goal: find bugs that WILL crash the server or corrupt data at runtime. Nothing else matters.
+      const prompt = `You are an expert TypeScript code reviewer performing a codebase audit.
+Your primary focus MUST be finding critical bugs and security vulnerabilities that WILL crash the server or corrupt data at runtime.
+However, you are also allowed to report highly valuable improvements in performance, refactoring, new features, or tool usage if they are significant.
 
 FILE: "${relPath}"${chunkInfo}
 
-WHAT TO REPORT (only these):
-- Uncaught exceptions that will crash the process
-- Null/undefined dereference that will throw at runtime
-- Incorrect function calls (wrong argument count, wrong types that JS won't auto-coerce)
-- Resource leaks (unclosed connections, missing clearInterval/clearTimeout)
-- SQL injection via unsanitized template literals in .prepare()/.exec()
-- Race conditions that cause data corruption
-- Infinite loops or unbounded recursion
+PRIORITY 1 - WHAT TO ACTIVELY REPORT (CRITICAL):
+- Uncaught exceptions, null/undefined dereferences that will throw at runtime
+- Incorrect function calls, type mismatches that crash JS
+- Resource leaks, Infinite loops, race conditions
+- SQL/NoSQL injection paths or explicit security flaws
 
-WHAT TO NEVER REPORT:
-- Style issues, naming conventions, code organization
+PRIORITY 2 - OTHER ACCEPTABLE REPORTS (ONLY IF SIGNIFICANT):
+- Performance bottlenecks (e.g., N+1 queries, unnecessary deep cloning)
+- Refactor opportunities (e.g., extracting massive functions, deduplicating logic)
+- Missing features or absent tool integrations that would greatly enhance functionality
+
+WHAT TO NEVER REPORT (STRICT RULES):
+- Minor style issues, naming conventions, code organization preferences
 - Missing logging, comments, documentation
-- TypeScript type-only issues (they don't crash at runtime)
-- Theoretical security concerns without concrete exploit path
-- Performance optimizations that aren't causing actual bugs
-- Redundant null checks (safe code is GOOD code, don't remove safety)
+- TypeScript type-only issues (that don't crash at runtime)
+- Redundant null checks (safe code is GOOD code)
 - Issues in other files — you can ONLY see "${relPath}"
-- "Add error handling" for code that already has try/catch
-- "Add validation" for internal functions not exposed to user input
-- BUGS THAT ARE ALREADY FIXED: Read the code carefully. If an object is already correctly null-checked (e.g., using '?.' or an if statement), DO NOT report it as a null dereference risk.
+- BUGS THAT ARE ALREADY FIXED: If an object is already safely null-checked, DO NOT report it.
 
 YOUR SUGGESTED FIX RULES:
-- Must be a MINIMAL valid TypeScript snippet (only the changed lines, max 20 lines)
+- Must be a MINIMAL valid TypeScript snippet (only the changed lines)
 - Must preserve ALL existing closing brackets }, ), ]
 - Must NOT add imports for packages not in the project
-- Must NOT change function signatures, export names, or interface definitions
+- Must NOT change function signatures or export names
 - If unsure → set confidence below 0.5 (it will be auto-filtered)
 
 Respond in pure JSON (no markdown wrapping) matching exactly this structure:
@@ -1000,11 +1000,11 @@ Respond in pure JSON (no markdown wrapping) matching exactly this structure:
     "dependencies": ["../database/db", "fs"]
   },
   "issues": [
-    {"type":"bug"|"security","title":"Short title","description":"What crashes and when","line_range":"10-15","suggested_fix":"minimal fix code","priority":"medium"|"high"|"critical","confidence":0.0-1.0}
+    {"type":"bug"|"feature"|"performance"|"refactor"|"security"|"tools","title":"Short title","description":"What crashes or what can be improved","line_range":"10-15","suggested_fix":"minimal fix code","priority":"low"|"medium"|"high"|"critical","confidence":0.0-1.0}
   ]
 }
 
-If no real runtime bugs are found, return an empty array for "issues": []
+If no issues are found, return an empty array for "issues": []
 Be conservative — false negatives are OK, false positives waste resources.
 
 EXAMPLE OUTPUT (for reference — adapt to actual findings):
