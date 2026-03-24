@@ -92,11 +92,16 @@ class SimpleVectorIndex {
         documents: Array.from(this.index.documents.values()),
         savedAt: new Date().toISOString(),
       };
-      fs.writeFileSync(this.indexPath, JSON.stringify(data, null, 2), 'utf-8');
+      // §6.2: Atomic write — write to temp file first, then rename to prevent corruption
+      const tmpPath = this.indexPath + '.tmp';
+      fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2), 'utf-8');
+      fs.renameSync(tmpPath, this.indexPath);
       this.dirty = false;
-      log.debug('Vector index persisted');
+      log.debug('Vector index persisted (atomic write)');
     } catch (err) {
       log.error('Failed to persist vector index', { error: String(err) });
+      // Clean up temp file if rename failed
+      try { fs.unlinkSync(this.indexPath + '.tmp'); } catch { /* best effort */ }
     }
   }
 

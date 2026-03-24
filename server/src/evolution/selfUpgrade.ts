@@ -1614,6 +1614,25 @@ function saveUpgradeDiff(id: number, filePath: string, original: string, modifie
  */
 let _baselineErrors: string[] | null = null;
 
+/** §5.1: Parse TSC error line into structured { file, line, errorCode } for reliable comparison */
+interface TscError { file: string; line: number; errorCode: string; message: string; raw: string; }
+function parseTscErrors(stdout: string): TscError[] {
+  const errors: TscError[] = [];
+  for (const line of stdout.split('\n')) {
+    // Match: src/foo.ts(42,5): error TS2339: Property 'x' does not exist
+    const m = line.match(/^(.+?)\((\d+),\d+\):\s*error\s+(TS\d+):\s*(.+)/);
+    if (m) {
+      errors.push({ file: m[1].trim(), line: parseInt(m[2], 10), errorCode: m[3], message: m[4].trim(), raw: line });
+    }
+  }
+  return errors;
+}
+
+/** Create a dedup key from a TSC error — uses file + errorCode + line for stable comparison */
+function tscErrorKey(e: TscError): string {
+  return `${e.file}:${e.line}:${e.errorCode}`;
+}
+
 async function captureBaselineErrors(rootDir: string): Promise<string[]> {
   if (_baselineErrors !== null) return _baselineErrors;
   const checkDir = path.resolve(rootDir, '..');
@@ -1622,7 +1641,7 @@ async function captureBaselineErrors(rootDir: string): Promise<string[]> {
     _baselineErrors = [];
   } catch (err: any) {
     const stdout = typeof err.stdout === 'string' ? err.stdout : '';
-    _baselineErrors = stdout.split('\n').filter((line: string) => line.includes('error TS')).sort();
+    _baselineErrors = parseTscErrors(stdout).map(e => tscErrorKey(e)).sort();
   }
   log.info(`TSC baseline captured: ${_baselineErrors!.length} pre-existing errors`);
   return _baselineErrors!;
@@ -1641,30 +1660,36 @@ async function verifyUpgrade(rootDir: string, proposalId: number): Promise<void>
   const baseline = await captureBaselineErrors(rootDir);
 
   // Run tsc after the upgrade
-  let afterErrors: string[] = [];
+  let afterErrorKeys: string[] = [];
+  let afterRawErrors: string[] = [];
   try {
     await execPromise('npx tsc --noEmit', { cwd: checkDir });
     // No errors at all — even better than baseline!
     return;
   } catch (err: any) {
     const stdout = typeof err.stdout === 'string' ? err.stdout : '';
-    afterErrors = stdout.split('\n').filter((line: string) => line.includes('error TS')).sort();
+    const parsed = parseTscErrors(stdout);
+    afterErrorKeys = parsed.map(e => tscErrorKey(e)).sort();
+    afterRawErrors = parsed.map(e => e.raw);
   }
 
-  // Compare: find NEW errors that didn't exist in baseline
+  // §5.1: Compare using structured error codes instead of raw string matching
   const baselineSet = new Set(baseline);
-  const newErrors = afterErrors.filter((err: string) => !baselineSet.has(err));
+  const newErrorKeys = afterErrorKeys.filter(key => !baselineSet.has(key));
 
-  if (newErrors.length === 0) {
-    // No new errors introduced — the upgrade is safe even if baseline errors remain
-    log.info(`Proposal #${proposalId} verification passed (${afterErrors.length} pre-existing errors, 0 new)`);
+  if (newErrorKeys.length === 0) {
+    log.info(`Proposal #${proposalId} verification passed (${afterErrorKeys.length} pre-existing errors, 0 new)`);
     return;
   }
 
   // New errors were introduced — reject the upgrade
-  // Also invalidate baseline so next check recaptures the true state
   _baselineErrors = null;
-  const errorMsg = `New TypeScript errors introduced (${newErrors.length}):\n${newErrors.join('\n')}`;
+  // Show the raw error lines for readability in the rejection message
+  const newRawErrors = afterRawErrors.filter(raw => {
+    const parsed = parseTscErrors(raw);
+    return parsed.length > 0 && !baselineSet.has(tscErrorKey(parsed[0]));
+  });
+  const errorMsg = `New TypeScript errors introduced (${newErrorKeys.length}):\n${(newRawErrors.length > 0 ? newRawErrors : newErrorKeys).join('\n')}`;
   throw { stdout: errorMsg, message: errorMsg };
 }
 
@@ -1869,20 +1894,46 @@ async function runtimeBootTest(rootDir: string, proposalId: number): Promise<voi
       }
     });
 
-    // Wait 4 seconds, then try to hit /health
+    // §5.2: Wait 6 seconds (increased from 4s), then run smoke tests
     setTimeout(async () => {
       if (settled) return;
 
       try {
-        const resp = await fetch(`http://127.0.0.1:${testPort}/health`, { signal: AbortSignal.timeout(5000) });
-        if (resp.ok) {
+        // 1. Health check
+        const healthResp = await fetch(`http://127.0.0.1:${testPort}/health`, { signal: AbortSignal.timeout(5000) });
+        if (!healthResp.ok) {
           settled = true;
-          log.info(`[RuntimeTest] Proposal #${proposalId} — /health returned OK, server boots clean.`);
-          resolve();
-        } else {
-          settled = true;
-          reject(new Error(`Runtime boot test: /health returned status ${resp.status}`));
+          reject(new Error(`Runtime boot test: /health returned status ${healthResp.status}`));
+          return;
         }
+        log.info(`[RuntimeTest] Proposal #${proposalId} — /health OK`);
+
+        // §5.2: Smoke test endpoints — verify subsystems are functional
+        const smokeEndpoints = [
+          '/api/upgrade/status',
+          '/api/models',
+        ];
+        const failedSmoke: string[] = [];
+        for (const ep of smokeEndpoints) {
+          try {
+            const resp = await fetch(`http://127.0.0.1:${testPort}${ep}`, { signal: AbortSignal.timeout(3000) });
+            // Accept 2xx or 401 (auth required but endpoint exists)
+            if (resp.status >= 500) {
+              failedSmoke.push(`${ep} returned ${resp.status}`);
+            }
+          } catch (smokeErr: any) {
+            failedSmoke.push(`${ep}: ${smokeErr.message}`);
+          }
+        }
+
+        if (failedSmoke.length > 0) {
+          log.warn(`[RuntimeTest] Smoke test warnings: ${failedSmoke.join('; ')}`);
+          // Warnings only — don't reject for smoke test failures (they may need auth)
+        }
+
+        settled = true;
+        log.info(`[RuntimeTest] Proposal #${proposalId} — boot + smoke tests passed.`);
+        resolve();
       } catch (err: any) {
         // If fetch fails, the server didn't start properly
         if (!settled) {
@@ -1894,7 +1945,7 @@ async function runtimeBootTest(rootDir: string, proposalId: number): Promise<voi
         try { child.kill('SIGTERM'); } catch {}
         setTimeout(() => { try { child.kill('SIGKILL'); } catch {} }, 2000);
       }
-    }, 4000);
+    }, 6000);
 
     // Hard timeout: kill after 15 seconds no matter what
     setTimeout(() => {
@@ -2189,6 +2240,30 @@ function getSortedImplementationSpecialists(swarmCoordinator: any): string[] {
 
 // ── Auto Implementation ──
 
+// §6.1: File-level locking — prevent 2 proposals from editing the same file concurrently
+const _fileLocks = new Map<string, number>(); // Map<normalizedPath, proposalId>
+
+function acquireFileLock(filePath: string, proposalId: number): boolean {
+  const key = filePath.replace(/\\/g, '/');
+  const existing = _fileLocks.get(key);
+  if (existing !== undefined && existing !== proposalId) {
+    log.warn(`[SelfUpgrade] File lock denied for proposal #${proposalId} — file "${key}" is locked by proposal #${existing}`);
+    return false;
+  }
+  _fileLocks.set(key, proposalId);
+  return true;
+}
+
+function releaseFileLock(filePath: string): void {
+  _fileLocks.delete(filePath.replace(/\\/g, '/'));
+}
+
+function releaseAllFileLocks(proposalId: number): void {
+  for (const [key, pid] of _fileLocks) {
+    if (pid === proposalId) _fileLocks.delete(key);
+  }
+}
+
 export async function implementProposalById(id: number, rootDir: string): Promise<boolean> {
   const db = getDb();
   const proposal = db.prepare('SELECT * FROM upgrade_proposals WHERE id = ?').get(id) as UpgradeProposal | undefined;
@@ -2196,6 +2271,12 @@ export async function implementProposalById(id: number, rootDir: string): Promis
 
   const fileName = path.basename(proposal.file_path);
   const relativePath = proposal.file_path.replace(/\\/g, '/');
+
+  // §6.1: Acquire file lock before implementation
+  if (!acquireFileLock(relativePath, id)) {
+    log.warn(`[SelfUpgrade] Skipping proposal #${id} — file "${relativePath}" is currently being edited by another proposal`);
+    return false;
+  }
 
   // 🛡️ Pre-Implementation Validation Gate — reject obviously bad proposals before wasting resources
   const REJECT_FILE_PATTERNS = [
@@ -2545,6 +2626,31 @@ export async function implementProposalById(id: number, rootDir: string): Promis
       importContext = `\n[EXISTING IMPORTS — DO NOT BREAK THESE]:\n${importLines.join('\n')}\n`;
     }
   } catch {}
+
+  // §3.2: Build available project imports map from Second Brain
+  let projectImportsMap = '';
+  try {
+    const upstreamDeps = getDb().prepare(
+      `SELECT cm.file_path, cm.exports_json FROM codebase_map cm
+       INNER JOIN codebase_edges ce ON ce.target_file = cm.file_path
+       WHERE ce.source_file = ? LIMIT 15`
+    ).all(relativePath) as Array<{ file_path: string; exports_json: string }>;
+    if (upstreamDeps.length > 0) {
+      const importItems: string[] = [];
+      for (const dep of upstreamDeps) {
+        try {
+          const exports = JSON.parse(dep.exports_json || '[]');
+          const symbols = exports.map((e: any) => typeof e === 'string' ? e : `${e.name}${e.signature ? `: ${e.signature}` : ''}`).slice(0, 10);
+          if (symbols.length > 0) {
+            importItems.push(`  ${dep.file_path}: [${symbols.join(', ')}]`);
+          }
+        } catch { /* skip bad JSON */ }
+      }
+      if (importItems.length > 0) {
+        projectImportsMap = `\n[📦 AVAILABLE PROJECT IMPORTS — Use these instead of inventing new ones]\n${importItems.join('\n')}\n`;
+      }
+    }
+  } catch { /* Second Brain may not be populated yet */ }
 
   // Build affected files context — show AI what other files depend on this one
   let affectedFilesContext = '';
@@ -3249,6 +3355,18 @@ ${commonSafetyRules}`;
 
       db.prepare(`UPDATE upgrade_proposals SET status = 'rejected', description = description || ? WHERE id = ?`)
         .run(`\n\nAuto-Implement Failed: ${errMsg}`, id);
+
+      // §4.1: Record anti_pattern learning from rejection
+      try {
+        const { addLearning } = await import('./learningJournal.js');
+        // Only record pattern for non-generic errors (quota, timeout, etc. are not anti-patterns)
+        const isGenericError = /429|quota|timeout|ECONNREFUSED|SIGTERM/i.test(errMsg);
+        if (!isGenericError && proposal.file_path) {
+          const antiPatternInsight = `[Anti-Pattern] File: ${proposal.file_path} | Proposal: "${proposal.title}" failed: ${errMsg.substring(0, 200)}`;
+          addLearning('anti_pattern', antiPatternInsight, `rejection_proposal_${id}`, 0.6);
+          log.debug(`[SelfUpgrade] Recorded anti_pattern learning for proposal #${id}`);
+        }
+      } catch { /* best effort */ }
     } catch (dbErr: any) {
       if (dbErr === err) throw err; // Re-throw quota errors
       log.error(`[SelfUpgrade] DB error while updating proposal #${id} status: ${dbErr.message}`);

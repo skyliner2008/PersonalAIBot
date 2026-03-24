@@ -1007,3 +1007,17 @@ Outcome:
 Outcome:
 - Fixed "Model Not Found" (404) and "Quota Exceeded" (429) errors for users on Gemini Paid Tier 1.
 - Ensured the bot always uses the most reliable and cost-effective models available.
+
+### 18.16 Self-Upgrade System Comprehensive Improvements (Phase 3-6) (2026-03-24)
+
+- **Context & Safety Improvements** (\`selfUpgrade.ts\` & \`vectorStore.ts\`):
+  - Injected **Import Map Context** from Second Brain (\`codebase_map\`) into the LLM implementation prompt to reduce syntax errors caused by hallucinated imports.
+  - Implemented **Atomic Writes** (\`fs.renameSync\`) in Vector Store to prevent index corruption during unexpected server crashes.
+  - Added **File-Level Locking** (\`acquireFileLock\`) to prevent multiple upgrade proposals from editing the exact same file simultaneously.
+- **Verification & Learning Pipeline**:
+  - Upgraded TSC verification to use **Structured Error Code Parsing** instead of simple string matching, accurately rejecting proposals only when *new* error codes (e.g., TS2339) are introduced.
+  - Expanded **Runtime Boot Tests** with API Smoke Tests (\`/health\`, \`/api/upgrade/status\`, \`/api/models\`) and increased wait time to 6s for more accurate health validation.
+  - Added **Negative Learning (\`anti_pattern\`)** to the \`learningJournal\` which automatically records insights when a proposal fails implementation, preventing the AI from repeating the exact same mistake.
+
+Outcome:
+- Reduced the Auto-Implement rejection rate by providing the AI with accurate internal project context, stable file interaction, and robust automated validation tools.

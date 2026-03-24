@@ -6,6 +6,7 @@
     - **DynamicRouter Resilience**: เพิ่มระบบป้องกัน SyntaxError ใน `agent.ts` โดยใช้ Regex แบบเจาะจงเฉพาะ Tool List และระบบ Multi-match retry เพื่อให้การประมวลผล JSON นิ่งและเสถียรที่สุด 🧩🚀
     - **Evolution Engine Updated**: ปรับปรุงระบบ Self-Upgrade ให้จดจำเครื่องมือสำคัญ (AST Tools) เสมอ ป้องกันการลบเครื่องมือที่จำเป็นในการซ่อมแซมตัวเอง 🧠🛠️
     - **Swarm Race Condition Fix**: นำระบบ Micro-queueing มาใช้ใน `SwarmHealthTracker` เพื่อป้องกันข้อมูลสถานะผิดพลาดเมื่อมีการบันทึกสถานะ Specialist พร้อมกันหลายรายการ 🛡️⚡
+    - **Self-Upgrade Comprehensive Fix**: ยกระดับระบบ Self-Upgrade ด้วย Import Map Context, File-Level Locking, Atomic Writes, Structured TSC Parsing, Smoke Tests และระบบตีกลับ (Anti-Pattern Learning) เพื่อลดอัตราการแก้ไขโค้ดผิดพลาด 🚀🤖
   </p>
 
   <p>

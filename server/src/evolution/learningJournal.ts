@@ -18,6 +18,7 @@ export type LearningCategory =
     | 'error_solutions'     // error ที่เจอและวิธีแก้
     | 'prompt_improvements' // ปรับปรุง prompt/persona ที่ได้ผล
     | 'performance'         // insights เกี่ยวกับ performance
+    | 'anti_pattern'        // §4.1: สิ่งที่ไม่ควรทำ — เรียนรู้จาก rejected proposals
     | 'general';            // ความรู้ทั่วไป
 
 export interface Learning {
