@@ -1,5 +1,4 @@
-import { Type } from '@google/genai';
-import type { FunctionDeclaration } from '@google/genai';
+import type { AITool } from '../providers/baseProvider.js';
 import {
   createPlan,
   updatePlanStep,
@@ -11,19 +10,19 @@ import {
 // ============================================================
 // Tool: create_plan
 // ============================================================
-export const createPlanDeclaration: FunctionDeclaration = {
+export const createPlanDeclaration: AITool = {
   name: 'create_plan',
   description: 'Create a persistent step-by-step plan for multi-step tasks.',
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
       objective: {
-        type: Type.STRING,
+        type: 'string',
         description: 'Main objective for this plan',
       },
       steps: {
-        type: Type.ARRAY,
-        items: { type: Type.STRING },
+        type: 'array',
+        items: { type: 'string' },
         description: 'Ordered list of concise steps',
       },
     },
@@ -63,22 +62,22 @@ async function createPlanToolForChat(
 // ============================================================
 // Tool: update_plan_step
 // ============================================================
-export const updatePlanStepDeclaration: FunctionDeclaration = {
+export const updatePlanStepDeclaration: AITool = {
   name: 'update_plan_step',
   description: 'Update status of a step in the active plan.',
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
       step_id: {
-        type: Type.STRING,
+        type: 'string',
         description: 'Step ID (e.g. step-1)',
       },
       status: {
-        type: Type.STRING,
+        type: 'string',
         description: 'One of: pending, in_progress, completed, failed',
       },
       result: {
-        type: Type.STRING,
+        type: 'string',
         description: 'Optional short result or note',
       },
     },
@@ -128,10 +127,10 @@ async function updatePlanStepToolForChat(
 // ============================================================
 // Tool: close_plan
 // ============================================================
-export const closePlanDeclaration: FunctionDeclaration = {
+export const closePlanDeclaration: AITool = {
   name: 'close_plan',
   description: 'Close the active plan immediately.',
-  parameters: { type: Type.OBJECT, properties: {} },
+  parameters: { type: 'object', properties: {} },
 };
 
 async function closePlanToolForChat(chatId: string): Promise<string> {
@@ -152,7 +151,7 @@ async function closePlanToolForChat(chatId: string): Promise<string> {
 // Exports
 // ============================================================
 
-export const planningToolDeclarations: FunctionDeclaration[] = [
+export const planningToolDeclarations: AITool[] = [
   createPlanDeclaration,
   updatePlanStepDeclaration,
   closePlanDeclaration,

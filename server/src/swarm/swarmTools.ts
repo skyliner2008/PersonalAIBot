@@ -2,8 +2,7 @@
  * Swarm tools that let agents delegate and coordinate specialist work.
  */
 
-import { Type } from '@google/genai';
-import type { FunctionDeclaration } from '@google/genai';
+import type { AITool } from '../bot_agents/types.js';
 import { getSwarmCoordinator } from './swarmCoordinator.js';
 import type { TaskType } from './taskQueue.js';
 import type { BotContext } from '../bot_agents/types.js';
@@ -14,26 +13,26 @@ import { startMeeting, formatMeetingResult } from './roundtable.js';
 /**
  * Delegate a subtask to a specialist lane.
  */
-export const delegateTaskDeclaration: FunctionDeclaration = {
+export const delegateTaskDeclaration: AITool = {
   name: 'delegate_task',
   description: 'Delegate a subtask to a swarm specialist (vision, code, translation, research, analysis, summary).',
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
       task_type: {
-        type: Type.STRING,
+        type: 'string',
         description: 'Task type: vision_analysis, code_review, code_generation, translation, web_search, data_analysis, summarization',
       },
       message: {
-        type: Type.STRING,
+        type: 'string',
         description: 'Task instruction for the specialist',
       },
       specialist: {
-        type: Type.STRING,
+        type: 'string',
         description: 'Optional specialist name override (for example: vision, coder, researcher, translator, analyst)',
       },
       priority: {
-        type: Type.STRING,
+        type: 'string',
         description: 'Priority: low (1), normal (3), high (5). Default is 3.',
       },
     },
@@ -44,18 +43,18 @@ export const delegateTaskDeclaration: FunctionDeclaration = {
 /**
  * Ask reviewer lane for strict critique.
  */
-export const requestPeerReviewDeclaration: FunctionDeclaration = {
+export const requestPeerReviewDeclaration: AITool = {
   name: 'request_peer_review',
   description: 'Request strict peer review for code, reasoning, or plan quality.',
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
       content_to_review: {
-        type: Type.STRING,
+        type: 'string',
         description: 'Content to review',
       },
       specific_concerns: {
-        type: Type.STRING,
+        type: 'string',
         description: 'Optional focus points or concerns',
       },
     },
@@ -66,14 +65,14 @@ export const requestPeerReviewDeclaration: FunctionDeclaration = {
 /**
  * Check swarm queue and runtime status.
  */
-export const checkSwarmStatusDeclaration: FunctionDeclaration = {
+export const checkSwarmStatusDeclaration: AITool = {
   name: 'check_swarm_status',
   description: 'Check swarm status, queue depth, and specialist readiness.',
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
       detail_level: {
-        type: Type.STRING,
+        type: 'string',
         description: 'summary or detailed',
       },
     },
@@ -83,11 +82,11 @@ export const checkSwarmStatusDeclaration: FunctionDeclaration = {
 /**
  * List available specialists.
  */
-export const listSpecialistsDeclaration: FunctionDeclaration = {
+export const listSpecialistsDeclaration: AITool = {
   name: 'list_specialists',
   description: 'List available specialists and their capabilities.',
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {},
   },
 };
@@ -95,18 +94,18 @@ export const listSpecialistsDeclaration: FunctionDeclaration = {
 /**
  * Start background project workspace loop.
  */
-export const startProjectWorkspaceDeclaration: FunctionDeclaration = {
+export const startProjectWorkspaceDeclaration: AITool = {
   name: 'start_project_workspace',
   description: 'Start a background project workspace where manager/coder/tester/reviewer can iterate toward a goal.',
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
       goal: {
-        type: Type.STRING,
+        type: 'string',
         description: 'Main project objective',
       },
       max_turns: {
-        type: Type.NUMBER,
+        type: 'number',
         description: 'Optional max turns, default 50',
       },
     },
@@ -117,18 +116,18 @@ export const startProjectWorkspaceDeclaration: FunctionDeclaration = {
 /**
  * Start a roundtable discussion where all CLI agents collaborate.
  */
-export const startRoundtableDeclaration: FunctionDeclaration = {
+export const startRoundtableDeclaration: AITool = {
   name: 'start_roundtable',
   description: 'Start a roundtable discussion where Jarvis leads Gemini, Codex, and Claude CLIs in a collaborative multi-round discussion to answer a complex question.',
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
       objective: {
-        type: Type.STRING,
+        type: 'string',
         description: 'Main topic or question for the roundtable discussion',
       },
       max_rounds: {
-        type: Type.NUMBER,
+        type: 'number',
         description: 'Maximum discussion rounds (1-3). Default is 2.',
       },
     },
@@ -389,7 +388,7 @@ export function getSwarmToolHandlers(ctx: BotContext) {
   };
 }
 
-export const swarmToolDeclarations = [
+export const swarmToolDeclarations: AITool[] = [
   delegateTaskDeclaration,
   requestPeerReviewDeclaration,
   checkSwarmStatusDeclaration,

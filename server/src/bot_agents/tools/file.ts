@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { Type, FunctionDeclaration } from '@google/genai';
+import type { AITool } from '../providers/baseProvider.js';
 import { astEditor } from '../../evolution/astEditor.js';
 import { refactorManager } from '../../evolution/refactorManager.js';
 
@@ -128,14 +128,14 @@ function validateCodeSyntax(filePath: string, content: string): { ok: boolean; e
 // ==========================================
 // 1. List Files in Directory
 // ==========================================
-export const listFilesDeclaration: FunctionDeclaration = {
+export const listFilesDeclaration: AITool = {
   name: "list_files",
   description: "แสดงรายชื่อไฟล์และโฟลเดอร์ในไดเรกทอรีที่ระบุ เพื่อดูว่ามีไฟล์อะไรอยู่บ้าง",
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
       directory_path: {
-        type: Type.STRING,
+        type: 'string',
         description: "พาธของไดเรกทอรี (เช่น 'C:\\Users\\MSI\\Documents' หรือ '.')",
       },
     },
@@ -158,14 +158,14 @@ export async function listFiles({ directory_path }: { directory_path: string }):
 // ==========================================
 // 2. Read File Content
 // ==========================================
-export const readFileContentDeclaration: FunctionDeclaration = {
+export const readFileContentDeclaration: AITool = {
   name: "read_file_content",
   description: "อ่านเนื้อหาภายในไฟล์ (รองรับเฉพาะไฟล์ข้อความ .txt, .js, .ts, .json, .md)",
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
       file_path: {
-        type: Type.STRING,
+        type: 'string',
         description: "พาธของไฟล์ที่ต้องการอ่าน",
       },
     },
@@ -187,21 +187,66 @@ export async function readFileContent({ file_path }: { file_path: string }): Pro
   }
 }
 
+// Alias for read_file_content
+export const readFileDeclaration: AITool = {
+  name: "read_file",
+  description: "อ่านเนื้อหาภายในไฟล์ (Alias ของ read_file_content)",
+  parameters: readFileContentDeclaration.parameters,
+};
+export const readFile = readFileContent;
+
+// ==========================================
+// 2.5 View File (Optimized for larger files)
+// ==========================================
+export const viewFileDeclaration: AITool = {
+  name: "view_file",
+  description: "ดูเนื้อหาไฟล์แบบระบุช่วงบรรทัด เพื่อประหยัด Token สำหรับไฟล์ขนาดใหญ่",
+  parameters: {
+    type: 'object',
+    properties: {
+      file_path: { type: 'string', description: "พาธของไฟล์" },
+      start_line: { type: 'number', description: "เริ่มที่บรรทัด (เริ่มต้นที่ 1)", default: 1 },
+      end_line: { type: 'number', description: "จบที่บรรทัด (ไม่ระบุจะอ่านจนจบไฟล์)" },
+    },
+    required: ["file_path"],
+  },
+};
+
+export async function viewFile({ file_path, start_line = 1, end_line }: { file_path: string, start_line?: number, end_line?: number }): Promise<string> {
+  const check = validateFilePath(file_path, 'read');
+  if (!check.safe) return check.reason!;
+  try {
+    const resolvedPath = path.resolve(file_path);
+    const content = fs.readFileSync(resolvedPath, 'utf8');
+    const allLines = content.split('\n');
+    
+    const start = Math.max(0, start_line - 1);
+    const end = end_line ? Math.min(allLines.length, end_line) : allLines.length;
+    
+    const sliced = allLines.slice(start, end);
+    const numberedContent = sliced.map((line, index) => `${start + index + 1}: ${line}`).join('\n');
+    
+    return `ไฟล์: ${resolvedPath} (บรรทัดที่ ${start + 1} ถึง ${end} จากทั้งหมด ${allLines.length} บรรทัด):\n---\n${numberedContent}\n---`;
+  } catch (error: any) {
+    return `Error viewing file: ${error.message}`;
+  }
+}
+
 // ==========================================
 // 3. Write/Create File
 // ==========================================
-export const writeFileContentDeclaration: FunctionDeclaration = {
+export const writeFileContentDeclaration: AITool = {
   name: "write_file_content",
   description: "สร้างไฟล์ใหม่หรือเขียนทับไฟล์เดิมด้วยเนื้อหาที่ระบุ",
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
       file_path: {
-        type: Type.STRING,
+        type: 'string',
         description: "พาธของไฟล์ที่ต้องการสร้างหรือแก้ไข",
       },
       content: {
-        type: Type.STRING,
+        type: 'string',
         description: "เนื้อหาที่ต้องการเขียนลงในไฟล์",
       },
     },
@@ -239,14 +284,14 @@ export async function writeFileContent({ file_path, content }: { file_path: stri
 // ==========================================
 // 4. Delete File
 // ==========================================
-export const deleteFileDeclaration: FunctionDeclaration = {
+export const deleteFileDeclaration: AITool = {
   name: "delete_file",
   description: "ลบไฟล์ออกจากระบบอย่างถาวร (โปรดระมัดระวัง)",
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
       file_path: {
-        type: Type.STRING,
+        type: 'string',
         description: "พาธของไฟล์ที่ต้องการลบ",
       },
     },
@@ -272,22 +317,22 @@ export async function deleteFile({ file_path }: { file_path: string }): Promise<
 // ==========================================
 // 5. Surgical Code Replacement (Agentic Core)
 // ==========================================
-export const replaceCodeBlockDeclaration: FunctionDeclaration = {
+export const replaceCodeBlockDeclaration: AITool = {
   name: "replace_code_block",
   description: "ผ่าตัดโค้ด: แทนที่ข้อความหรือบล็อคโค้ดเดิมด้วยโค้ดใหม่ (ปลอดภัยกว่าการเขียนทับทั้งไฟล์)",
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
       file_path: {
-        type: Type.STRING,
+        type: 'string',
         description: "พาธของไฟล์ที่ต้องการแก้ไข",
       },
       exact_old_string: {
-        type: Type.STRING,
+        type: 'string',
         description: "ข้อความ/โค้ดเดิมเป๊ะๆ ที่ต้องการจะแก้ (รวม Tab/Space ให้ตรง)",
       },
       new_string: {
-        type: Type.STRING,
+        type: 'string',
         description: "ข้อความ/โค้ดใหม่ที่จะใส่ลงไปแทนที่",
       },
     },
@@ -329,20 +374,85 @@ export async function replaceCodeBlock({ file_path, exact_old_string, new_string
 }
 
 // ==========================================
+// 5.5 Multi-Replace File Content
+// ==========================================
+export const multiReplaceFileContentDeclaration: AITool = {
+  name: "multi_replace_file_content",
+  description: "ผ่าตัดโค้ดหลายจุด: แทนที่บล็อคโค้ดหลายๆ จุดในไฟล์เดียวพร้อมกัน (มีประสิทธิภาพมากกว่าการรัน replace_code_block หลายรอบ)",
+  parameters: {
+    type: 'object',
+    properties: {
+      file_path: { type: 'string', description: "พาธของไฟล์" },
+      replacements: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            exact_old_string: { type: 'string', description: "โค้ดเดิมเป๊ะๆ" },
+            new_string: { type: 'string', description: "โค้ดใหม่" },
+          },
+          required: ["exact_old_string", "new_string"],
+        },
+        description: "รายการที่จะแทนที่",
+      },
+    },
+    required: ["file_path", "replacements"],
+  },
+};
+
+export async function multiReplaceFileContent({ file_path, replacements }: { file_path: string, replacements: { exact_old_string: string, new_string: string }[] }): Promise<string> {
+  const check = validateFilePath(file_path);
+  if (!check.safe) return check.reason!;
+  try {
+    const resolvedPath = path.resolve(file_path);
+    if (!fs.existsSync(resolvedPath)) return `Error: ไม่พบไฟล์ ${resolvedPath}`;
+    
+    let content = fs.readFileSync(resolvedPath, 'utf8');
+    let successfulCount = 0;
+    
+    for (const r of replacements) {
+      if (content.includes(r.exact_old_string)) {
+        content = content.replace(r.exact_old_string, r.new_string);
+        successfulCount++;
+      }
+    }
+    
+    if (successfulCount === 0) {
+      return `Error: ค้นหา exact_old_string ไม่เจอเลยสักจุดใน ${replacements.length} รายการที่ส่งมา`;
+    }
+
+    const syntaxCheck = validateCodeSyntax(resolvedPath, content);
+    if (!syntaxCheck.ok) {
+      return `Error: การแก้ไขถูกระงับเนื่องจากพบ Syntax Error - ${syntaxCheck.error}`;
+    }
+
+    fs.writeFileSync(resolvedPath, content, 'utf8');
+    
+    if (typeof (global as any).onFileWrittenByTool === 'function') {
+      (global as any).onFileWrittenByTool(resolvedPath);
+    }
+
+    return `Successfully applied ${successfulCount}/${replacements.length} replacements in ${resolvedPath}.`;
+  } catch (error: any) {
+    return `Error in multi-replace: ${error.message}`;
+  }
+}
+
+// ==========================================
 // 6. Search Codebase (grep-like)
 // ==========================================
-export const searchCodebaseDeclaration: FunctionDeclaration = {
+export const searchCodebaseDeclaration: AITool = {
   name: "search_codebase",
   description: "ค้นหาข้อความ ตัวแปร หรือชื่อฟังก์ชัน (grep-like) ทั่วทั้งโปรเจกต์ เพื่อดูลำดับการเรียกใช้และ Dependencies",
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
       query: {
-        type: Type.STRING,
+        type: 'string',
         description: "คำประโยคที่ต้องการค้นหา เช่น 'validateBody'",
       },
       directory: {
-        type: Type.STRING,
+        type: 'string',
         description: "พาธหรือโฟลเดอร์สำหรับค้นหา (ค่าเริ่มต้นคือ ./server/src)",
       }
     },
@@ -408,22 +518,22 @@ export async function searchCodebase({ query, directory }: { query: string, dire
 // ==========================================
 // 7. AST: Replace Function/Method
 // ==========================================
-export const astReplaceFunctionDeclaration: FunctionDeclaration = {
+export const astReplaceFunctionDeclaration: AITool = {
   name: "ast_replace_function",
   description: "AST-Aware: แก้ไข/แทนที่ฟังก์ชันเป้าหมายโดยไม่ต้องสนเว้นวรรค (space/tab) หรือรูปแบบเก่า เพียงบอกชื่อและให้โค้ดใหม่ทั้งหมด",
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
       file_path: {
-        type: Type.STRING,
+        type: 'string',
         description: "พาธของไฟล์เป้าหมาย",
       },
       function_name: {
-        type: Type.STRING,
+        type: 'string',
         description: "ชื่อฟังก์ชัน ตัวแปรที่เป็นฟังก์ชัน หรือเมธอดในคลาส",
       },
       new_function_code: {
-        type: Type.STRING,
+        type: 'string',
         description: "โค้ดใหม่ทั้งหมดของฟังก์ชันนี้ (รวม signature และ body)",
       },
     },
@@ -453,29 +563,29 @@ export async function astReplaceFunction({ file_path, function_name, new_functio
 // ==========================================
 // 8. AST: Add Import
 // ==========================================
-export const astAddImportDeclaration: FunctionDeclaration = {
+export const astAddImportDeclaration: AITool = {
   name: "ast_add_import",
   description: "AST-Aware: เพิ่มคำสั่ง import ใหม่เข้าไปในไฟล์อย่างชาญฉลาด (ช่วยควบรวมกับ import ที่มีอยู่แล้วได้)",
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
       file_path: {
-        type: Type.STRING,
+        type: 'string',
         description: "พาธของไฟล์",
       },
       module_specifier: {
-        type: Type.STRING,
+        type: 'string',
         description: "ชื่อโมดูลเป้าหมายหรือพาธ relative (เช่น 'fs', '../utils', 'react')",
       },
       named_imports: {
-        type: Type.ARRAY,
+        type: 'array',
         items: {
-          type: Type.STRING,
+          type: 'string',
         },
         description: "รายชื่อ import แบบปีกกา { } (ถ้ามี)",
       },
       default_import: {
-        type: Type.STRING,
+        type: 'string',
         description: "ชื่อ import default (ถ้ามี)",
       },
     },
@@ -505,18 +615,18 @@ export async function astAddImport({ file_path, module_specifier, named_imports,
 // ==========================================
 // 9. AST: Find References (Global)
 // ==========================================
-export const findReferencesDeclaration: FunctionDeclaration = {
+export const findReferencesDeclaration: AITool = {
   name: "find_references",
   description: "Global Search: ค้นหาว่าชื่อฟังก์ชัน/ตัวแปรนี้ ถูกใช้งานที่ไหนบ้างทั่วทั้งโปรเจกต์ (ช่วยวางแผนก่อน Refactor)",
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
       file_path: {
-        type: Type.STRING,
+        type: 'string',
         description: "พาธของไฟล์ที่นิยามชื่อนั้นไว้ (เช่น 'src/utils/math.ts')",
       },
       symbol_name: {
-        type: Type.STRING,
+        type: 'string',
         description: "ชื่อฟังก์ชัน ตัวแปร หรือคลาสที่ต้องการหา",
       },
     },
@@ -549,22 +659,22 @@ export async function findReferences({ file_path, symbol_name }: { file_path: st
 // ==========================================
 // 10. AST: Global Rename
 // ==========================================
-export const astRenameDeclaration: FunctionDeclaration = {
+export const astRenameDeclaration: AITool = {
   name: "ast_rename",
   description: "Global Refactor: เปลี่ยนชื่อฟังก์ชัน/ตัวแปร/คลาส ทุกที่ที่มีการเรียกใช้งานทั่วทั้งโปรเจกต์อย่างปลอดภัย",
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
       file_path: {
-        type: Type.STRING,
+        type: 'string',
         description: "พาธของไฟล์ที่นิยามชื่อเดิม",
       },
       old_name: {
-        type: Type.STRING,
+        type: 'string',
         description: "ชื่อเดิมที่ต้องการเปลี่ยน",
       },
       new_name: {
-        type: Type.STRING,
+        type: 'string',
         description: "ชื่อใหม่ที่ต้องการ",
       },
     },

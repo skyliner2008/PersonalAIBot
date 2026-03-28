@@ -1,4 +1,4 @@
-import type { Content } from '@google/genai';
+import type { AIMessage } from '../bot_agents/types.js';
 import type { JarvisPlannerOptions } from './jarvisPlanner.js';
 import type { SpecialistRuntimeHealth } from './swarmCoordinator.js';
 import { ProviderFactory } from '../providers/providerFactory.js';
@@ -21,7 +21,7 @@ export async function buildEnglishObjectiveHandoff(objective: string): Promise<s
       const instance = await ProviderFactory.createProvider(provider.id);
       if (!instance || typeof instance.generateResponse !== 'function') continue;
 
-      const contents: Content[] = [
+      const contents: AIMessage[] = [
         {
           role: 'user',
           parts: [

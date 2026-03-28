@@ -7,7 +7,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { Type, FunctionDeclaration } from '@google/genai';
+import type { AITool } from '../providers/baseProvider.js';
 import { createLogger } from '../../utils/logger.js';
 import { validateTool, type ValidationResult } from './toolValidator.js';
 import { executeTool, validateCodeCompilation } from './toolSandbox.js';
@@ -17,15 +17,15 @@ const log = createLogger('DynamicTools'); // Test
 /**
  * Maps string types to Gemini Type enum
  */
-const mapSchemaType = (type: any): Type => {
+const mapSchemaType = (type: any): string => {
   switch (String(type || 'string').toLowerCase()) {
-    case 'string': return Type.STRING;
-    case 'number': return Type.NUMBER;
-    case 'integer': return Type.INTEGER;
-    case 'boolean': return Type.BOOLEAN;
-    case 'array': return Type.ARRAY;
-    case 'object': return Type.OBJECT;
-    default: return Type.STRING;
+    case 'string': return 'string';
+    case 'number': return 'number';
+    case 'integer': return 'number';
+    case 'boolean': return 'boolean';
+    case 'array': return 'array';
+    case 'object': return 'object';
+    default: return 'string';
   }
 };
 
@@ -80,7 +80,7 @@ export interface DynamicToolDef {
   description: string;
   parameters?: Record<string, unknown>;
   handler: (args: Record<string, unknown>) => Promise<string>;
-  declaration: FunctionDeclaration;
+  declaration: AITool;
 }
 
 /**
@@ -133,7 +133,7 @@ async function loadToolFromFile(filePath: string): Promise<{ tool?: DynamicToolD
     };
 
     // Create the FunctionDeclaration for Gemini API
-    const declaration: FunctionDeclaration = { // TEST
+    const declaration: AITool = { // TEST
       name: toolName,
       description: toolDescription,
       parameters: toolParameters
@@ -142,7 +142,7 @@ async function loadToolFromFile(filePath: string): Promise<{ tool?: DynamicToolD
             type: mapSchemaType((toolParameters as any).type || 'object'),
           }
         : {
-            type: Type.OBJECT,
+            type: 'object',
             properties: {},
           },
     };
@@ -251,7 +251,7 @@ export async function registerDynamicTool(
     };
 
     // Create the FunctionDeclaration for Gemini API
-    const declaration: FunctionDeclaration = {
+    const declaration: AITool = {
       name,
       description,
       parameters: parameters
@@ -260,7 +260,7 @@ export async function registerDynamicTool(
             type: mapSchemaType((parameters as any).type || 'object'),
           }
         : {
-            type: Type.OBJECT,
+            type: 'object',
             properties: {},
           },
     };
@@ -362,7 +362,7 @@ export function getDynamicToolHandlers(): Record<string, (args: Record<string, u
 /**
  * Get all dynamic tool declarations (for Gemini API)
  */
-export function getDynamicToolDeclarations(): FunctionDeclaration[] {
+export function getDynamicToolDeclarations(): AITool[] {
   return Array.from(dynamicToolsMap.values()).map((tool) => tool.declaration);
 }
 

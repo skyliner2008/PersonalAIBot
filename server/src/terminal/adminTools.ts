@@ -12,8 +12,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { Type } from '@google/genai';
-import type { FunctionDeclaration } from '@google/genai';
+import type { AITool } from '../bot_agents/types.js';
 import { addLog, dbAll } from '../database/db.js';
 import { createLogger } from '../utils/logger.js';
 import {
@@ -38,227 +37,227 @@ function auditLog(action: string, detail: string): void {
 // Tool Declarations
 // ══════════════════════════════════════════════════════════════
 
-export const adminReadProjectFileDecl: FunctionDeclaration = {
+export const adminReadProjectFileDecl: AITool = {
   name: 'admin_read_project_file',
   description: 'อ่านไฟล์ใดก็ได้ในโปรเจค สำหรับ Root Admin Agent เท่านั้น',
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
-      path: { type: Type.STRING, description: 'พาธของไฟล์ (สัมพัทธ์จาก project root)' },
+      path: { type: 'string', description: 'พาธของไฟล์ (สัมพัทธ์จาก project root)' },
     },
     required: ['path'],
   },
 };
 
-export const adminWriteProjectFileDecl: FunctionDeclaration = {
+export const adminWriteProjectFileDecl: AITool = {
   name: 'admin_write_project_file',
   description: 'เขียนหรือสร้างไฟล์ใดก็ได้ในโปรเจค สร้าง directory อัตโนมัติ',
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
-      path: { type: Type.STRING, description: 'พาธของไฟล์ (สัมพัทธ์จาก project root)' },
-      content: { type: Type.STRING, description: 'เนื้อหาที่ต้องการเขียน' },
+      path: { type: 'string', description: 'พาธของไฟล์ (สัมพัทธ์จาก project root)' },
+      content: { type: 'string', description: 'เนื้อหาที่ต้องการเขียน' },
     },
     required: ['path', 'content'],
   },
 };
 
-export const adminListProjectFilesDecl: FunctionDeclaration = {
+export const adminListProjectFilesDecl: AITool = {
   name: 'admin_list_project_files',
   description: 'แสดงรายการไฟล์ในโปรเจค รองรับ directory path และ pattern filter',
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
-      dir: { type: Type.STRING, description: 'Directory path (สัมพัทธ์จาก project root)' },
-      pattern: { type: Type.STRING, description: 'Glob pattern สำหรับ filter (e.g., *.ts)' },
+      dir: { type: 'string', description: 'Directory path (สัมพัทธ์จาก project root)' },
+      pattern: { type: 'string', description: 'Glob pattern สำหรับ filter (e.g., *.ts)' },
     },
     required: ['dir'],
   },
 };
 
-export const adminRunCommandDecl: FunctionDeclaration = {
+export const adminRunCommandDecl: AITool = {
   name: 'admin_run_command',
   description: 'รัน shell command ได้ไม่จำกัด (สำหรับ Root Admin Agent เท่านั้น) ใช้ในการจัดการระบบ',
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
-      command: { type: Type.STRING, description: 'Shell command ที่ต้องการรัน' },
-      cwd: { type: Type.STRING, description: 'Working directory (optional)' },
-      timeout: { type: Type.NUMBER, description: 'Timeout ในหน่วย ms (default: 30000)' },
+      command: { type: 'string', description: 'Shell command ที่ต้องการรัน' },
+      cwd: { type: 'string', description: 'Working directory (optional)' },
+      timeout: { type: 'number', description: 'Timeout ในหน่วย ms (default: 30000)' },
     },
     required: ['command'],
   },
 };
 
-export const adminCreateBotAgentDecl: FunctionDeclaration = {
+export const adminCreateBotAgentDecl: AITool = {
   name: 'admin_create_bot_agent',
   description: 'สร้างและลงทะเบียน bot agent ใหม่',
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
-      name: { type: Type.STRING, description: 'ชื่อ bot' },
-      platform: { type: Type.STRING, description: 'แพลตฟอร์ม: telegram, line, facebook, custom' },
-      config: { type: Type.STRING, description: 'JSON config string' },
+      name: { type: 'string', description: 'ชื่อ bot' },
+      platform: { type: 'string', description: 'แพลตฟอร์ม: telegram, line, facebook, custom' },
+      config: { type: 'string', description: 'JSON config string' },
     },
     required: ['name', 'platform'],
   },
 };
 
-export const adminStopBotAgentDecl: FunctionDeclaration = {
+export const adminStopBotAgentDecl: AITool = {
   name: 'admin_stop_bot_agent',
   description: 'หยุด bot agent ที่กำลังทำงาน',
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
-      botId: { type: Type.STRING, description: 'Bot ID ที่ต้องการหยุด' },
+      botId: { type: 'string', description: 'Bot ID ที่ต้องการหยุด' },
     },
     required: ['botId'],
   },
 };
 
-export const adminListAllAgentsDecl: FunctionDeclaration = {
+export const adminListAllAgentsDecl: AITool = {
   name: 'admin_list_all_agents',
   description: 'แสดงรายการ agent ทั้งหมดในระบบ พร้อมสถานะ',
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {},
   },
 };
 
-export const adminCreateDynamicToolDecl: FunctionDeclaration = {
+export const adminCreateDynamicToolDecl: AITool = {
   name: 'admin_create_dynamic_tool',
   description: 'สร้าง dynamic tool ใหม่ให้ agent ใช้งานได้',
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
-      name: { type: Type.STRING, description: 'ชื่อ tool (snake_case)' },
-      description: { type: Type.STRING, description: 'คำอธิบาย tool' },
-      code: { type: Type.STRING, description: 'JavaScript code ที่จะรันเมื่อเรียกใช้ tool' },
-      parameters: { type: Type.STRING, description: 'JSON schema ของ parameters' },
+      name: { type: 'string', description: 'ชื่อ tool (snake_case)' },
+      description: { type: 'string', description: 'คำอธิบาย tool' },
+      code: { type: 'string', description: 'JavaScript code ที่จะรันเมื่อเรียกใช้ tool' },
+      parameters: { type: 'string', description: 'JSON schema ของ parameters' },
     },
     required: ['name', 'description', 'code'],
   },
 };
 
-export const adminGetSystemOverviewDecl: FunctionDeclaration = {
+export const adminGetSystemOverviewDecl: AITool = {
   name: 'admin_get_system_overview',
   description: 'ดูสถานะรวมของระบบทั้งหมด: providers, bots, queues, memory, uptime',
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {},
   },
 };
 
-export const adminDelegateToSwarmDecl: FunctionDeclaration = {
+export const adminDelegateToSwarmDecl: AITool = {
   name: 'admin_delegate_to_swarm',
   description: 'มอบหมายงานให้ swarm coordinator จัดการ',
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
-      taskType: { type: Type.STRING, description: 'ประเภทงาน: code_review, code_generation, translation, web_search, data_analysis, summarization, general' },
-      message: { type: Type.STRING, description: 'คำอธิบายงาน' },
-      specialist: { type: Type.STRING, description: 'เจาะจง specialist agent (optional)' },
-      priority: { type: Type.NUMBER, description: 'ลำดับความสำคัญ 1-5 (default: 3)' },
+      taskType: { type: 'string', description: 'ประเภทงาน: code_review, code_generation, translation, web_search, data_analysis, summarization, general' },
+      message: { type: 'string', description: 'คำอธิบายงาน' },
+      specialist: { type: 'string', description: 'เจาะจง specialist agent (optional)' },
+      priority: { type: 'number', description: 'ลำดับความสำคัญ 1-5 (default: 3)' },
     },
     required: ['taskType', 'message'],
   },
 };
 
-export const adminViewLogsDecl: FunctionDeclaration = {
+export const adminViewLogsDecl: AITool = {
   name: 'admin_view_logs',
   description: 'ดูบันทึก activity logs ของระบบ',
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
-      filter: { type: Type.STRING, description: 'กรองตามหมวดหมู่ (เช่น server, agent, admin-agent)' },
-      limit: { type: Type.NUMBER, description: 'จำนวน log ที่ต้องการ (default: 20)' },
+      filter: { type: 'string', description: 'กรองตามหมวดหมู่ (เช่น server, agent, admin-agent)' },
+      limit: { type: 'number', description: 'จำนวน log ที่ต้องการ (default: 20)' },
     },
   },
 };
 
-export const adminDiagnoseCliDecl: FunctionDeclaration = {
+export const adminDiagnoseCliDecl: AITool = {
   name: 'admin_diagnose_cli',
   description: 'ตรวจสอบสถานะ การติดตั้ง และปัญหาของ CLI (เช่น gemini, claude, aider) รวมติงทดสอบรัน command พื้นฐาน',
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
-      cliId: { type: Type.STRING, description: 'ชื่อ CLI ที่ต้องการตรวจ เช่น gemini-cli, aider-cli, หรือพิมพ์ all เพื่อดูทั้งหมด' },
+      cliId: { type: 'string', description: 'ชื่อ CLI ที่ต้องการตรวจ เช่น gemini-cli, aider-cli, หรือพิมพ์ all เพื่อดูทั้งหมด' },
     },
     required: ['cliId'],
   },
 };
 
-export const adminEditCliProfileDecl: FunctionDeclaration = {
+export const adminEditCliProfileDecl: AITool = {
   name: 'admin_edit_cli_profile',
   description: 'แก้ไขการตั้งค่า Template ของ CLI ใน Meeting Room (เช่น เปลี่ยน argument จาก --message เป็น run)',
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
-      cliId: { type: Type.STRING, description: 'ชื่อ CLI เช่น kilo-cli, qwen-cli, claude-cli' },
-      argsTemplate: { type: Type.ARRAY, items: { type: Type.STRING }, description: 'Array ของ Arguments เช่น ["run", "{prompt_content}"]' },
-      usesStdin: { type: Type.BOOLEAN, description: 'true ถ้ารับค่าผ่าน stdin, false ถ้ารับผ่าน argument/file' },
+      cliId: { type: 'string', description: 'ชื่อ CLI เช่น kilo-cli, qwen-cli, claude-cli' },
+      argsTemplate: { type: 'array', items: { type: 'string' }, description: 'Array ของ Arguments เช่น ["run", "{prompt_content}"]' },
+      usesStdin: { type: 'boolean', description: 'true ถ้ารับค่าผ่าน stdin, false ถ้ารับผ่าน argument/file' },
     },
     required: ['cliId', 'argsTemplate', 'usesStdin'],
   },
 };
 
-export const adminGetRuntimeSettingDecl: FunctionDeclaration = {
+export const adminGetRuntimeSettingDecl: AITool = {
   name: 'admin_get_runtime_setting',
   description: 'อ่านค่า runtime setting จากฐานข้อมูล (รองรับทั้ง key ปกติและ key ลับ)',
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
-      key: { type: Type.STRING, description: 'ชื่อ setting key' },
+      key: { type: 'string', description: 'ชื่อ setting key' },
     },
     required: ['key'],
   },
 };
 
-export const adminSetRuntimeSettingDecl: FunctionDeclaration = {
+export const adminSetRuntimeSettingDecl: AITool = {
   name: 'admin_set_runtime_setting',
   description: 'อัปเดตค่า runtime setting ในฐานข้อมูล (รองรับทั้ง key ปกติและ key ลับ)',
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
-      key: { type: Type.STRING, description: 'ชื่อ setting key' },
-      value: { type: Type.STRING, description: 'ค่าที่ต้องการตั้ง' },
+      key: { type: 'string', description: 'ชื่อ setting key' },
+      value: { type: 'string', description: 'ค่าที่ต้องการตั้ง' },
     },
     required: ['key', 'value'],
   },
 };
 
-export const adminListRuntimeSettingsDecl: FunctionDeclaration = {
+export const adminListRuntimeSettingsDecl: AITool = {
   name: 'admin_list_runtime_settings',
   description: 'แสดงรายการ runtime settings ที่มีอยู่ในฐานข้อมูล (mask ค่าลับอัตโนมัติ)',
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
-      pattern: { type: Type.STRING, description: 'กรอง key ด้วยข้อความบางส่วน (optional)' },
-      limit: { type: Type.NUMBER, description: 'จำนวนสูงสุดที่ต้องการแสดง (default: 100, max: 500)' },
+      pattern: { type: 'string', description: 'กรอง key ด้วยข้อความบางส่วน (optional)' },
+      limit: { type: 'number', description: 'จำนวนสูงสุดที่ต้องการแสดง (default: 100, max: 500)' },
     },
   },
 };
 
-export const adminGetRootAdminConfigDecl: FunctionDeclaration = {
+export const adminGetRootAdminConfigDecl: AITool = {
   name: 'admin_get_root_admin_config',
   description: 'อ่านค่า root admin identity ที่ระบบใช้งานอยู่จริง',
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {},
   },
 };
 
-export const adminSetRootAdminConfigDecl: FunctionDeclaration = {
+export const adminSetRootAdminConfigDecl: AITool = {
   name: 'admin_set_root_admin_config',
   description: 'ตั้งค่า root admin identity (botId, botName, supervisorBotIds, personaPlatform) แบบ runtime',
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
-      botId: { type: Type.STRING, description: 'botId ของ root admin' },
-      botName: { type: Type.STRING, description: 'ชื่อแสดงผลของ root admin' },
-      supervisorBotIds: { type: Type.ARRAY, items: { type: Type.STRING }, description: 'รายการ botId ที่ถือเป็น root/supervisor' },
-      personaPlatform: { type: Type.STRING, description: 'persona platform สำหรับ root admin (เช่น system)' },
-      specialistName: { type: Type.STRING, description: 'ชื่อ specialist หลักของ root admin ในระบบ swarm (เช่น jarvis-root-admin)' },
+      botId: { type: 'string', description: 'botId ของ root admin' },
+      botName: { type: 'string', description: 'ชื่อแสดงผลของ root admin' },
+      supervisorBotIds: { type: 'array', items: { type: 'string' }, description: 'รายการ botId ที่ถือเป็น root/supervisor' },
+      personaPlatform: { type: 'string', description: 'persona platform สำหรับ root admin (เช่น system)' },
+      specialistName: { type: 'string', description: 'ชื่อ specialist หลักของ root admin ในระบบ swarm (เช่น jarvis-root-admin)' },
     },
   },
 };
@@ -737,7 +736,7 @@ async function adminSetRootAdminConfig(args: {
 // Exports — Declarations + Handlers
 // ══════════════════════════════════════════════════════════════
 
-export const adminToolDeclarations: FunctionDeclaration[] = [
+export const adminToolDeclarations: AITool[] = [
   adminReadProjectFileDecl,
   adminWriteProjectFileDecl,
   adminListProjectFilesDecl,

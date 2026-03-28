@@ -1,6 +1,5 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { Content, Part, GoogleGenAI } from '@google/genai';
 import { tools, getFunctionHandlers, setCurrentChatId } from './tools/index.js';
 import type { BotContext, SystemToolContext } from './tools/index.js';
 import { getBot } from './registries/botRegistry.js';
@@ -17,13 +16,14 @@ import {
   setCoreMemory, shouldExtractCore, shouldExtractArchival,
   saveArchivalFact, setEmbeddingProvider,
 } from '../memory/unifiedMemory.js';
+import { getSetting } from '../database/db.js';
 import { setSummarizeProvider } from '../memory/conversationSummarizer.js';
 import { classifyTask, TaskType, getBestModelForTask, type MultiModelConfig } from './config/aiConfig.js';
 import { configManager } from './config/configManager.js';
 import { personaManager } from '../ai/personaManager.js';
 import { OpenAICompatibleProvider } from './providers/openaiCompatibleProvider.js';
 import { getProvider, getRegistry } from '../providers/registry.js';
-import type { AIProvider } from './providers/baseProvider.js';
+import type { AIProvider, AIMessage, AIMessagePart, AITool } from './providers/baseProvider.js';
 import { createAgentRuntimeProvider } from '../providers/agentRuntime.js';
 import { shouldReflect, triggerReflection } from '../evolution/selfReflection.js';
 import { runHealthCheck } from '../evolution/selfHealing.js';
@@ -135,6 +135,7 @@ export interface AgentRun {
   id: string; chatId: string; message: string; startTime: number; endTime?: number;
   durationMs?: number; turns: number; toolCalls: ToolTelemetry[]; totalTokens: number;
   reply?: string; error?: string; taskType?: string;
+  transcript?: AIMessage[]; // Full conversation transcript (including tool calls/responses)
 }
 
 const _runHistory: AgentRun[] = [];
@@ -152,7 +153,7 @@ function startRun(chatId: string, message: string, taskType: string): AgentRun {
   return run;
 }
 
-function finishRun(run: AgentRun, stats: IAgentStats, reply?: string, error?: string) {
+function finishRun(run: AgentRun, stats: IAgentStats, reply?: string, error?: string, transcript?: AIMessage[]) {
   run.endTime = Date.now();
   run.durationMs = run.endTime - run.startTime;
   run.turns = stats.turns;
@@ -160,6 +161,15 @@ function finishRun(run: AgentRun, stats: IAgentStats, reply?: string, error?: st
   run.totalTokens = stats.totalTokens;
   run.reply = reply?.substring(0, 300);
   run.error = error;
+  run.transcript = transcript;
+}
+
+export function getRunHistory(): AgentRun[] {
+  return [..._runHistory];
+}
+
+export function getLatestRun(chatId: string): AgentRun | undefined {
+  return [..._runHistory].reverse().find(r => r.chatId === chatId);
 }
 
 export class Agent {
@@ -179,12 +189,12 @@ export class Agent {
     });
   }
 
-  public processMessage(chatId: string, message: string, ctx: BotContext, attachments?: Part[]): Promise<string> {
+  public processMessage(chatId: string, message: string, ctx: BotContext, attachments?: AIMessagePart[]): Promise<string> {
     notifyUserActivity(); // Mark system as active for ANY AI intelligence operation (Chat, Cron, API)
     return enqueueForUser(chatId, () => this._processMessageCore(chatId, message, ctx, attachments));
   }
 
-  private async _processMessageCore(chatId: string, message: string, ctx: BotContext, attachments?: Part[]): Promise<string> {
+  private async _processMessageCore(chatId: string, message: string, ctx: BotContext, attachments?: AIMessagePart[]): Promise<string> {
     const abortController = new AbortController();
     const timeoutId = setTimeout(() => abortController.abort(), AGENT_TIMEOUT_MS);
     const stats = newStats();
@@ -213,12 +223,12 @@ export class Agent {
       umAddMessage(chatId, 'user', cleanMessage);
       addEpisode(chatId, 'user', cleanMessage);
 
-      const history: Content[] = memoryCtx.workingMessages.map(m => ({
-        role: m.role === 'user' ? 'user' : 'model',
+      const history: AIMessage[] = memoryCtx.workingMessages.map(m => ({
+        role: m.role === 'user' ? 'user' : 'assistant',
         parts: [{ text: m.content }]
       }));
 
-      const userParts: Part[] = [{ text: message }];
+      const userParts: AIMessagePart[] = [{ text: message }];
       if (attachments) userParts.push(...attachments);
 
       // Pre-search for web
@@ -232,10 +242,10 @@ export class Agent {
         } catch {}
       }
 
-      let currentContents: Content[] = [...history, { role: 'user', parts: userParts }];
+      let currentContents: AIMessage[] = [...history, { role: 'user', parts: userParts }];
 
       // Persona & Identity
-      const personaConfig = personaManager.loadPersona(ctx?.platform ?? 'telegram');
+      const personaConfig = personaManager.loadPersona(ctx?.platform ?? 'telegram', ctx?.botId);
       let enabledToolNames = personaConfig.enabledTools || [];
       const botInstance = ctx?.botId ? getBot(ctx.botId) : null;
       if (botInstance?.enabled_tools) {
@@ -371,14 +381,19 @@ Strict Rules:
           while (currentTurn < MAX_TURNS) {
             if (abortController.signal.aborted) return this.buildTimeoutResponse(stats);
             
-            const systemInstruction = `${personaConfig.systemInstruction}\n- Model: ${modelName} (${providerName})\n- Task: ${taskType}\n${memoryCtx.coreMemoryText}`;
+            const preferredLang = getSetting('ai_preferred_language') || 'th';
+            const langInstruction = preferredLang === 'en' 
+              ? '\n- IMPORTANT: Respond in ENGLISH only.' 
+              : '\n- IMPORTANT: ตอบเป็นภาษาไทยเท่านั้น (Respond in THAI only).';
+
+            const systemInstruction = `${personaConfig.systemInstruction}\n- Model: ${modelName} (${providerName})\n- Task: ${taskType}\n${memoryCtx.coreMemoryText}${langInstruction}`;
 
             // Use correctly defined generateResponse from AIProvider
             const response = await provider.generateResponse(
               modelName,
               systemInstruction,
-              currentContents as any,
-              activeTools.length > 0 ? (activeTools as any) : undefined,
+              currentContents,
+              activeTools as AITool[],
               useGoogleSearch
             );
             
@@ -399,11 +414,11 @@ Strict Rules:
             // Handle Tool Calls
             if (response.toolCalls && response.toolCalls.length > 0) {
               currentContents.push(response.rawModelContent || {
-                role: 'model',
+                role: 'assistant',
                 parts: (response.toolCalls as ToolCall[]).map(c => ({ functionCall: { name: c.name, args: c.args } }))
               });
 
-              const responseParts: Part[] = [];
+              const responseParts: AIMessagePart[] = [];
               for (const call of response.toolCalls as ToolCall[]) {
                 const toolStart = Date.now();
                 if (isCircuitOpen(call.name)) {
@@ -430,6 +445,7 @@ Strict Rules:
 
             if (response.text) {
               finalResponseText = response.text;
+              currentContents.push({ role: 'assistant', parts: [{ text: finalResponseText }] });
               umAddMessage(chatId, 'assistant', finalResponseText);
               addEpisode(chatId, 'model', finalResponseText);
               break;
@@ -452,12 +468,12 @@ Strict Rules:
         setImmediate(() => this.extractCoreProfile(chatId, cleanMessage, finalResponseText));
       }
 
-      finishRun(agentRun, stats, finalResponseText);
+      finishRun(agentRun, stats, finalResponseText, undefined, currentContents);
       return finalResponseText || '✅ Done';
 
     } catch (error: any) {
       console.error('[Agent Error]:', error);
-      finishRun(agentRun, stats, undefined, error.message);
+      finishRun(agentRun, stats, undefined, error.message, (this as any)._currentTranscript);
 
       // Friendly error messages for common issues
       const msg = error.message || String(error);

@@ -1,14 +1,7 @@
 import OpenAI from 'openai';
-import type { Content, FunctionDeclaration } from '@google/genai';
-import type { AIProvider, AIResponse } from './baseProvider.js';
+import type { AIProvider, AIResponse, AIMessage, AITool } from './baseProvider.js';
 import type { ToolCall } from '../types.js';
 import { withRetry } from '../../utils/retry.js';
-
-/** Minimal OpenAI-format message shape */
-interface OpenAIMessage {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
-}
 
 export class OpenAICompatibleProvider implements AIProvider {
   private client: OpenAI;
@@ -25,16 +18,17 @@ export class OpenAICompatibleProvider implements AIProvider {
   async generateResponse(
     modelName: string,
     systemInstruction: string,
-    contents: Content[],
-    tools?: FunctionDeclaration[]
+    history: AIMessage[],
+    tools?: AITool[]
   ): Promise<AIResponse> {
-    const messages: OpenAIMessage[] = [
+    const messages: any[] = [
       { role: 'system', content: systemInstruction }
     ];
 
-    for (const content of contents) {
-      const role = content.role === 'model' ? 'assistant' : 'user';
-      const text = content.parts?.map(p => p.text).join('\n') || '';
+    for (const msg of history) {
+      const role = msg.role === 'model' || msg.role === 'assistant' ? 'assistant' : 'user';
+      // For OpenAI, we simplify parts to text for now
+      const text = msg.parts.map(p => p.text || '').join('\n');
       messages.push({ role, content: text });
     }
 
@@ -56,25 +50,14 @@ export class OpenAICompatibleProvider implements AIProvider {
       });
 
       const choice = response.choices[0];
-      if (!choice) {
-        return {
-          text: '',
-          toolCalls: undefined,
-          usage: undefined,
-        };
-      }
+      if (!choice) return { text: '', toolCalls: undefined };
 
       const toolCalls: ToolCall[] | undefined = choice.message.tool_calls
         ?.filter((tc: any) => tc.function?.name)
-        .map((tc: any) => {
-          let args: Record<string, unknown> = {};
-          try {
-            args = JSON.parse(tc.function.arguments) as Record<string, unknown>;
-          } catch {
-            args = { _raw: tc.function.arguments };
-          }
-          return { name: tc.function.name as string, args };
-        });
+        .map((tc: any) => ({
+          name: tc.function.name as string,
+          args: JSON.parse(tc.function.arguments || '{}')
+        }));
 
       return {
         text: choice.message.content || '',
@@ -88,21 +71,16 @@ export class OpenAICompatibleProvider implements AIProvider {
     }, { context: `OpenAI:${this.providerId}` });
   }
 
-  async generateImage(prompt: string, modelName?: string, options?: Record<string, any>): Promise<{ url?: string; b64_json?: string; revised_prompt?: string }[]> {
+  async generateImage(prompt: string, modelName?: string, options?: Record<string, any>): Promise<{ b64_json?: string; buffer?: Buffer }[]> {
     const response = await this.client.images.generate({
       prompt,
       model: modelName || 'dall-e-3',
       n: options?.n || 1,
-      size: options?.size || '1024x1024',
-      response_format: options?.response_format || 'url',
+      response_format: 'b64_json'
     });
-    
-    // Safety check for response.data
-    const data = (response as any).data || [];
-    return data.map((d: any) => ({
-      url: d.url,
-      b64_json: d.b64_json,
-      revised_prompt: d.revised_prompt
+    return (response.data || []).map(img => ({
+      b64_json: img.b64_json,
+      buffer: img.b64_json ? Buffer.from(img.b64_json, 'base64') : undefined
     }));
   }
 
@@ -110,38 +88,22 @@ export class OpenAICompatibleProvider implements AIProvider {
     const response = await this.client.audio.speech.create({
       model: modelName || 'tts-1',
       voice: (voice as any) || 'alloy',
-      input: text,
-      response_format: 'mp3',
+      input: text
     });
     return Buffer.from(await response.arrayBuffer());
   }
 
   async listModels(): Promise<string[]> {
     try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 8000);
-
-      try {
-        const response = await (this.client.models as any).list({
-          signal: controller.signal as any,
-        });
-        clearTimeout(timeout);
-        const data = response.data || [];
-        const modelIds = data.map((m: any) => m.id).filter(Boolean).sort();
-        if (modelIds.length > 0) return modelIds;
-        return [];
-      } catch (err: any) {
-        clearTimeout(timeout);
-        const baseUrl = this.client.baseURL || '';
-        const silentProviders = ['minimax', 'anthropic', 'perplexity'];
-        const isSilent = silentProviders.some(p => baseUrl.includes(p));
-        if (!isSilent) {
-          console.warn(`[ListModels:${this.providerId || 'unknown'}] API call failed: ${err.message}`);
-        }
-        return [];
-      }
+      const response = await this.client.models.list();
+      return (response.data || []).map(m => m.id).sort();
     } catch {
       return [];
     }
+  }
+
+  async syncModels(): Promise<{ success: boolean; updatedCount: number; models: string[] }> {
+    const models = await this.listModels();
+    return { success: models.length > 0, updatedCount: models.length, models };
   }
 }

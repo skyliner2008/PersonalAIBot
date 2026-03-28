@@ -1,8 +1,10 @@
-import { GoogleGenAI, Content, FunctionDeclaration } from '@google/genai';
-import type { AIProvider, AIResponse } from './baseProvider.js';
+import { GoogleGenAI, Content, Part } from '@google/genai';
+import type { AIProvider, AIResponse, AIMessage, AITool } from './baseProvider.js';
 import type { ToolCall } from '../types.js';
 import { withRetry } from '../../utils/retry.js';
 import { createLogger } from '../../utils/logger.js';
+import { getProvider, updateProvider } from '../../providers/registry.js';
+import * as path from 'path';
 
 const logger = createLogger('GeminiProvider');
 
@@ -22,42 +24,6 @@ interface GeminiProviderOptions {
 /** API versions to try, in order. v1beta is default but some newer models only work on v1. */
 const API_VERSIONS = ['v1beta', 'v1'] as const;
 
-/**
- * Alias map for common short names → actual API model names.
- * When users configure a short name, this map resolves it to
- * the canonical API identifier. Only include aliases that differ
- * from their resolved name — passthrough entries are optional.
- */
-const MODEL_ALIAS_MAP: Record<string, string> = {
-  // Current Generation (2025-2026 Models) — verified against Gemini API
-  // Gemini 3 Series (Latest 2026)
-  'gemini-3-flash-preview': 'gemini-3-flash-preview',
-  'gemini-3.1-flash-lite': 'gemini-3.1-flash-lite',
-
-  // Gemini 2.5 Series (Previews)
-  'gemini-2.5-flash': 'gemini-2.5-flash', 
-  'gemini-2.5-flash-lite': 'gemini-2.5-flash-lite',
-  'gemini-2.5-pro': 'gemini-2.5-pro',
-
-  // Gemini 2.0 Series (Stable)
-  'gemini-2-flash': 'gemini-2.0-flash',
-  'gemini-2.0-flash': 'gemini-2.0-flash',
-  'gemini-2.0-flash-lite': 'gemini-2.0-flash-lite',
-  
-  // Legacy Aliases
-  'gemini-1.5-flash': 'gemini-1.5-flash',
-  'gemini-1.5-pro': 'gemini-1.5-pro',
-};
-
-/** Resolve a model name — expand short aliases to full API names. */
-function resolveModelName(model: string): string {
-  const alias = MODEL_ALIAS_MAP[model];
-  if (alias) {
-    logger.info(`Resolving model alias "${model}" → "${alias}"`);
-  }
-  return alias || model;
-}
-
 export class GeminiProvider implements AIProvider {
   private ai: GoogleGenAI;
   /** Secondary client with fallback API version (lazily created) */
@@ -74,37 +40,49 @@ export class GeminiProvider implements AIProvider {
     this.isVertexAI = !!options.vertexai;
 
     if (this.isVertexAI) {
-      // Vertex AI mode: use OAuth token via httpOptions headers
       const vertexAiOptions = {
         vertexai: true,
         project: options.project || '',
         location: options.location || 'us-central1',
-        googleAuthOptions: {
-          // The `apiKey` is used as a Bearer token in httpOptions.headers,
-          // so explicit, empty credentials are not needed and can cause errors.
-          // credentials: { client_email: '', private_key: '' },
-          // Override with access token
-        } as any,
         httpOptions: {
           headers: { 'Authorization': `Bearer ${apiKey}` },
         },
       };
       this.ai = new GoogleGenAI(vertexAiOptions);
     } else {
-      this.ai = this.createGenAIClient(apiKey);
+      this.ai = new GoogleGenAI({ apiKey });
     }
   }
 
-  /** Creates a GoogleGenAI client with common configuration. */
-  private createGenAIClient(apiKey: string, httpOptions?: any): GoogleGenAI {
-    return new GoogleGenAI({ apiKey, ...httpOptions });
+  /** Convert universal AIMessage to Gemini Content */
+  private mapToGeminiContent(messages: AIMessage[]): Content[] {
+    return messages.map(m => ({
+      role: m.role === 'assistant' ? 'model' : m.role,
+      parts: m.parts.map(p => {
+        if (p.text) return { text: p.text };
+        if (p.inlineData) return { inlineData: p.inlineData };
+        if (p.fileData) return { fileData: p.fileData };
+        if (p.functionCall) return { functionCall: p.functionCall } as any;
+        if (p.functionResponse) return { functionResponse: p.functionResponse } as any;
+        return { text: '' };
+      })
+    }));
   }
 
-  /** Get the appropriate client for a model (v1beta or v1) */
+  /** Convert universal AITool to Gemini FunctionDeclaration */
+  private mapToGeminiTools(tools: AITool[]): any[] {
+    return tools.map(t => ({
+      functionDeclarations: [{
+        name: t.name,
+        description: t.description,
+        parameters: t.parameters
+      }]
+    }));
+  }
+
   private getClientForModel(modelName: string): GoogleGenAI {
-    if (this.isVertexAI) return this.ai; // Vertex AI handles versioning internally
+    if (this.isVertexAI) return this.ai;
     if (this.v1Models.has(modelName)) {
-      // Ensure aiFallback is initialized if a v1 model is requested
       if (!this.aiFallback) {
         this.aiFallback = new GoogleGenAI({ apiKey: this.apiKey, httpOptions: { apiVersion: 'v1' } });
       }
@@ -113,49 +91,27 @@ export class GeminiProvider implements AIProvider {
     return this.ai;
   }
 
-  /** Prepares the content array for v1 retry by adding the system instruction. */
-  private prepareContentsForV1Retry(systemInstruction: string, contents: Content[]): Content[] {
-    return systemInstruction
-      ? [{ role: 'user' as const, parts: [{ text: `[System Instruction]\n${systemInstruction}` }] }, ...contents]
-      : contents;
-  }
-
-  /** Merges tool calls from different sources, eliminating duplicates. */
-  private mergeToolCalls(functionCallsFromApi: ToolCall[], functionCallsFromParts: ToolCall[]): ToolCall[] {
-    const toolCallByKey = new Map<string, ToolCall>();
-    for (const call of [...functionCallsFromApi, ...functionCallsFromParts]) {
-      const key = `${call.name}:${JSON.stringify(call.args || {})}`;
-      if (!toolCallByKey.has(key)) toolCallByKey.set(key, call);
-    }
-    return Array.from(toolCallByKey.values());
-  }
-
   async generateResponse(
     modelName: string,
     systemInstruction: string,
-    contents: Content[],
-    tools?: FunctionDeclaration[],
+    history: AIMessage[],
+    tools?: AITool[],
     useGoogleSearch?: boolean
   ): Promise<AIResponse> {
-    // Resolve model name upfront (map invalid names to valid fallbacks)
-    modelName = resolveModelName(modelName);
-
+    const contents = this.mapToGeminiContent(history);
+    
     return withRetry(async () => {
-      // Build tools config
-      // IMPORTANT: Gemini API does NOT allow combining built-in tools (googleSearch)
-      // with custom tools (Function Calling) in the same request.
-      // When function calling tools exist → use them (web_search/read_webpage handle search)
-      // When no function calling tools → use Google Search grounding
       const toolsConfig: any[] = [];
       if (tools && tools.length > 0) {
-        toolsConfig.push({ functionDeclarations: tools });
+        toolsConfig.push({ functionDeclarations: tools.map(t => ({
+          name: t.name,
+          description: t.description,
+          parameters: t.parameters
+        })) });
       } else if (useGoogleSearch) {
-        // Only use Google Search grounding when there are no function calling tools
         toolsConfig.push({ googleSearch: {} });
       }
 
-      // SDK v1.x (including v1beta) expects systemInstruction and tools at the top level
-      // of the request object, not inside the generationConfig (config).
       const requestPayload: any = {
         model: modelName,
         contents,
@@ -172,110 +128,47 @@ export class GeminiProvider implements AIProvider {
       try {
         response = await client.models.generateContent(requestPayload);
       } catch (genErr: any) {
-        const errMsg = JSON.stringify(genErr?.message || genErr || '');
-        const modelNotFound = /404|NOT_FOUND|is not found/i.test(errMsg);
-        const invalidArgs = /INVALID_ARGUMENT|Unknown name/i.test(errMsg);
-        
-        // If model not found or invalid args on current API version, try alternative version
-        if (!this.isVertexAI && (modelNotFound || invalidArgs) && !this.v1Models.has(modelName)) {
-          logger.warn(`Model "${modelName}" ${modelNotFound ? 'not found' : 'invalid args'} on v1beta, retrying with v1 API version...`);
-          
-          let fallbackClient: GoogleGenAI | null = this.aiFallback;
-          if (!fallbackClient) {
-            try {
-              fallbackClient = new GoogleGenAI({ apiKey: this.apiKey, httpOptions: { apiVersion: 'v1' } });
-              this.aiFallback = fallbackClient; // Assign to class property only on successful initialization
-            } catch (fallbackInitErr: any) {
-              logger.error(`Failed to initialize v1 fallback GoogleGenAI client for model "${modelName}":`, fallbackInitErr);
-              throw genErr; 
-            }
+        const errMsg = String(genErr?.message || genErr || '');
+        if (!this.isVertexAI && /404|NOT_FOUND|INVALID_ARGUMENT|Unknown name/i.test(errMsg) && !this.v1Models.has(modelName)) {
+          this.v1Models.add(modelName);
+          if (!this.aiFallback) {
+            this.aiFallback = new GoogleGenAI({ apiKey: this.apiKey, httpOptions: { apiVersion: 'v1' } });
           }
-
-          // Now that we have a valid fallbackClient (or confirmed it's null and re-threw),
-          // we can safely add the model to the v1Models set.
-          // This ensures getClientForModel will only return this.aiFallback! if it's actually initialized.
-          this.v1Models.add(modelName); 
-          
-          // CRITICAL: For v1, strip systemInstruction and tools if WE DETECTED INVALID_ARGUMENT
-          // OR if we suspect this model is in the restricted list for v1.
-          const v1Payload = {
-            ...requestPayload,
-            config: {
-              ...requestPayload.config,
-              systemInstruction: undefined, // Standardize on stripping for v1 retry
-              tools: undefined,
-            },
-            contents: this.prepareContentsForV1Retry(systemInstruction, contents),
-          };
-          
-          try {
-            response = await this.aiFallback!.models.generateContent(v1Payload); // aiFallback guaranteed non-null: assigned above or pre-existing
-          } catch (v1Err: any) {
-            // If v1 STILL fails with INVALID_ARGUMENT, it might be due to remaining fields
-            logger.error(`v1 retry also failed for ${modelName}:`, v1Err);
-            throw v1Err;
-          }
+          response = await this.aiFallback.models.generateContent(requestPayload);
         } else {
           throw genErr;
         }
       }
 
       const candidateParts: any[] = (response.candidates?.[0] as any)?.content?.parts || [];
-      const textParts = candidateParts
-        .map((part: any) => String(part?.text || '').trim())
-        .filter(Boolean);
-
-      // Avoid response.text getter warning when model returns functionCall-only parts.
+      const textParts = candidateParts.map((part: any) => String(part?.text || '').trim()).filter(Boolean);
       let responseText = textParts.join('\n').trim();
 
-      const functionCallsFromParts: ToolCall[] = candidateParts
-        .map((part: any) => part?.functionCall)
-        .filter((fc: any) => fc?.name)
-        .map((fc: any) => ({
-          name: String(fc.name),
-          args: (fc.args ?? {}) as Record<string, unknown>,
-        }));
+      const functionCalls: ToolCall[] = [];
+      candidateParts.forEach((part: any) => {
+        if (part?.functionCall) {
+          functionCalls.push({
+            name: String(part.functionCall.name),
+            args: (part.functionCall.args ?? {}) as Record<string, unknown>,
+          });
+        }
+      });
 
-      const functionCallsFromApi: ToolCall[] = (response.functionCalls || [])
-        .filter((fc: any) => fc.name != null)
-        .map((fc: any) => ({
-          name: fc.name as string,
-          args: (fc.args ?? {}) as Record<string, unknown>,
-        }));
-
-      const toolCallByKey = new Map<string, ToolCall>();
-      for (const call of [...functionCallsFromApi, ...functionCallsFromParts]) {
-        const key = `${call.name}:${JSON.stringify(call.args || {})}`;
-        if (!toolCallByKey.has(key)) toolCallByKey.set(key, call);
-      }
-      const mergedToolCalls = Array.from(toolCallByKey.values());
-
-      // Fallback to response.text only when there are no tool calls.
-      if (!responseText && mergedToolCalls.length === 0) {
+      if (!responseText && functionCalls.length === 0) {
         responseText = response.text || '';
       }
 
-      // Extract grounding metadata (Google Search citations)
+      // Grounding summary
       const grounding = (response.candidates?.[0] as any)?.groundingMetadata;
       if (grounding?.searchEntryPoint?.renderedContent) {
-        // Append search sources summary
         const chunks = grounding.groundingChunks || [];
-        if (chunks.length > 0) {
-          const sources = chunks
-            .filter((c: any) => c.web?.uri)
-            .map((c: any, i: number) => `${i + 1}. ${c.web.title || 'Source'}: ${c.web.uri}`)
-            .join('\n');
-          if (sources) {
-            responseText += `\n\n📚 แหล่งอ้างอิง:\n${sources}`;
-          }
-        }
+        const sources = chunks.filter((c: any) => c.web?.uri).map((c: any, i: number) => `${i + 1}. ${c.web.title || 'Source'}: ${c.web.uri}`).join('\n');
+        if (sources) responseText += `\n\n📚 แหล่งอ้างอิง:\n${sources}`;
       }
-
-      const toolCalls: ToolCall[] | undefined = mergedToolCalls.length > 0 ? mergedToolCalls : undefined;
 
       return {
         text: responseText,
-        toolCalls,
+        toolCalls: functionCalls.length > 0 ? functionCalls : undefined,
         rawModelContent: response.candidates?.[0]?.content,
         usage: response.usageMetadata ? {
           promptTokens: response.usageMetadata.promptTokenCount || 0,
@@ -286,7 +179,46 @@ export class GeminiProvider implements AIProvider {
     }, { context: 'Gemini' });
   }
 
-  async generateImage(prompt: string, modelName?: string, options?: Record<string, any>): Promise<{ url?: string; b64_json?: string; buffer?: Buffer; revised_prompt?: string }[]> {
+  async syncModels(): Promise<{ success: boolean; updatedCount: number; models: string[] }> {
+    try {
+      const pager: any = await this.ai.models.list();
+      const allModels: string[] = [];
+      let guard = 0;
+
+      while (pager && guard < 50) {
+        guard++;
+        const modelsPage = pager.page || pager.pageInternal || [];
+        for (const model of modelsPage) {
+          const name = (model.name || '').replace('models/', '').trim();
+          if (name) allModels.push(name);
+        }
+        if (!pager.hasNextPage || typeof pager.nextPage !== 'function') break;
+        await pager.nextPage();
+      }
+
+      if (allModels.length > 0) {
+        const providerId = this.options.providerId || 'gemini';
+        updateProvider(providerId, { models: allModels });
+        logger.info(`Synced ${allModels.length} models for ${providerId}`);
+        return { success: true, updatedCount: allModels.length, models: allModels };
+      }
+      return { success: false, updatedCount: 0, models: [] };
+    } catch (err) {
+      logger.error('Failed to sync models:', err);
+      return { success: false, updatedCount: 0, models: [] };
+    }
+  }
+
+  async listModels(): Promise<string[]> {
+    const provider = getProvider(this.options.providerId || 'gemini');
+    if (provider?.models && provider.models.length > 0) {
+      return provider.models;
+    }
+    const res = await this.syncModels();
+    return res.models.length > 0 ? res.models : ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-3.1-flash'];
+  }
+
+  async generateImage(prompt: string, modelName?: string, options?: Record<string, any>): Promise<{ b64_json?: string; buffer?: Buffer }[]> {
     const model = modelName || 'imagen-3.0-generate-001';
     const client = this.getClientForModel(model);
     const response = await client.models.generateImages({
@@ -295,17 +227,13 @@ export class GeminiProvider implements AIProvider {
       config: {
         numberOfImages: options?.n || 1,
         outputMimeType: options?.response_format === 'png' ? 'image/png' : 'image/jpeg',
-        aspectRatio: options?.aspectRatio || '1:1',
         personGeneration: 'ALLOW_ALL' as any
       }
     });
-
-    return (response.generatedImages || []).map(img => {
-      return {
-        b64_json: img.image?.imageBytes,
-        buffer: img.image?.imageBytes ? Buffer.from(img.image.imageBytes, 'base64') : undefined
-      };
-    });
+    return (response.generatedImages || []).map(img => ({
+      b64_json: img.image?.imageBytes,
+      buffer: img.image?.imageBytes ? Buffer.from(img.image.imageBytes, 'base64') : undefined
+    }));
   }
 
   async generateSpeech(text: string, modelName?: string, voice?: string): Promise<Buffer> {
@@ -314,98 +242,13 @@ export class GeminiProvider implements AIProvider {
     const response = await client.models.generateContent({
       model,
       contents: [{ role: 'user', parts: [{ text }] }],
-      config: {
-        responseModalities: ["AUDIO"],
-        speechConfig: voice ? { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } } : undefined
-      } as any
+      config: { responseModalities: ["AUDIO"] } as any
     });
-    
-    // Parse AUDIO modality output (usually base64 inline data)
     for (const part of response.candidates?.[0]?.content?.parts || []) {
-      if (part.inlineData && part.inlineData.mimeType?.startsWith('audio')) {
+      if (part.inlineData?.mimeType?.startsWith('audio')) {
         return Buffer.from(part.inlineData.data || '', 'base64');
       }
     }
-    
-    throw new Error('No audio generated from ' + model);
-  }
-
-  async listModels(): Promise<string[]> {
-    try {
-      const allModels: string[] = [];
-      const includeEmbeddings = this.options.includeEmbeddingsInList === true;
-      const includeTTS = this.options.includeTTSInList === true;
-      const includeAqa = this.options.includeAqaInList === true;
-
-      const pager: any = await this.ai.models.list();
-      let guard = 0;
-
-      while (pager && guard < 20) {
-        guard += 1;
-        const modelsPage = pager.page || pager.pageInternal || [];
-        for (const model of modelsPage) {
-          const name: string = (model.name || '').replace('models/', '').trim();
-          if (!name) continue;
-
-          if (!includeEmbeddings && name.includes('embedding')) continue;
-          if (!includeTTS && name.includes('tts')) continue;
-          if (!includeAqa && name.includes('aqa')) continue;
-
-          allModels.push(name);
-        }
-
-        const hasNext =
-          typeof pager.hasNextPage === 'function'
-            ? pager.hasNextPage()
-            : Boolean(pager.nextPageToken);
-
-        if (!hasNext || typeof pager.nextPage !== 'function') {
-          break;
-        }
-
-        try {
-          // NOTE: in @google/genai Pager, nextPage mutates the pager state
-          // and returns the next page array, not a new pager instance.
-          await pager.nextPage();
-        } catch (pageErr: any) {
-          const msg = String(pageErr?.message || pageErr || '');
-          if (msg.includes('No more pages to fetch')) {
-            break;
-          }
-          throw pageErr;
-        }
-      }
-
-      // Include predefined aliases to ensure they are available in UI (even if not listed by API)
-      const aliasModels = Object.keys(MODEL_ALIAS_MAP);
-      const combinedModels = Array.from(new Set([...allModels, ...aliasModels])).sort();
-
-      if (combinedModels.length > 0) {
-        return combinedModels;
-      }
-
-      throw new Error('No models returned from API');
-    } catch (err) {
-      logger.error('[Gemini ListModels Error]:', err);
-      const errorMessage = (err as any)?.message || String(err);
-      if (errorMessage.includes('authentication') || errorMessage.includes('permission')) {
-        // Handle authentication/permission errors by returning an empty list to avoid misleading fallbacks
-        return [];
-      }
-      if (this.options.includeEmbeddingsInList) {
-        return [
-          'gemini-embedding-001',
-          'text-embedding-004',
-          'gemini-embedding-002',
-        ];
-      }
-      // Fallback list for LLM mode if the API call entirely fails
-      return [
-        'gemini-2.5-flash',
-        'gemini-2.0-flash',
-        'gemini-2.0-flash-lite',
-        'gemini-1.5-flash'
-      ];
-    }
+    throw new Error('No audio generated');
   }
 }

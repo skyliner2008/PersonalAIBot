@@ -15,9 +15,15 @@ clipboard_read
 clipboard_write
 list_files
 read_file_content
+read_file
+view_file
 write_file_content
 delete_file
 send_file_to_chat
+multi_replace_file_content
+system_terminal
+notify_user
+search_knowledge
 browser_click
 browser_type
 browser_close

@@ -960,37 +960,36 @@ async function analyzeBatchWithLLM(rootDir: string, batchFiles: string[]): Promi
       const chunkContent = chunk.code;
       const chunkInfo = chunks.length > 1 ? ` [Chunk: ${chunk.chunkLabel}]` : '';
 
-      const prompt = `You are an expert TypeScript code reviewer performing a codebase audit.
+      const prompt = `You are a Senior Strategic Software Architect performing a MISSION-CRITICAL codebase audit.
 Your primary focus MUST be finding critical bugs and security vulnerabilities that WILL crash the server or corrupt data at runtime.
-However, you are also allowed to report highly valuable improvements in performance, refactoring, new features, or tool usage if they are significant.
 
 FILE: "${relPath}"${chunkInfo}
 
 PRIORITY 1 - WHAT TO ACTIVELY REPORT (CRITICAL):
-- Uncaught exceptions, null/undefined dereferences that will throw at runtime
-- Incorrect function calls, type mismatches that crash JS
-- Resource leaks, Infinite loops, race conditions
-- SQL/NoSQL injection paths or explicit security flaws
+- Uncaught exceptions, null/undefined dereferences that will throw at runtime.
+- Incorrect function calls, type mismatches that crash JS.
+- Serious resource leaks, Infinite loops, race conditions.
+- SQL/NoSQL injection paths or explicit security flaws.
 
-PRIORITY 2 - OTHER ACCEPTABLE REPORTS (ONLY IF SIGNIFICANT):
-- Performance bottlenecks (e.g., N+1 queries, unnecessary deep cloning)
-- Refactor opportunities (e.g., extracting massive functions, deduplicating logic)
-- Missing features or absent tool integrations that would greatly enhance functionality
+PRIORITY 2 - HIGH-VALUE IMPROVEMENTS (ONLY IF EXTREME):
+- Severe performance bottlenecks (e.g., O(N^2) in request loops).
+- Major refactoring needed to prevent system failure.
+- Essential missing features that align with current project architecture.
 
-WHAT TO NEVER REPORT (STRICT RULES):
-- Minor style issues, naming conventions, code organization preferences
-- Missing logging, comments, documentation
-- TypeScript type-only issues (that don't crash at runtime)
-- Redundant null checks (safe code is GOOD code)
-- Issues in other files — you can ONLY see "${relPath}"
-- BUGS THAT ARE ALREADY FIXED: If an object is already safely null-checked, DO NOT report it.
+WHAT TO NEVER REPORT (STRICT RULES — VIOLATION REDUCES CONFIDENCE):
+1. MINOR STYLE: Naming, spacing, comments, "cleaner" code, project structure.
+2. MISSING DOCS: Missing JSDoc, comments, or logging.
+3. TYPE-ONLY: TS errors that don't affect runtime (e.g., simple type mismatches in non-critical paths).
+4. REDUNDANT CHECKS: If an object is already safely null-checked, DO NOT report it.
+5. DE-DUPLICATION: If you see a pattern used throughout the file, only report the MOST critical instance or a single comprehensive fix. DO NOT create 10 proposals for the same pattern.
+6. ALREADY FIXED: If the code already handles the edge case, skip it.
 
 YOUR SUGGESTED FIX RULES:
-- Must be a MINIMAL valid TypeScript snippet (only the changed lines)
-- Must preserve ALL existing closing brackets }, ), ]
-- Must NOT add imports for packages not in the project
-- Must NOT change function signatures or export names
-- If unsure → set confidence below 0.5 (it will be auto-filtered)
+- Must be a SURGICAL valid TypeScript snippet (only the minimal changed lines).
+- Must preserve ALL existing closing brackets }, ), ].
+- Must NOT add imports for packages not in the project.
+- Must NOT change function signatures or export names.
+- If unsure or low impact → DO NOT REPORT (return empty issues).
 
 Respond in pure JSON (no markdown wrapping) matching exactly this structure:
 {
@@ -1005,27 +1004,7 @@ Respond in pure JSON (no markdown wrapping) matching exactly this structure:
 }
 
 If no issues are found, return an empty array for "issues": []
-Be conservative — false negatives are OK, false positives waste resources.
-
-EXAMPLE OUTPUT (for reference — adapt to actual findings):
-{
-  "architecture": {
-    "summary": "Manages WebSocket connections for real-time messaging",
-    "exports": ["WebSocketManager", "broadcastMessage"],
-    "dependencies": ["../database/db", "ws", "../utils/logger"]
-  },
-  "issues": [
-    {
-      "type": "bug",
-      "title": "Uncaught null dereference in broadcastMessage",
-      "description": "client.socket can be null after disconnect, but send() is called without null check at line 45. Will throw TypeError at runtime when broadcasting to disconnected clients.",
-      "line_range": "44-46",
-      "suggested_fix": "if (client.socket && client.socket.readyState === WebSocket.OPEN) { client.socket.send(data); }",
-      "priority": "high",
-      "confidence": 0.9
-    }
-  ]
-}
+Be extremely conservative — only report things worth the token cost of autonomous implementation.
 
 Code:
 ${chunkContent}`;
@@ -2199,6 +2178,25 @@ async function analyzeImpact(rootDir: string, targetFilePath: string, proposalDe
   return report;
 }
 
+/** Record AI transcript for a proposal for auditing purposes */
+export function recordProposalTrace(proposalId: number, transcript: any[]): void {
+  try {
+    // Use a stable path relative to the root, avoiding CWD dependency
+    const logsDir = path.resolve(_dirname, '../../../logs/upgrade_traces');
+    if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
+    
+    const tracePath = path.join(logsDir, `proposal_${proposalId}.json`);
+    fs.writeFileSync(tracePath, JSON.stringify({
+      proposalId,
+      timestamp: new Date().toISOString(),
+      transcript
+    }, null, 2), 'utf-8');
+    log.info(`[SelfUpgrade] AI TRACE recorded for proposal #${proposalId} at ${tracePath}`);
+  } catch (err: any) {
+    log.error(`[SelfUpgrade] Failed to record AI TRACE for proposal #${proposalId}: ${err.message}`);
+  }
+}
+
 /** Format impact report for DB storage */
 function serializeImpactReport(report: ImpactReport): { affected_files: string; impact_analysis: string } {
   return {
@@ -2856,7 +2854,8 @@ ${originalContent}
             platform: 'system' as any,
             botId: rootAdmin.botId,
             botName: rootAdmin.botName,
-            replyWithFile: async () => 'Not supported in autonomous mode'
+            replyWithFile: async () => 'Not supported in autonomous mode',
+            replyWithText: async (t) => `[SelfUpgrade Internal] ${t}`,
           },
           'code_generation',
           { message: prompt, context: `Self-Upgrade System — ${isMultiFile ? 'Multi-File' : 'Single-File'} Mode` },
@@ -2868,6 +2867,13 @@ ${originalContent}
             metadata: { proposalId: proposal.id, isMultiFile, affectedFileCount: allTargetFiles.length }
           }
         );
+
+        // Record trace as soon as it's done, surviving potential restart race better than waitForTaskResult
+        swarmCoordinator.onTaskDone(taskId, async (task) => {
+          if (task.transcript) {
+            recordProposalTrace(id, task.transcript);
+          }
+        });
 
         // Track ALL file modifications (multi-file aware)
         const modifiedFiles = new Set<string>();
@@ -2899,9 +2905,13 @@ ${originalContent}
           console.log(`\x1b[90m  │  ⏳ ${specialistName} working... ${waitSec}s elapsed${modCount > 0 ? `, ${modCount} file(s) modified so far` : ''}\x1b[0m`);
         }, 15000);
 
-        let result: { status: string; result?: string; error?: string };
+        let result: { status: string; result?: string; error?: string; transcript?: any[] };
         try {
           result = await swarmCoordinator.waitForTaskResult(taskId, taskTimeout);
+          // record AI TRACE if available (redundant but safe fallback)
+          if (result.transcript) {
+            recordProposalTrace(id, result.transcript);
+          }
         } finally {
           clearInterval(heartbeat);
         }
@@ -3041,7 +3051,8 @@ ${commonSafetyRules}`;
                     platform: 'system' as any,
                     botId: rootAdmin.botId,
                     botName: rootAdmin.botName,
-                    replyWithFile: async () => 'Not supported in autonomous mode'
+                    replyWithFile: async () => 'Not supported in autonomous mode',
+                    replyWithText: async (t) => `[SelfUpgrade Internal] ${t}`,
                   },
                   'code_generation',
                   { message: correctionPrompt, context: `Self-Upgrade Self-Correction — Attempt ${correctionAttempt}` },
@@ -3234,7 +3245,8 @@ ${commonSafetyRules}`;
                       platform: 'system' as any,
                       botId: rootAdmin.botId,
                       botName: rootAdmin.botName,
-                      replyWithFile: async () => 'Not supported in autonomous mode'
+                      replyWithFile: async () => 'Not supported in autonomous mode',
+                      replyWithText: async (t) => `[SelfUpgrade Internal] ${t}`,
                     },
                     'code_generation',
                     { message: bootFixPrompt, context: `Self-Upgrade Boot Fix — Proposal #${proposal.id}` },
@@ -3648,6 +3660,20 @@ export async function startSelfUpgrade(rootDir: string): Promise<void> {
   ensureUpgradeTable();
   _currentRootDir = rootDir;
 
+  // --- COLD BOOT PROTECTION ---
+  const coldBootPath = path.resolve(process.cwd(), '../COLD_BOOT.flag');
+  if (fs.existsSync(coldBootPath)) {
+    log.info('[SelfUpgrade] COLD_BOOT.flag detected! Forcing Self-Upgrade System to OFF/PAUSED.');
+    try {
+      setSetting('upgrade_paused', 'true');
+      setSetting('upgrade_continuous_scan', 'false');
+      setSetting('upgrade_implement_all', 'false');
+      log.info('[SelfUpgrade] COLD_BOOT.flag remains active until manual user intervention.');
+    } catch (e: any) {
+      log.error(`[SelfUpgrade] Failed to handle COLD_BOOT.flag: ${e.message}`);
+    }
+  }
+
   // Load persisted configuration
   refreshConfig();
   
@@ -3775,11 +3801,13 @@ export function getUpgradeStatus(): {
     batchActive = getSetting('upgrade_implement_all') === 'true';
   } catch { /* ignore */ }
 
+  const isContinuous = !!_continuousScanTimeout;
+  
   return {
-    running: !!upgradeInterval || !!_continuousScanTimeout,
-    isContinuousActive: !!_continuousScanTimeout,
+    running: !!upgradeInterval || isContinuous,
+    isContinuousActive: isContinuous,
     isManualScanActive: _isManualScanActive,
-    isUpgrading,
+    isUpgrading: isUpgrading,
     paused: _paused,
     isIdle: _isManualScanActive ? false : isSystemIdle(),
     idleMinutes: _isManualScanActive ? 0 : Math.round(idleMs / 60000),
@@ -3918,6 +3946,13 @@ export async function toggleContinuousScan(rootDir: string): Promise<boolean> {
     clearTimeout(_continuousScanTimeout);
     _continuousScanTimeout = null;
     _isManualScanActive = false;
+    
+    // If we were just scanning and not actually writing files, 
+    // we can safely clear isUpgrading to make the UI feel responsive.
+    if (isUpgrading) {
+      log.info('Continuous scan stopped; system will finish its current file-read batch and then idle.');
+    }
+
     setSetting('upgrade_continuous_scan', 'false');
     log.info('Continuous scan mode stopped explicitly.');
     return false;

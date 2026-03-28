@@ -5,8 +5,8 @@ import { startChatMonitor, stopChatMonitor, isChatMonitorActive } from '../autom
 import { startCommentMonitor, stopCommentMonitor, isCommentMonitorActive } from '../automation/commentBot.js';
 import { startScheduler, stopScheduler } from '../scheduler/scheduler.js';
 import { addLog } from '../database/db.js';
-import { Type } from '@google/genai';
 import { LiveVideoClient, resolveGeminiLiveModel } from './liveVoice.js';
+import type { AITool } from '../bot_agents/types.js';
 import { resolveProviderApiKey } from '../config/settingsSecurity.js';
 import { getProvider } from '../providers/registry.js';
 import { personaManager } from '../ai/personaManager.js';
@@ -136,15 +136,15 @@ const liveClients = new Map<string, { client: LiveVideoClient; sessionChatId: st
 const voiceAgentQueues = new Map<string, Promise<any>>();
 const log = createLogger('SocketHandlers');
 const LIVE_AGENT_TOOL_NAME = 'jarvis_agent_execute';
-const LIVE_AGENT_TOOL_DECLARATIONS = [
+const LIVE_AGENT_TOOL_DECLARATIONS: AITool[] = [
     {
         name: LIVE_AGENT_TOOL_NAME,
         description: 'Delegate the user request to Jarvis Agent with full internal tools, then return the tool result for final voice reply.',
         parameters: {
-            type: Type.OBJECT,
+            type: 'object',
             properties: {
                 command: {
-                    type: Type.STRING,
+                    type: 'string',
                     description: 'User request in plain text (Thai preferred).',
                 },
             },

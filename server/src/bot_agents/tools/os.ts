@@ -1,6 +1,6 @@
 import { exec, execFile } from 'child_process';
 import { promisify } from 'util';
-import { Type, FunctionDeclaration } from '@google/genai';
+import type { AITool } from '../providers/baseProvider.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -111,14 +111,14 @@ async function safeExec(
 // ==========================================
 // 1. Run Command (CMD/PowerShell)
 // ==========================================
-export const runCommandDeclaration: FunctionDeclaration = {
+export const runCommandDeclaration: AITool = {
   name: "run_command",
   description: "รันคำสั่ง Command Line (CMD/PowerShell) บนระบบปฏิบัติการ Windows คืนค่าผลลัพธ์จาก Terminal. ใช้สำหรับจัดการไฟล์ เช็คสถานะระบบ หรือควบคุม OS ในระดับลึก. ข้อควรระวัง: คุณกำลังรันบน Windows! ดังนั้นห้ามใช้ Linux commands เช่น grep, cat, ls, rm (ใช้ findstr, Select-String, type, dir, del แทน)",
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
       command: {
-        type: Type.STRING,
+        type: 'string',
         description: "คำสั่งที่ต้องการรัน (เช่น 'dir', 'findstr', 'ping google.com')",
       },
     },
@@ -174,16 +174,57 @@ export async function runCommand(
 }
 
 // ==========================================
+// 1.5 System Terminal (Robust execution)
+// ==========================================
+export const systemTerminalDeclaration: AITool = {
+  name: "system_terminal",
+  description: "รันคำสั่ง Terminal ที่มีความซับซ้อน หรือต้องการการจำลองสภาพแวดล้อมที่เหมือนการพิมพ์จริง (TTY) บนเเครื่องโฮสต์",
+  parameters: {
+    type: 'object',
+    properties: {
+      command: { type: 'string', description: "คำสั่งที่ต้องการรัน" },
+      cwd: { type: 'string', description: "Working Directory (ถ้าวางแผนจะรันในโฟลเดอร์เฉพาะ)" },
+    },
+    required: ["command"],
+  },
+};
+
+export async function systemTerminal({ command, cwd }: { command: string, cwd?: string }): Promise<string> {
+  const check = isSafeCommand(command);
+  if (!check.safe) return `🚫 Security Error: ${check.reason}`;
+
+  try {
+    const options = {
+      cwd: cwd ? path.resolve(cwd) : process.cwd(),
+      timeout: 60000,
+      maxBuffer: 10 * 1024 * 1024, // 10MB
+    };
+
+    // Use cmd.exe /c for Windows compatibility
+    const { stdout, stderr } = await execAsync(`cmd.exe /c "${command.replace(/"/g, '^"')}"`, options);
+    
+    let result = stdout.trim();
+    if (stderr) {
+      result += `\n\n[Stderr]:\n${stderr.trim()}`;
+    }
+    
+    return result || "✅ Command executed successfully (no output).";
+  } catch (error: any) {
+    return `❌ Terminal Error: ${error.message}${error.stderr ? '\n' + error.stderr : ''}`;
+  }
+}
+
+// ==========================================
 // 2. Open Application
 // ==========================================
-export const openApplicationDeclaration: FunctionDeclaration = {
+export const openApplicationDeclaration: AITool = {
   name: "open_application",
   description: "เปิดโปรแกรมประยุกต์ (Application) หรือไฟล์บน Windows. ตัวอย่างเช่น 'notepad', 'chrome', 'calc', หรือพาธเต็มของโปรแกรม",
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
       appNameOrPath: {
-        type: Type.STRING,
+        type: 'string',
         description: "ชื่อโปรแกรม (เช่น notepad) หรือ พาธเต็ม",
       },
     },
@@ -208,14 +249,14 @@ export async function openApplication({ app_name_or_path }: { app_name_or_path: 
 // ==========================================
 // 3. Close Application
 // ==========================================
-export const closeApplicationDeclaration: FunctionDeclaration = {
+export const closeApplicationDeclaration: AITool = {
   name: "close_application",
   description: "ปิดโปรแกรมที่ทำงานอยู่โดยบังคับปิด (Force Close). ต้องระบุชื่อ Process Name ให้ถูกต้อง เช่น 'notepad.exe', 'chrome.exe'",
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
       process_name: {
-        type: Type.STRING,
+        type: 'string',
         description: "ชื่อของ process ที่ต้องการปิด (ต้องลงท้ายด้วย .exe เสมอ เช่น notepad.exe)",
       },
     },
@@ -240,14 +281,14 @@ export async function closeApplication({ process_name }: { process_name: string 
 // ==========================================
 // 4. Run Python Code (Code Interpreter)
 // ==========================================
-export const runPythonDeclaration: FunctionDeclaration = {
+export const runPythonDeclaration: AITool = {
   name: "run_python",
   description: "รัน Python code โดยตรง ใช้คำนวณ วิเคราะห์ข้อมูล สร้างกราฟ จัดการไฟล์ หรือทำอะไรก็ได้ที่ Python ทำได้ ส่งคืนผลลัพธ์ของ code",
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
       code: {
-        type: Type.STRING,
+        type: 'string',
         description: "Python code ที่ต้องการรัน (ใช้ print() เพื่อแสดงผล)",
       },
     },
@@ -277,10 +318,10 @@ export async function runPython({ code }: { code: string }): Promise<string> {
 // ==========================================
 // 5. System Info
 // ==========================================
-export const systemInfoDeclaration: FunctionDeclaration = {
+export const systemInfoDeclaration: AITool = {
   name: "system_info",
   description: "ดึงข้อมูลระบบปฏิบัติการ เช่น CPU, RAM, Disk, Network, Uptime ใช้เมื่อต้องการเช็คสถานะเครื่อง",
-  parameters: { type: Type.OBJECT, properties: {} },
+  parameters: { type: 'object', properties: {} },
 };
 
 export function systemInfo(): string {
@@ -312,14 +353,14 @@ export function systemInfo(): string {
 // ==========================================
 // 6. Screenshot Desktop (via PowerShell)
 // ==========================================
-export const screenshotDesktopDeclaration: FunctionDeclaration = {
+export const screenshotDesktopDeclaration: AITool = {
   name: "screenshot_desktop",
   description: "ถ่ายภาพหน้าจอ Desktop ทั้งจอ บันทึกเป็นไฟล์ภาพ ใช้เมื่อต้องการดูว่าหน้าจอแสดงอะไรอยู่",
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
       save_path: {
-        type: Type.STRING,
+        type: 'string',
         description: "พาธที่จะบันทึกไฟล์ภาพ (ค่าเริ่มต้น: Desktop/screenshot.png)",
       },
     },
@@ -357,10 +398,10 @@ $bitmap.Dispose()
 // ==========================================
 // 7. Clipboard Operations
 // ==========================================
-export const clipboardReadDeclaration: FunctionDeclaration = {
+export const clipboardReadDeclaration: AITool = {
   name: "clipboard_read",
   description: "อ่านข้อความจาก Clipboard (คลิปบอร์ด) ของ Windows",
-  parameters: { type: Type.OBJECT, properties: {} },
+  parameters: { type: 'object', properties: {} },
 };
 
 export async function clipboardRead(): Promise<string> {
@@ -372,13 +413,13 @@ export async function clipboardRead(): Promise<string> {
   }
 }
 
-export const clipboardWriteDeclaration: FunctionDeclaration = {
+export const clipboardWriteDeclaration: AITool = {
   name: "clipboard_write",
   description: "เขียนข้อความลง Clipboard ของ Windows",
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
-      text: { type: Type.STRING, description: "ข้อความที่ต้องการเขียน" },
+      text: { type: 'string', description: "ข้อความที่ต้องการเขียน" },
     },
     required: ["text"],
   },

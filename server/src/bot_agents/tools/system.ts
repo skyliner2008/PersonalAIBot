@@ -3,8 +3,7 @@
 // ให้ Agent รู้จักตัวเอง, รู้จัก Model, เปลี่ยน Model ได้
 // ============================================================
 
-import { Type } from '@google/genai';
-import type { FunctionDeclaration } from '@google/genai';
+import type { AITool } from '../providers/baseProvider.js';
 import type { BotContext, ToolHandlerMap } from '../types.js';
 import { TaskType, type ModelConfig } from '../config/aiConfig.js';
 import { configManager } from '../config/configManager.js';
@@ -28,46 +27,46 @@ export interface SystemToolContext {
 // Tool Declarations (FunctionDeclaration)
 // ============================================================
 
-export const getMyConfigDeclaration: FunctionDeclaration = {
+export const getMyConfigDeclaration: AITool = {
   name: 'get_my_config',
   description: 'ดูข้อมูล config ของตัวเอง เช่น ชื่อ, platform, model ที่ใช้อยู่, จำนวน tools ที่เปิดใช้, และสถานะ Auto Routing',
-  parameters: { type: Type.OBJECT, properties: {} },
+  parameters: { type: 'object', properties: {} },
 };
 
-export const listAvailableModelsDeclaration: FunctionDeclaration = {
+export const listAvailableModelsDeclaration: AITool = {
   name: 'list_available_models',
   description: 'แสดงรายการ AI model ทั้งหมดที่ใช้ได้ในระบบ จัดกลุ่มตาม provider ที่ agent ใช้งานได้ตอนนี้',
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
       provider: {
-        type: Type.STRING,
+        type: 'string',
         description: 'กรอง provider ที่ต้องการ เช่น "gemini", "openai", "anthropic" หรือ provider id อื่นที่ agent ใช้ได้ (ถ้าไม่ระบุจะแสดงทั้งหมด)',
       },
     },
   },
 };
 
-export const setMyModelDeclaration: FunctionDeclaration = {
+export const setMyModelDeclaration: AITool = {
   name: 'set_my_model',
   description: 'เปลี่ยน AI model หรือเปิด/ปิด Auto Routing สำหรับ task type ที่กำหนด',
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
       task_type: {
-        type: Type.STRING,
+        type: 'string',
         description: `ประเภทงาน: ${Object.values(TaskType).join(', ')}`,
       },
       provider: {
-        type: Type.STRING,
+        type: 'string',
         description: 'provider id ที่ agent ใช้งานได้ เช่น gemini, openai, minimax',
       },
       model_name: {
-        type: Type.STRING,
+        type: 'string',
         description: 'ชื่อ model เช่น gemini-2.0-flash, gpt-4o, abab6.5s-chat',
       },
       auto: {
-        type: Type.BOOLEAN,
+        type: 'boolean',
         description: 'ถ้า true จะเปิดใช้ adaptive routing (auto) สำหรับ bot นี้ (ถ้าใส่ auto=true ไม่ต้องระบุ provider/model)',
       },
     },
@@ -75,55 +74,55 @@ export const setMyModelDeclaration: FunctionDeclaration = {
   },
 };
 
-export const getSystemStatusDeclaration: FunctionDeclaration = {
+export const getSystemStatusDeclaration: AITool = {
   name: 'get_system_status',
   description: 'ดูสถานะระบบ: uptime, providers ที่ใช้ได้, สถิติการทำงาน',
-  parameters: { type: Type.OBJECT, properties: {} },
+  parameters: { type: 'object', properties: {} },
 };
 
-export const getMyCapabilitiesDeclaration: FunctionDeclaration = {
+export const getMyCapabilitiesDeclaration: AITool = {
   name: 'get_my_capabilities',
   description: 'แสดงรายการ tools และความสามารถที่เปิดใช้อยู่ จัดกลุ่มตามประเภท',
-  parameters: { type: Type.OBJECT, properties: {} },
+  parameters: { type: 'object', properties: {} },
 };
 
-export const helpDeclaration: FunctionDeclaration = {
+export const helpDeclaration: AITool = {
   name: 'help',
   description: 'แสดงคู่มือการใช้งานและความสามารถทั้งหมดของ AI Agent',
-  parameters: { type: Type.OBJECT, properties: {} },
+  parameters: { type: 'object', properties: {} },
 };
 
-export const getRecentErrorsDeclaration: FunctionDeclaration = {
+export const getRecentErrorsDeclaration: AITool = {
   name: 'get_recent_errors',
   description: 'ดูข้อผิดพลาดล่าสุดของระบบ เพื่อวินิจฉัยปัญหา',
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
       limit: {
-        type: Type.NUMBER,
+        type: 'number',
         description: 'จำนวนรายการที่ต้องการดู (ค่าเริ่มต้น 10)',
       },
     },
   },
 };
 
-export const getSessionStatsDeclaration: FunctionDeclaration = {
+export const getSessionStatsDeclaration: AITool = {
   name: 'get_session_stats',
   description: 'ดูสถิติการทำงานของ Agent: จำนวน runs, tokens ที่ใช้, เวลาเฉลี่ย',
-  parameters: { type: Type.OBJECT, properties: {} },
+  parameters: { type: 'object', properties: {} },
 };
 
-export const getSystemPathsDeclaration: FunctionDeclaration = {
+export const getSystemPathsDeclaration: AITool = {
   name: 'get_system_paths',
   description: 'ดูพาธที่สำคัญในระบบ เช่น Desktop, Documents, Downloads, Home, AppData',
-  parameters: { type: Type.OBJECT, properties: {} },
+  parameters: { type: 'object', properties: {} },
 };
 
 // ============================================================
 // All declarations for export
 // ============================================================
 
-export const systemToolDeclarations: FunctionDeclaration[] = [
+export const systemToolDeclarations: AITool[] = [
   getMyConfigDeclaration,
   listAvailableModelsDeclaration,
   setMyModelDeclaration,

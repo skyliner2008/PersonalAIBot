@@ -7,7 +7,7 @@
 // Layer 4: Archival Memory — Semantic embeddings for long-term facts
 // ============================================================
 
-import { getDb, upsertConversation } from '../database/db.js';
+import { getDb, upsertConversation, addMessage as dbAddMessage } from '../database/db.js';
 import type {
     CoreMemoryBlock,
     MemoryMessage,
@@ -204,7 +204,14 @@ export function formatCoreMemory(blocks: CoreMemoryBlock[]): string {
 // WORKING MEMORY (Layer 2) — RAM-cached recent messages
 // ============================================================
 
-export function addMessage(chatId: string, role: string, content: string): void {
+export function addMessage(
+    chatId: string, 
+    role: string, 
+    content: string, 
+    source: string = 'chat', 
+    metadata: any = {}, 
+    isInternal: boolean = false
+): void {
     const workingMemoryLimit = getMaxMemoryMessages();
     // 0. Aggressive token saving: strip <think>, Base64 images, and overly long lines
     let cleanContent = content.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
@@ -220,22 +227,25 @@ export function addMessage(chatId: string, role: string, content: string): void 
 
     // 0.5 Ensure parent conversation exists before writing recall messages.
     // This prevents FOREIGN KEY failures for ad-hoc chat IDs (e.g. admin_web_session).
-    const displayName = chatId.startsWith('admin_')
-        ? 'Jarvis Terminal Admin'
-        : 'Unified Memory Session';
+    let displayName = 'Unified Memory Session';
+    if (chatId.startsWith('admin_')) {
+        displayName = 'Jarvis Terminal Admin';
+    } else if (chatId.startsWith('trace_')) {
+        displayName = `Self-Upgrade Trace #${chatId.split('_')[1]}`;
+    } else if (source === 'swarm_trace') {
+        displayName = `Swarm Intelligence Trace`;
+    }
     upsertConversation(chatId, chatId, displayName);
 
     // 1. Save to DB (recall memory)
-    getDb().prepare(
-        'INSERT INTO messages (conversation_id, role, content) VALUES (?, ?, ?)'
-    ).run(chatId, role, cleanContent);
+    dbAddMessage(chatId, role, cleanContent, undefined, source, metadata, isInternal);
 
     // 2. Update RAM cache (with LRU check)
     if (!ramCache[chatId]) {
         evictLRU(); // ป้องกัน cache โตไม่มีขีดจำกัด
         // Load recent from DB to prime cache
         const rows = getDb()
-            .prepare('SELECT role, content FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT ?')
+            .prepare('SELECT role, content, source, metadata, is_internal FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT ?')
             .all(chatId, workingMemoryLimit) as any[];
         // Initialize messageCount from DB to keep extraction triggers aligned
         const countRow = getDb().prepare('SELECT COUNT(*) as c FROM messages WHERE conversation_id = ?').get(chatId) as any;
@@ -243,7 +253,14 @@ export function addMessage(chatId: string, role: string, content: string): void 
         // Double-check: if it became defined concurrently during DB load, use that one.
         if (!ramCache[chatId]) {
             ramCache[chatId] = {
-                messages: rows.reverse().map(r => ({ chatId, role: r.role, content: r.content })),
+                messages: rows.reverse().map(r => ({ 
+                    chatId, 
+                    role: r.role, 
+                    content: r.content,
+                    source: r.source,
+                    metadata: r.metadata ? JSON.parse(r.metadata) : {},
+                    isInternal: !!r.is_internal
+                })),
                 lastActive: Date.now(),
                 messageCount: countRow?.c || 0,
             };
@@ -256,7 +273,14 @@ export function addMessage(chatId: string, role: string, content: string): void 
         return; // Gracefully exit, DB write succeeded, but cache update failed.
     }
 
-    entry.messages.push({ chatId, role: role as any, content: cleanContent });
+    entry.messages.push({ 
+        chatId, 
+        role: role as any, 
+        content: cleanContent,
+        source,
+        metadata,
+        isInternal
+    });
     // Trim to limit
     if (entry.messages.length > workingMemoryLimit) {
         entry.messages = entry.messages.slice(-workingMemoryLimit);
@@ -270,7 +294,7 @@ export function getWorkingMemory(chatId: string): MemoryMessage[] {
     if (!ramCache[chatId]) {
         // Load from DB
         const rows = getDb()
-            .prepare('SELECT role, content FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT ?')
+            .prepare('SELECT role, content, source, metadata, is_internal FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT ?')
             .all(chatId, workingMemoryLimit) as any[];
         // Initialize messageCount from DB to keep extraction triggers aligned
         const countRow = getDb().prepare('SELECT COUNT(*) as c FROM messages WHERE conversation_id = ?').get(chatId) as any;
@@ -278,7 +302,14 @@ export function getWorkingMemory(chatId: string): MemoryMessage[] {
         // Double-check: if it became defined concurrently during DB load, use that one.
         if (!ramCache[chatId]) {
             ramCache[chatId] = {
-                messages: rows.reverse().map(r => ({ chatId, role: r.role, content: r.content })),
+                messages: rows.reverse().map(r => ({ 
+                    chatId, 
+                    role: r.role, 
+                    content: r.content,
+                    source: r.source,
+                    metadata: r.metadata ? JSON.parse(r.metadata) : {},
+                    isInternal: !!r.is_internal
+                })),
                 lastActive: Date.now(),
                 messageCount: countRow?.c || 0,
             };

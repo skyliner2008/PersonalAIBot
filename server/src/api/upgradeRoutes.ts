@@ -19,11 +19,29 @@ import {
 import type { ProposalStatus, ProposalType } from '../evolution/selfUpgrade.js';
 import { asyncHandler } from '../utils/errorHandler.js';
 import { createLogger } from '../utils/logger.js';
+import { fileURLToPath } from 'url';
 import path from 'path';
 import * as fs from 'fs';
 
+const _filename = fileURLToPath(import.meta.url);
+const _dirname = path.dirname(_filename);
+
 const log = createLogger('UpgradeRoutes');
 const router = Router();
+
+// Helper to clear cold boot flag when user manually interacts
+function clearColdBootFlag() {
+  const projectRoot = path.resolve(process.cwd());
+  const flagPath = path.join(projectRoot, 'COLD_BOOT.flag');
+  if (fs.existsSync(flagPath)) {
+    try {
+      fs.unlinkSync(flagPath);
+      log.info('COLD_BOOT.flag cleared after manual user interaction');
+    } catch (err) {
+      log.error('Failed to clear COLD_BOOT.flag', { error: err });
+    }
+  }
+}
 
 // GET /api/upgrade/status — ดูสถานะระบบ self-upgrade
 router.get('/status', asyncHandler(async (_req, res) => {
@@ -65,7 +83,30 @@ router.patch('/proposals/:id', asyncHandler(async (req, res) => {
     log.info(`Proposal #${id} status updated to "${status}"`);
     res.json({ ok: true, id, status });
   } else {
-    res.status(404).json({ ok: false, error: 'Proposal not found' });
+    res.status(404).json({ ok: false, error: 'Compiler log not found for this proposal' });
+  }
+}));
+
+// GET /api/upgrade/proposals/:id/trace — Get AI TRACE (transcript) for a proposal
+router.get('/proposals/:id/trace', asyncHandler(async (req, res) => {
+  const id = parseInt(String(req.params.id));
+  if (!id) {
+    res.status(400).json({ ok: false, error: 'Missing id' });
+    return;
+  }
+
+  const logsDir = path.resolve(_dirname, '../../../logs/upgrade_traces');
+  const traceFile = path.join(logsDir, `proposal_${id}.json`);
+  
+  if (fs.existsSync(traceFile)) {
+    try {
+      const traceData = JSON.parse(fs.readFileSync(traceFile, 'utf-8'));
+      res.json({ ok: true, trace: traceData });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: 'Failed to parse trace file' });
+    }
+  } else {
+    res.status(404).json({ ok: false, error: 'AI TRACE not found for this proposal. It might have been implemented before TRACE logging was enabled or it was rejected at the planning phase.' });
   }
 }));
 
@@ -196,6 +237,7 @@ router.post('/scan', asyncHandler(async (_req, res) => {
   const rootDir = path.resolve(process.cwd(), 'src');
   try {
     const isActive = await toggleContinuousScan(rootDir);
+    if (isActive) clearColdBootFlag();
     res.json({ ok: true, message: isActive ? `Continuous Scan started` : `Continuous Scan stopped`, isActive });
   } catch (err: any) {
     res.status(500).json({ ok: false, error: err.message });
@@ -227,7 +269,9 @@ router.post('/stop-batch', asyncHandler(async (_req, res) => {
 router.post('/implement-all', asyncHandler(async (_req, res) => {
   const rootDir = path.resolve(process.cwd(), 'src');
   
+  clearColdBootFlag();
   // Set flag in database so it resumes on restart
+  setSetting('evolution_enabled', '1'); // Ensure enabled if batch start requested
   setSetting('upgrade_implement_all', 'true');
   
   res.json({ ok: true, message: `Batch implementation started. The system will process approved proposals sequentially and survive server restarts.` });
@@ -255,6 +299,7 @@ router.post('/implement/:id', asyncHandler(async (req, res) => {
   }
   const rootDir = path.resolve(process.cwd(), 'src');
   
+  clearColdBootFlag();
   updateProposalStatus(id, 'implementing');
 
   // Respond immediately so UI doesn't spin forever when server restarts
@@ -292,6 +337,10 @@ router.patch('/toggle', asyncHandler(async (req, res) => {
   if (typeof paused !== 'boolean') {
     res.status(400).json({ ok: false, error: 'Missing paused boolean' });
     return;
+  }
+  if (!paused) {
+    clearColdBootFlag();
+    setSetting('evolution_enabled', '1');
   }
   setUpgradePaused(paused);
   res.json({ ok: true, paused });

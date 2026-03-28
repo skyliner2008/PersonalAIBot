@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { Type, FunctionDeclaration } from '@google/genai';
+import type { AITool } from '../providers/baseProvider.js';
 import { BotContext } from '../types.js';
 import { config } from '../../config.js';
 import * as cheerio from 'cheerio';
@@ -27,14 +27,14 @@ async function loadDependencies() {
 // Tool Declarations
 // ===============================================
 
-export const readDocumentDeclaration: FunctionDeclaration = {
+export const readDocumentDeclaration: AITool = {
   name: "read_document",
   description: "อ่านเนื้อหาและข้อความจากไฟล์เอกสาร Local (รองรับ .pdf, .docx, .xlsx, .csv, .txt) เพื่อนำข้อความเหล่านั้นมาให้ AI วิเคราะห์หรือสรุป",
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
       file_path: {
-        type: Type.STRING,
+        type: 'string',
         description: "Absolute path ของไฟล์ที่ต้องการอ่าน เช่น C:\\Users\\MSI\\Documents\\report.pdf",
       }
     },
@@ -42,22 +42,22 @@ export const readDocumentDeclaration: FunctionDeclaration = {
   },
 };
 
-export const createDocumentDeclaration: FunctionDeclaration = {
+export const createDocumentDeclaration: AITool = {
   name: "create_document",
   description: "สร้างไฟล์เอกสารใหม่ (PDF, DOCX, XLSX) จากเนื้อหาที่ AI คิดขึ้นมา แล้วบันทึกลงเครื่อง",
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
       format: {
-        type: Type.STRING,
+        type: 'string',
         description: "ชนิดของไฟล์ที่ต้องการสร้าง ('pdf', 'docx', 'xlsx')",
       },
       content: {
-        type: Type.STRING,
+        type: 'string',
         description: "เนื้อหาของเอกสาร ถ้าเป็น xlsx ให้ส่งมาเป็น JSON String ของ Array of Objects (เช่น '[{\"Name\":\"A\",\"Age\":20}]') ถ้าเป็น pdf/docx ให้ส่งข้อความธรรมดา",
       },
       filename: {
-        type: Type.STRING,
+        type: 'string',
         description: "ชื่อไฟล์ที่ต้องการบันทึก (ระบุแค่ชื่อ เช่น 'report' ไม่ต้องใส่สกุลไฟล์)",
       }
     },
@@ -65,18 +65,18 @@ export const createDocumentDeclaration: FunctionDeclaration = {
   },
 };
 
-export const editDocumentDeclaration: FunctionDeclaration = {
+export const editDocumentDeclaration: AITool = {
   name: "edit_document",
   description: "แก้ไขเอกสารที่มีอยู่เดิม (เฉพาะ .xlsx หรือ .csv) สำหรับเพิ่มแถวหรือแก้ไขข้อมูลตาราง (การแก้ไข PDF/Word โดยตรงทำได้ยาก แนะนำให้อ่านและสร้างใหม่แทน)",
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
       file_path: {
-        type: Type.STRING,
+        type: 'string',
         description: "Absolute path ของไฟล์ตาราง Excel/CSV ที่ต้องการแก้ไข",
       },
       json_data: {
-        type: Type.STRING,
+        type: 'string',
         description: "ข้อมูล JSON String ที่เป็น Array of Objects ที่จะนำไปต่อท้าย (Append) ในตารางเดิม",
       }
     },
@@ -84,14 +84,14 @@ export const editDocumentDeclaration: FunctionDeclaration = {
   },
 };
 
-export const readGoogleDocDeclaration: FunctionDeclaration = {
+export const readGoogleDocDeclaration: AITool = {
   name: "read_google_doc",
   description: "อ่านข้อความจากลิงก์ Google Docs, Google Sheets หรือ Notion แบบ Public",
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
       url: {
-        type: Type.STRING,
+        type: 'string',
         description: "Public URL ของเอกสารออนไลน์ที่ต้องการให้อ่าน",
       }
     },

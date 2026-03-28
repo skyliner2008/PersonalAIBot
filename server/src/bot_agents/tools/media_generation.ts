@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import { Type, FunctionDeclaration } from '@google/genai';
+import type { AITool } from '../providers/baseProvider.js';
 import { ProviderFactory } from '../../providers/providerFactory.js';
 import type { BotContext } from '../types.js';
 import { config } from '../../config.js';
@@ -50,18 +50,18 @@ async function prepareFileReply(ctx: BotContext, absolutePath: string): Promise<
 // Tool Declarations
 // ===============================================
 
-export const generateImageDeclaration: FunctionDeclaration = {
+export const generateImageDeclaration: AITool = {
   name: "generate_image",
   description: "สร้างรูปภาพตามคำบรรยาย (Prompt) ที่ผู้ใช้ต้องการ (รองรับ DALL-E, Imagen และอื่นๆ)",
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
       prompt: {
-        type: Type.STRING,
+        type: 'string',
         description: "คำบรรยายรูปภาพที่ต้องการ ให้ใช้ภาษาที่โมเดลเข้าใจได้ดี (ภาษาอังกฤษจะดีที่สุด)",
       },
       n: {
-        type: Type.INTEGER,
+        type: 'number',
         description: "จำนวนรูปที่ต้องการสร้าง (default 1)",
       }
     },
@@ -69,18 +69,18 @@ export const generateImageDeclaration: FunctionDeclaration = {
   },
 };
 
-export const generateSpeechDeclaration: FunctionDeclaration = {
+export const generateSpeechDeclaration: AITool = {
   name: "generate_speech",
   description: "แปลงข้อความเป็นเสียงพูด (Text-to-Speech) และส่งไฟล์เสียงให้ผู้ใช้ (รองรับ OpenAI TTS, Gemini TTS)",
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
       text: {
-        type: Type.STRING,
+        type: 'string',
         description: "ข้อความที่ต้องการให้ AI พูดออกมา",
       },
       voice: {
-        type: Type.STRING,
+        type: 'string',
         description: "ชื่อของเสียง ถ้ามี (เช่น alloy, echo, fable, onyx, nova, shimmer) หรือถ้าไม่แน่ใจให้ปล่อยว่าง",
       }
     },
@@ -88,14 +88,14 @@ export const generateSpeechDeclaration: FunctionDeclaration = {
   },
 };
 
-export const generateVideoDeclaration: FunctionDeclaration = {
+export const generateVideoDeclaration: AITool = {
   name: "generate_video",
   description: "สร้างวิดีโอจากคำบรรยาย (รองรับผ่าน RestAPI provider ภายนอกเช่น Runway/Luma เมื่อตั้งค่าไว้)",
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
       prompt: {
-        type: Type.STRING,
+        type: 'string',
         description: "คำบรรยายวิดีโอที่ต้องการสร้าง (แนะนำภาษาอังกฤษยาวๆ)",
       }
     },

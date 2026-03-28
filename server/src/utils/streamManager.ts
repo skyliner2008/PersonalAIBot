@@ -103,14 +103,14 @@ export class SSEWriter {
 }
 
 // ── Streaming Gemini Response with Tool Loop ────────────
-import { GoogleGenAI, Content, FunctionDeclaration } from '@google/genai';
+import type { AIMessage, AITool } from '../bot_agents/types.js';
 
 export interface StreamOptions {
-  ai: GoogleGenAI;
+  ai: any;
   modelName: string;
   systemInstruction: string;
-  contents: Content[];
-  tools?: FunctionDeclaration[];
+  contents: AIMessage[];
+  tools?: AITool[];
   useGoogleSearch?: boolean;
   writer: SSEWriter;
 }
@@ -161,11 +161,11 @@ export async function streamGeminiResponse(opts: StreamOptions): Promise<{
       }
 
       // Extract tool calls from chunk
-      const fcs = chunk.functionCalls;
+      const fcs = (chunk as any).functionCalls;
       if (fcs && fcs.length > 0) {
         toolCalls = fcs
-          .filter(fc => fc.name != null)
-          .map(fc => ({ name: fc.name as string, args: (fc.args ?? {}) as Record<string, unknown> }));
+          .filter((fc: any) => fc.name != null)
+          .map((fc: any) => ({ name: fc.name as string, args: (fc.args ?? {}) as Record<string, unknown> }));
       }
 
       // Extract usage from final chunk

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { GoogleGenAI } from '@google/genai';
+import type { AIMessage } from '../../bot_agents/types.js';
 import {
   addLog,
   addMessage,
@@ -241,25 +241,41 @@ chatRoutes.post('/chat/stream', validateBody(chatReplySchema), asyncHandler(asyn
     }
 
     const systemInstruction = aiMessages.filter(m => m.role === 'system').map(m => m.content).join('\n');
-    const contents = aiMessages.filter(m => m.role !== 'system').map(m => ({
-      role: m.role === 'user' ? 'user' : 'model',
+    const contents: AIMessage[] = aiMessages.filter(m => m.role !== 'system').map(m => ({
+      role: m.role === 'user' ? 'user' : 'assistant',
       parts: [{ text: m.content }],
     }));
 
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      writer.sendError('GEMINI_API_KEY not configured');
+    const chatProvider = getProviderForTask('chat');
+    const chatProviderModel = getSetting('ai_task_chat_model') || 'gemini-2.0-flash';
+    
+    // For now, if it's Gemini, we can still use streamGeminiResponse if we pass the right 'ai' instance
+    // But it's better to check if the provider supports streaming.
+    // Given the current structure, we'll try to get the native Gemini instance if possible.
+    
+    let aiInstance: any = null;
+    if (chatProvider.id === 'gemini' && (chatProvider as any).getNativeInstance) {
+      aiInstance = (chatProvider as any).getNativeInstance();
+    } else {
+       // Fallback or generic streaming if implemented. 
+       // For now, we assume Gemini for SSE streaming as per original code.
+       const apiKey = process.env.GEMINI_API_KEY;
+       if (apiKey) {
+         const { GoogleGenAI: GAI } = await import('@google/genai');
+         aiInstance = new GAI({ apiKey });
+       }
+    }
+
+    if (!aiInstance) {
+      writer.sendError('Streaming AI provider not available');
       return;
     }
 
-    const chatProviderModel = getSetting('ai_task_chat_model') || 'gemini-2.0-flash';
-    const ai = new GoogleGenAI({ apiKey });
-    
     addLog('chat', 'Stream Start', `Model: ${chatProviderModel} | Search: enabled`, 'info');
     writer.sendStatus('กำลังคิด...');
 
     const result = await streamGeminiResponse({
-      ai,
+      ai: aiInstance,
       modelName: chatProviderModel,
       systemInstruction,
       contents,

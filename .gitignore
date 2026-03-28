@@ -60,3 +60,4 @@ dump_*.ts
 recover*.cjs
 analyze*.js
 analyze*.cjs
+.aider*

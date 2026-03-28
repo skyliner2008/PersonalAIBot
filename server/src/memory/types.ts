@@ -18,6 +18,9 @@ export interface MemoryMessage {
     chatId: string;
     role: 'user' | 'assistant' | 'system';
     content: string;
+    source?: string;
+    metadata?: any;
+    isInternal?: boolean;
     createdAt?: string;
 }
 

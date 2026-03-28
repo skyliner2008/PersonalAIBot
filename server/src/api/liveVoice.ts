@@ -1,6 +1,6 @@
 import WebSocket from 'ws';
 import { EventEmitter } from 'events';
-import type { FunctionDeclaration } from '@google/genai';
+import type { AITool } from '../bot_agents/types';
 import { createLogger } from '../utils/logger';
 
 const logger = createLogger('LiveVoice');
@@ -125,7 +125,7 @@ export class LiveVideoClient extends EventEmitter {
   private model: string;
   private apiVersion: string;
   private systemInstruction?: string;
-  private toolDeclarations: FunctionDeclaration[];
+  private toolDeclarations: AITool[];
   public isConnected: boolean = false;
   private reconnectAttempts: number = 0;
   private maxReconnectAttempts: number = 3;
@@ -137,7 +137,7 @@ export class LiveVideoClient extends EventEmitter {
     model: string,
     apiVersion: string = DEFAULT_LIVE_API_VERSION,
     systemInstruction?: string,
-    toolDeclarations: FunctionDeclaration[] = [],
+    toolDeclarations: AITool[] = [],
   ) {
     super();
     this.apiKey = apiKey;

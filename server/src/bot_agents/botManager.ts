@@ -8,7 +8,7 @@ import { configManager } from './config/configManager.js';
 import { getDb, upsertConversation } from '../database/db.js';
 import { listBots, getBot, updateBot, createBot, type BotInstance } from './registries/botRegistry.js';
 import axios from 'axios';
-import { Part } from '@google/genai';
+import type { AIMessagePart } from './types.js';
 import { isAdminCommand, handleAdminCommand, isBossModeActive } from '../terminal/messagingBridge.js';
 import { approvalSystem } from '../utils/approvalSystem.js';
 import { getProviderApiKey } from '../config/settingsSecurity.js';
@@ -100,7 +100,7 @@ let _expressApp: express.Express | null = null;
 
 // Helpers
 
-async function getGeminiPartFromTelegram(ctx: any, fileId: string, mimeType: string): Promise<Part> {
+async function getPartFromTelegram(ctx: any, fileId: string, mimeType: string): Promise<AIMessagePart> {
     const fileLink = await ctx.telegram.getFileLink(fileId);
     const response = await axios.get(fileLink.toString(), { responseType: 'arraybuffer' });
     const data = Buffer.from(response.data).toString('base64');
@@ -160,7 +160,7 @@ async function handleTelegramMultimodal(ctx: any, agent: Agent, botConfig: BotIn
     if (fileId) {
         await ctx.reply('Analyzing file/image with multimodal pipeline...');
         try {
-            const attachmentPart = await getGeminiPartFromTelegram(ctx, fileId, mimeType);
+            const attachmentPart = await getPartFromTelegram(ctx, fileId, mimeType);
             const caption = ('caption' in ctx.message ? ctx.message.caption : null) || 'Please analyze this file/image.';
             upsertConversation(chatId, ctx.chat.id.toString(), 'Telegram User');
             const agentResponse = await agent.processMessage(
@@ -173,6 +173,9 @@ async function handleTelegramMultimodal(ctx: any, agent: Agent, botConfig: BotIn
                     replyWithFile: async (fp: string, cap?: string) => {
                         await ctx.replyWithDocument({ source: fp }, { caption: cap });
                         return 'File sent successfully';
+                    },
+                    replyWithText: async (text: string) => {
+                        return await ctx.reply(text);
                     },
                 },
                 [attachmentPart],
@@ -215,6 +218,9 @@ async function handleTelegramText(ctx: any, bot: Telegraf<any>, agent: Agent, bo
             replyWithFile: async (filePath: string, caption?: string) => {
                 await ctx.replyWithDocument({ source: filePath }, { caption });
                 return `Sent file ${filePath} successfully`;
+            },
+            replyWithText: async (text: string) => {
+                return await ctx.reply(text);
             }
         });
         await sendTelegramText(bot, ctx.chat.id, responseText);
@@ -414,7 +420,10 @@ async function handleLineEvent(event: WebhookEvent, agent: Agent, botConfig: Bot
             botId: botConfig.id,
             botName: botConfig.name,
             platform: 'line',
-            replyWithFile: async (fileUrl: string, caption?: string) => handleLineFileReply(lineClient, userId, fileUrl, caption)
+            replyWithFile: async (fileUrl: string, caption?: string) => handleLineFileReply(lineClient, userId, fileUrl, caption),
+            replyWithText: async (text: string) => {
+                return await lineClient.pushMessage(userId, { type: 'text', text });
+            }
         });
         const text = responseText.length > 5000 ? responseText.substring(0, 4997) + '...' : responseText;
         await lineClient.pushMessage(userId, { type: 'text', text });

@@ -16,6 +16,7 @@ cd ../dashboard
 if not exist node_modules (call npm install)
 cd ..
 
+echo cold_boot > COLD_BOOT.flag
 echo [2/3] Starting Server (port 3000)...
 start "AI Bot Server" cmd /k "cd /d "%~dp0server" && npm run dev"
 timeout /t 3 /nobreak >nul

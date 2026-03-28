@@ -68,6 +68,7 @@ export type BatchListener = (batch: SwarmBatch) => void | Promise<void>;
 export interface SpecialistExecutionResult {
   output: string;
   tokenUsage?: CommandTokenUsage;
+  transcript?: any[]; // For agent specialists to return the full conversation trace
 }
 
 export type CliDispatchMode = 'shell' | 'prefix';

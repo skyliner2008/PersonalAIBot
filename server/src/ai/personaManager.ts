@@ -111,9 +111,10 @@ class PersonaManager {
   }
 
   /** Load combined persona config for bot agent use */
-  public loadPersona(platform: PlatformType): PersonaConfig {
+  public loadPersona(platform: PlatformType, botId?: string): PersonaConfig {
     const now = Date.now();
-    const cached = this.cache.get(platform);
+    const cacheKey = botId ? `${platform}:${botId}` : platform;
+    const cached = this.cache.get(cacheKey);
     if (cached && now - cached.lastLoaded < this.TTL_MS) return cached.config;
 
     const agents   = this.loadFile(platform, 'AGENTS.md');
@@ -130,13 +131,14 @@ class PersonaManager {
       .map(line => line.match(/^(?!#|\/\/)\s*([\w-]+)/)?.[1])
       .filter(Boolean) as string[];
 
-    // Security: Restrict 'run_command' to 'system' platform only
-    const finalEnabledTools = platform === 'system' 
+    // Security: Restrict 'run_command' to 'system' platform AND 'specialist_*' bots
+    const isSpecialist = botId?.startsWith('specialist_');
+    const finalEnabledTools = (platform === 'system' || isSpecialist)
       ? enabledTools 
       : enabledTools.filter(tool => tool !== 'run_command');
 
     const config: PersonaConfig = { systemInstruction, enabledTools: finalEnabledTools };
-    this.cache.set(platform, { config, lastLoaded: now });
+    this.cache.set(cacheKey, { config, lastLoaded: now });
     return config;
   }
 }

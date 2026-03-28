@@ -580,6 +580,8 @@ export const api = {
     }),
   getUpgradeProposalLog: (id: number) =>
     request(`/upgrade/proposals/${id}/log`),
+  getUpgradeProposalTrace: (id: number) =>
+    request(`/upgrade/proposals/${id}/trace`),
 
   // Cron Jobs (Agentic Automation)
   getCronJobs: () => request('/cron-jobs'),

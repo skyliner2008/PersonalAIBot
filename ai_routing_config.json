@@ -4,7 +4,7 @@
     "general": {
       "active": {
         "provider": "gemini",
-        "modelName": "gemini-2.0-flash"
+        "modelName": "gemini-2.5-flash"
       },
       "fallbacks": [
         {
@@ -29,14 +29,14 @@
         },
         {
           "provider": "gemini",
-          "modelName": "gemini-2.0-flash"
+          "modelName": "gemini-2.5-flash"
         }
       ]
     },
     "vision": {
       "active": {
         "provider": "gemini",
-        "modelName": "gemini-2.0-flash"
+        "modelName": "gemini-2.5-flash"
       },
       "fallbacks": [
         {
@@ -48,7 +48,7 @@
     "web": {
       "active": {
         "provider": "gemini",
-        "modelName": "gemini-2.0-flash"
+        "modelName": "gemini-2.5-flash"
       },
       "fallbacks": [
         {
@@ -112,7 +112,7 @@
     "system": {
       "active": {
         "provider": "gemini",
-        "modelName": "gemini-2.0-flash"
+        "modelName": "gemini-2.5-flash"
       },
       "fallbacks": [
         {

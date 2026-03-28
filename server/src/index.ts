@@ -442,6 +442,25 @@ async function main() {
   ensureQueueTable();
   await initSelfReflection();
 
+  // --- Cold Boot Protection (Self-Upgrade Safety) ---
+  const projectRoot = path.resolve(__dirname, '../..');
+  const coldBootFlag = path.join(projectRoot, 'COLD_BOOT.flag');
+  if (fs.existsSync(coldBootFlag)) {
+    const { setSetting, addLog } = await import('./database/db.js');
+    startupInfo('[ColdBoot] ❄️ Cold Boot Flag detected. Disabling Self-Upgrade System for safety.');
+    setSetting('evolution_enabled', '0');
+    setSetting('upgrade_paused', 'true');
+    setSetting('upgrade_implement_all', 'false');
+    setSetting('upgrade_continuous_scan', 'false');
+    addLog('system', 'Cold Boot Protection', 'Disabled Self-Upgrade system due to COLD_BOOT.flag', 'info');
+    
+    // Also clean up any stale upgrade lock
+    const lockPath = path.resolve(projectRoot, 'data/upgrade_in_progress.lock');
+    if (fs.existsSync(lockPath)) {
+      try { fs.unlinkSync(lockPath); } catch { /* ignore */ }
+    }
+  }
+
   // --- Credential integrity check (purge entries encrypted with old CRED_SECRET) ---
   const credCheck = checkCredentialIntegrity();
   if (credCheck.purged.length > 0) {
@@ -598,6 +617,13 @@ async function main() {
             const message = String(err?.message || err || 'unknown error').trim();
             return `ส่งไฟล์ไม่สำเร็จ: ${message}`;
           }
+        },
+        replyWithText: async (text: string) => {
+          const voiceSocketId = extractVoiceSocketId(userId);
+          if (voiceSocketId) {
+            io.to(voiceSocketId).emit('voice:response', { text });
+          }
+          return `ส่งข้อความเรียบร้อยแล้ว: ${text}`;
         },
       });
     });

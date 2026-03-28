@@ -1,23 +1,22 @@
-import { Type } from '@google/genai';
-import type { FunctionDeclaration } from '@google/genai';
+import type { AITool } from '../providers/baseProvider.js';
 import { broadcast } from '../../utils/socketBroadcast.js';
 
-export const renderUiDeclaration: FunctionDeclaration = {
+export const renderUiDeclaration: AITool = {
   name: "render_ui",
   description: "Render a dynamic UI component (Generative UI) to the user's Dashboard screen.",
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
       componentType: {
-        type: Type.STRING,
+        type: 'string',
         description: "The type of component to render. Supported: 'card', 'bar_chart', 'data_table'",
       },
       title: {
-        type: Type.STRING,
+        type: 'string',
         description: "The title of the UI component",
       },
       data: {
-        type: Type.STRING,
+        type: 'string',
         description: "A JSON string containing the data for the component. For 'card', use { content: string, color?: string }. For 'data_table', use { headers: string[], rows: string[][] }",
       },
     },

@@ -169,6 +169,7 @@ if /I "!START_MODE!"=="compact" (
 )
 
 cd ../server
+echo cold_boot > ..\COLD_BOOT.flag
 echo [4/4] Starting server...
 echo.
 echo +------------------------------------------------------+

@@ -58,8 +58,7 @@ export function startScheduler(io: SocketServer): void {
 
       // 5. SQLite VACUUM (optimize storage)
       try {
-        const { getDb: getDatabase } = require('../database/db.js');
-        getDatabase().pragma('wal_checkpoint(TRUNCATE)');
+        getDb().pragma('wal_checkpoint(TRUNCATE)');
       } catch (e) { console.debug('[Scheduler] vacuum db:', String(e)); }
 
       logger.info(`Daily maintenance: logs=${logsCleaned} dedup=${dedupCleaned} episodes=${episodesCleaned}`);

@@ -1,4 +1,4 @@
-import { Type, FunctionDeclaration } from '@google/genai';
+import type { AITool } from '../providers/baseProvider.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
@@ -10,30 +10,30 @@ const rootDir = path.resolve(__dirname, '../../../');
 
 let fileUpdateLock: Promise<any> = Promise.resolve();
 
-export const addCliAgentDeclaration: FunctionDeclaration = {
+export const addCliAgentDeclaration: AITool = {
   name: "add_cli_agent",
   description: "เพิ่ม CLI Agent ใหม่เข้าไปในระบบโดยอัตโนมัติ (Discovery, Messaging, Swarm, Voice). ต้องระบุชื่อ executable และข้อมูลพื้นฐาน.",
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
       cliName: {
-        type: Type.STRING,
+        type: 'string',
         description: "ชื่อตัวเล็กของ CLI (เช่น 'opencode', 'gemini', 'claude')"
       },
       executable: {
-        type: Type.STRING,
+        type: 'string',
         description: "ชื่อไฟล์รัน (executable) เช่น 'opencode', 'gemini-cli'"
       },
       displayName: {
-        type: Type.STRING,
+        type: 'string',
         description: "ชื่อที่แสดงบน Dashboard"
       },
       description: {
-        type: Type.STRING,
+        type: 'string',
         description: "คำอธิบายความสามารถสั้นๆ"
       },
       icon: {
-        type: Type.STRING,
+        type: 'string',
         description: "Emoji icon (เช่น '📜', '🔷')"
       }
     },

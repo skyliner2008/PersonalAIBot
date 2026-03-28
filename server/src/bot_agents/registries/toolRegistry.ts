@@ -2,7 +2,7 @@
 // Tool Registry — centralized metadata for all available tools
 // ============================================================
 
-import type { FunctionDeclaration } from '@google/genai';
+import type { AITool } from '../types.js';
 
 export type ToolCategory = 'utility' | 'os' | 'file' | 'browser' | 'web' | 'memory' | 'communication' | 'system' | 'media' | 'office' | 'cron';
 export type ToolRiskLevel = 'low' | 'medium' | 'high';
@@ -25,8 +25,7 @@ export interface ToolMeta {
   tags: string[];
   /** Whether this tool is enabled by default for new bots */
   enabledByDefault: boolean;
-  /** Reference to the FunctionDeclaration (set at registration time) */
-  declaration?: FunctionDeclaration;
+  declaration?: AITool;
 }
 
 // The central registry map

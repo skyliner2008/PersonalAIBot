@@ -1,4 +1,4 @@
-import { Type, FunctionDeclaration } from '@google/genai';
+import type { AITool } from '../providers/baseProvider.js';
 import { runCommand } from './os.js';
 import * as cheerio from 'cheerio';
 import { createLogger } from '../../utils/logger.js';
@@ -8,13 +8,13 @@ const logger = createLogger('limitless-tool');
 // ==========================================
 // Web Search Tool
 // ==========================================
-export const webSearchDeclaration: FunctionDeclaration = {
+export const webSearchDeclaration: AITool = {
     name: "web_search",
     description: "ค้นหาข้อมูลในอินเทอร์เน็ตผ่านเว็บเบราว์เซอร์ ใช้เมื่อไม่รู้ข้อมูลปัจจุบัน หรือต้องการสืบค้นข่าวสาร อัปเดตล่าสุด",
     parameters: {
-        type: Type.OBJECT,
+        type: 'object',
         properties: {
-            query: { type: Type.STRING, description: "คำค้นหา (Search Query)" },
+            query: { type: 'string', description: "คำค้นหา (Search Query)" },
         },
         required: ["query"],
     },
@@ -165,13 +165,13 @@ export async function webSearch({ query }: { query: string }): Promise<string> {
 // ==========================================
 // Read Webpage Content Tool
 // ==========================================
-export const readWebpageDeclaration: FunctionDeclaration = {
+export const readWebpageDeclaration: AITool = {
     name: "read_webpage",
     description: "อ่านเนื้อหาจากเว็บไซต์ (URL) แล้วแปลงเป็นข้อความ ใช้เมื่อต้องการอ่านบทความ ข่าว หรือเนื้อหาจากลิงก์ที่ค้นหาเจอ",
     parameters: {
-        type: Type.OBJECT,
+        type: 'object',
         properties: {
-            url: { type: Type.STRING, description: "URL ของเว็บไซต์ที่ต้องการอ่าน" },
+            url: { type: 'string', description: "URL ของเว็บไซต์ที่ต้องการอ่าน" },
         },
         required: ["url"],
     },
@@ -224,10 +224,10 @@ export async function readWebpage({ url }: { url: string }): Promise<string> {
 // ==========================================
 // Mouse & Keyboard Control (PyAutoGUI)
 // ==========================================
-export const mouseClickDeclaration: FunctionDeclaration = {
+export const mouseClickDeclaration: AITool = {
     name: "mouse_click",
     description: "คลิกเม้าส์ซ้าย 1 ครั้งตรงตำแหน่งปัจจุบัน ใช้สำหรับโต้ตอบกับ GUI ในคอมพิวเตอร์",
-    parameters: { type: Type.OBJECT, properties: {} },
+    parameters: { type: 'object', properties: {} },
 };
 
 export async function mouseClick() {
@@ -239,13 +239,13 @@ export async function mouseClick() {
     }
 }
 
-export const keyboardTypeDeclaration: FunctionDeclaration = {
+export const keyboardTypeDeclaration: AITool = {
     name: "keyboard_type",
     description: "พิมพ์ข้อความลงบนคีย์บอร์ดโดยตรง",
     parameters: {
-        type: Type.OBJECT,
+        type: 'object',
         properties: {
-            text: { type: Type.STRING, description: "ข้อความที่จะพิมพ์" },
+            text: { type: 'string', description: "ข้อความที่จะพิมพ์" },
         },
         required: ["text"],
     },

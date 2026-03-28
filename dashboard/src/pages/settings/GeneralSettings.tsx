@@ -119,6 +119,18 @@ export function GeneralSettings({ settings, onSettingChange }: Props) {
             />
             <p className="text-[10px] text-gray-600 mt-1">เวลาสูงสุดที่อนุญาตให้ระบบ Swarm ของ AI ทำงาน (มิลลิวินาที)</p>
           </div>
+          <div>
+            <label className="text-[10px] text-gray-500 uppercase mb-1 block">ภาษาหลักของ AI (AI Language)</label>
+            <select
+              value={settings['ai_preferred_language'] || 'th'}
+              onChange={e => onSettingChange('ai_preferred_language', e.target.value)}
+              className="w-full px-3 py-1.5 text-xs bg-gray-800 border border-gray-700 rounded-lg text-gray-200"
+            >
+              <option value="th">ภาษาไทย (Thai)</option>
+              <option value="en">English (English)</option>
+            </select>
+            <p className="text-[10px] text-gray-600 mt-1">เลือกภาษาที่ต้องการให้ AI ตอบกลับเป็นหลัก</p>
+          </div>
         </div>
       </div>
       {/* Admin Security */}

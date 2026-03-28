@@ -67,6 +67,9 @@ export interface SwarmTask {
   /** Error message if task failed */
   error?: string;
 
+  /** Full conversation transcript (for agent specialists) */
+  transcript?: any[];
+
   /** Creation timestamp */
   createdAt: Date;
 
@@ -374,7 +377,7 @@ export class TaskQueue {
   /**
    * Mark a task as completed with result
    */
-  async complete(taskId: string, result: string): Promise<void> {
+  async complete(taskId: string, result: string, transcript?: any[]): Promise<void> {
     const task = this.tasks.get(taskId);
     if (!task) {
       logger.warn(`[TaskQueue] Task not found: ${taskId}`);
@@ -388,6 +391,7 @@ export class TaskQueue {
 
     task.status = 'completed';
     task.result = result;
+    task.transcript = transcript;
     task.completedAt = new Date();
     this.processingTasks.delete(taskId);
     

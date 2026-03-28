@@ -3,15 +3,19 @@
 run_command
 run_python
 system_info
+system_terminal
 open_application
 close_application
 
 # File System Management
 list_files
 read_file_content
+read_file
+view_file
 write_file_content
 delete_file
 replace_code_block
+multi_replace_file_content
 search_codebase
 send_file_to_chat
 
@@ -45,3 +49,4 @@ audit_cli_integration
 
 # Utilities
 echo_message
+notify_user

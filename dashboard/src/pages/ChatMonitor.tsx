@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { api } from '../services/api';
-import { MessageCircle, Send, User, Bot, RefreshCw, Search } from 'lucide-react';
+import { MessageCircle, Send, User, Bot, RefreshCw, Search, ChevronDown, ChevronUp, Terminal, Cpu, Info } from 'lucide-react';
 
 interface Props {
   status: { browser: boolean; loggedIn: boolean; chatBot: boolean; commentBot: boolean };
@@ -181,31 +181,92 @@ export function ChatMonitor({ status, emit, on }: Props) {
               </div>
             )}
 
-            {/* Messages */}
-            {!loadingMessages && (
-            <div className="flex-1 overflow-auto p-4 space-y-3">
-              {messages.map((msg, i) => (
-                <div key={i} className={`flex gap-2 ${msg.role === 'assistant' ? '' : 'flex-row-reverse'}`}>
-                  <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${
-                    msg.role === 'assistant' ? 'bg-blue-500/20' : 'bg-gray-700'
-                  }`}>
-                    {msg.role === 'assistant' ? <Bot className="w-3.5 h-3.5 text-blue-400" /> : <User className="w-3.5 h-3.5 text-gray-400" />}
-                  </div>
-                  <div className={`max-w-[70%] px-3 py-2 rounded-xl text-sm ${
-                    msg.role === 'assistant'
-                      ? 'bg-blue-500/10 text-gray-200 rounded-tl-sm'
-                      : 'bg-gray-800 text-gray-300 rounded-tr-sm'
-                  }`}>
-                    <p className="whitespace-pre-wrap">{msg.content}</p>
-                    <p className="text-[10px] text-gray-600 mt-1">
-                      {new Date(msg.timestamp).toLocaleTimeString('th-TH')}
+            {/* Smart Content Component */}
+            {(() => {
+              const SmartContent = ({ content, metadata, source }: { content: string, metadata?: any, source?: string }) => {
+                const [expanded, setExpanded] = useState(false);
+                
+                // Truncation logic
+                const isTrace = source === 'swarm_trace';
+                const hasLongCode = content.includes('```') && content.length > 500;
+                const hasLongJson = content.trim().startsWith('{') && content.trim().endsWith('}') && content.length > 300;
+                const isSystemLog = content.startsWith('[') && content.includes(']') && content.length > 200;
+                
+                const shouldTruncate = !expanded && (hasLongCode || hasLongJson || (isTrace && content.length > 300));
+                
+                if (!shouldTruncate) {
+                  return (
+                    <div className="relative group">
+                      <p className="whitespace-pre-wrap">{content}</p>
+                      {expanded && (
+                        <button 
+                          onClick={() => setExpanded(false)}
+                          className="mt-2 text-[10px] text-blue-400 hover:text-blue-300 flex items-center gap-1"
+                        >
+                          <ChevronUp className="w-3 h-3" /> Show less
+                        </button>
+                      )}
+                    </div>
+                  );
+                }
+
+                const preview = content.substring(0, 250) + '...';
+
+                return (
+                  <div className="relative">
+                    <p className="whitespace-pre-wrap text-gray-400 italic mb-1 text-[10px]">
+                      {isTrace ? '🔍 System Trace' : '📝 Long content truncated'}
                     </p>
+                    <p className="whitespace-pre-wrap opacity-60">{preview}</p>
+                    <button 
+                      onClick={() => setExpanded(true)}
+                      className="mt-2 px-2 py-1 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 rounded text-[10px] flex items-center gap-1 transition"
+                    >
+                      <ChevronDown className="w-3 h-3" /> Expand Details
+                    </button>
                   </div>
+                );
+              };
+
+              {/* Message loop with enhancements */}
+              return !loadingMessages && (
+                <div className="flex-1 overflow-auto p-4 space-y-3">
+                  {messages.map((msg, i) => {
+                    const isSystem = msg.role === 'system' || msg.source === 'swarm_trace';
+                    const sourceLabel = msg.source === 'swarm_trace' ? 'Swarm' : (msg.source === 'system_log' ? 'System' : null);
+                    
+                    return (
+                      <div key={i} className={`flex gap-2 ${msg.role === 'assistant' ? '' : 'flex-row-reverse'}`}>
+                        <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${
+                          msg.role === 'assistant' ? 'bg-blue-500/20' : (isSystem ? 'bg-purple-500/20' : 'bg-gray-700')
+                        }`}>
+                          {msg.role === 'assistant' ? <Bot className="w-3.5 h-3.5 text-blue-400" /> : 
+                           (isSystem ? <Cpu className="w-3.5 h-3.5 text-purple-400" /> : <User className="w-3.5 h-3.5 text-gray-400" />)}
+                        </div>
+                        <div className={`max-w-[85%] px-3 py-2 rounded-xl text-sm ${
+                          msg.role === 'assistant'
+                            ? 'bg-blue-500/10 text-gray-200 rounded-tl-sm border border-blue-500/5'
+                            : (isSystem ? 'bg-purple-500/5 text-gray-300 rounded-tl-sm border border-purple-500/10' : 'bg-gray-800 text-gray-300 rounded-tr-sm')
+                        }`}>
+                          {sourceLabel && (
+                            <span className={`inline-block px-1.5 py-0.5 rounded text-[8px] font-bold uppercase mb-1 ${
+                              sourceLabel === 'Swarm' ? 'bg-purple-500/20 text-purple-400' : 'bg-gray-700 text-gray-400'
+                            }`}>
+                              {sourceLabel}
+                            </span>
+                          )}
+                          <SmartContent content={msg.content} source={msg.source} metadata={msg.metadata} />
+                          <p className="text-[10px] text-gray-600 mt-1">
+                            {new Date(msg.timestamp || msg.created_at).toLocaleTimeString('th-TH')}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div ref={messagesEndRef} />
                 </div>
-              ))}
-              <div ref={messagesEndRef} />
-            </div>
-            )}
+              );
+            })()}
           </>
         )}
       </div>

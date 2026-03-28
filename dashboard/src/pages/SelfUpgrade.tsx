@@ -4,7 +4,7 @@ import {
   Zap, Bug, Shield, Wrench, Sparkles, RefreshCcw, 
   Trash2, CheckCircle2, XCircle, Clock, Rocket, FileCode,
   Info, AlertTriangle, Search, ChevronRight, Activity, Bot, Eye, X,
-  Square, CheckCheck
+  Square, CheckCheck, MessageSquare, Cpu
 } from 'lucide-react';
 
 // ── Types ──
@@ -98,6 +98,9 @@ export default function SelfUpgrade() {
   
   const [showLogModal, setShowLogModal] = useState<{ id: number; title: string; content: string } | null>(null);
   const [logLoading, setLogLoading] = useState(false);
+  
+  const [showTraceModal, setShowTraceModal] = useState<{ id: number; title: string; trace: any } | null>(null);
+  const [traceLoading, setTraceLoading] = useState(false);
 
   const fetchData = useCallback(async () => {
     try {
@@ -298,6 +301,22 @@ export default function SelfUpgrade() {
       setShowLogModal({ id: p.id, title: p.title, content: `Error loading log file. It might have been deleted or never existed.\n\n${e.message}` });
     } finally {
       setLogLoading(false);
+    }
+  };
+
+  const viewTrace = async (p: Proposal) => {
+    setShowTraceModal({ id: p.id, title: p.title, trace: null });
+    setTraceLoading(true);
+    try {
+      const res = await api.getUpgradeProposalTrace(p.id);
+      if (res && res.ok) {
+        setShowTraceModal({ id: p.id, title: p.title, trace: res.trace });
+      }
+    } catch (e: any) {
+      console.error(e);
+      setShowTraceModal({ id: p.id, title: p.title, trace: { error: `Error loading trace: ${e.message}` } });
+    } finally {
+      setTraceLoading(false);
     }
   };
 
@@ -680,13 +699,22 @@ export default function SelfUpgrade() {
                             title={p.status === 'review_diff' ? "ตรวจพิจารณา Diff" : "ดูการเปลี่ยนแปลงโค้ด (Diff)"}
                           />
                         )}
-                        {p.status === 'rejected' && p.description.includes('.log') && (
+                         {p.status === 'rejected' && p.description.includes('.log') && (
                           <ActionButton 
                             onClick={() => viewLog(p)} 
                             icon={FileCode} 
                             color="text-yellow-400 bg-yellow-500/10 hover:bg-yellow-500/20" 
                             title="📄 ดู Log File"
                             spin={logLoading && showLogModal?.id === p.id}
+                          />
+                        )}
+                        {(p.status === 'implemented' || p.status === 'rejected' || p.status === 'skipped') && (
+                          <ActionButton 
+                            onClick={() => viewTrace(p)} 
+                            icon={MessageSquare} 
+                            color="text-indigo-400 bg-indigo-500/10 hover:bg-indigo-500/20" 
+                            title="🤖 ดู AI TRACE (Transcript)"
+                            spin={traceLoading && showTraceModal?.id === p.id}
                           />
                         )}
                         <ActionButton 
@@ -919,6 +947,95 @@ export default function SelfUpgrade() {
                     <pre className="p-4 text-[11px] font-mono text-gray-300 w-max min-w-full">
                       {showLogModal.content}
                     </pre>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+      {/* AI TRACE Modal */}
+      {showTraceModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-300">
+          <div className="bg-[#0f1115] border border-white/10 rounded-2xl w-full max-w-4xl h-[85vh] flex flex-col shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b border-white/5 bg-gray-900/40">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-indigo-500/20 flex items-center justify-center">
+                  <Cpu className="w-4 h-4 text-indigo-400" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    AI TRACE log <span className="text-indigo-400 font-mono text-xs">#{showTraceModal.id}</span>
+                  </h3>
+                  <p className="text-[10px] text-gray-500">{showTraceModal.title}</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowTraceModal(null)}
+                className="p-1 hover:bg-white/5 rounded-lg transition-colors text-gray-400 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar bg-[#0a0c10]">
+              {traceLoading ? (
+                <div className="h-full flex flex-col items-center justify-center text-gray-500 gap-3">
+                  <RefreshCcw className="w-8 h-8 animate-spin opacity-20" />
+                  <p className="text-xs animate-pulse">กำลังดึงข้อมูล AI Transcript...</p>
+                </div>
+              ) : showTraceModal.trace?.error ? (
+                <div className="h-full flex flex-col items-center justify-center text-rose-400 gap-3 p-8 text-center">
+                  <AlertTriangle className="w-12 h-12 opacity-40" />
+                  <p className="text-sm font-medium">{showTraceModal.trace.error}</p>
+                  <p className="text-[10px] text-gray-500 max-w-xs">AI TRACE จะถูกบันทึกเมื่อระบบเริ่มขั้นตอนการ Implement (Specialist Task) เท่านั้น หากถูกปฏิเสธในขั้นวางแผนจะไม่มี Log นี้</p>
+                </div>
+              ) : !showTraceModal.trace?.transcript ? (
+                <div className="h-full flex flex-col items-center justify-center text-gray-500 p-8 text-center gap-3">
+                   <Bot className="w-12 h-12 opacity-10" />
+                   <p className="text-sm">ไม่พบประวัติการสนทนาของ AI สำหรับรายการนี้</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {showTraceModal.trace.transcript.map((msg: any, i: number) => (
+                    <div key={i} className={`flex flex-col gap-2 ${msg.role === 'user' ? 'bg-blue-500/5' : 'bg-white/5'} p-3 rounded-xl border border-white/5`}>
+                      <div className="flex items-center justify-between">
+                        <span className={`text-[10px] font-bold uppercase tracking-widest ${msg.role === 'user' ? 'text-blue-400' : 'text-purple-400'}`}>
+                          {msg.role === 'user' ? 'User (System Prompt)' : 'AI Specialist'}
+                        </span>
+                      </div>
+                      <div className="text-xs text-gray-300 whitespace-pre-wrap leading-relaxed font-mono">
+                        {Array.isArray(msg.parts) ? msg.parts.map((p: any, j: number) => {
+                          if (p.text) return <p key={j}>{p.text}</p>;
+                          if (p.functionCall) return (
+                            <div key={j} className="my-2 p-2 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
+                              <div className="text-yellow-400 font-bold mb-1 flex items-center gap-2">
+                                <Wrench className="w-3 h-3" /> Tool Call: {p.functionCall.name}
+                              </div>
+                              <pre className="text-[10px] text-yellow-500/80 overflow-x-auto">
+                                {JSON.stringify(p.functionCall.args, null, 2)}
+                              </pre>
+                            </div>
+                          );
+                          if (p.functionResponse) return (
+                            <div key={j} className="my-2 p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
+                              <div className="text-emerald-400 font-bold mb-1 flex items-center gap-2">
+                                <CheckCircle2 className="w-3 h-3" /> Tool Result: {p.functionResponse.name}
+                              </div>
+                              <pre className="text-[10px] text-emerald-500/80 overflow-x-auto whitespace-pre-wrap">
+                                {typeof p.functionResponse.response === 'string' 
+                                  ? p.functionResponse.response 
+                                  : JSON.stringify(p.functionResponse.response?.result || p.functionResponse.response, null, 2)}
+                              </pre>
+                            </div>
+                          );
+                          return null;
+                        }) : <p>{msg.content || JSON.stringify(msg)}</p>}
+                      </div>
+                    </div>
+                  ))}
+                  <div className="text-center text-[10px] text-gray-600 pt-4 pb-2 border-t border-white/5">
+                    — End of AI TRACE —
                   </div>
                 </div>
               )}

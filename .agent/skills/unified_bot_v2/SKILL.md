@@ -3,6 +3,34 @@ name: "Unified Bot Architecture (v2)"
 description: "Complete architecture reference for PersonalAIBotV2 — Agentic AI Platform with multi-agent orchestration, 4-layer MemGPT memory, self-evolution engine, 40+ tools, and production hardening. Read this before any project work."
 ---
 
+### [Update 2026-03-28] Cold Boot Safety & UI Precision (Phase 5) 🛠️❄️
+- **Persistent Cold Boot**: ปรับปรุงระบบโปรเทคชั่น `COLD_BOOT.flag` ให้มีความปลอดภัยสูงสุด โดย flag จะไม่ถูกลบอัตโนมัติเมื่อเริ่มเครื่อง แต่จะมีการจดจำสถานะและบังคับปิดระบบ Self-Upgrade ทั้งหมดทันทีจนกว่าผู้ใช้จะสั่ง "เปิด" ทำงานด้วยตัวเองเท่านั้น
+- **Stop Scan UI Fix**: แก้ไข UI บัคที่ปุ่ม "หยุด scan" เมื่อกดแล้วยังค้างสถานะ "กำลังทำงาน..." โดยเพิ่มการ Reset `isUpgrading` status ทันที
+- **Gemini 2.5 Migration**: อัปเดต `ai_routing_config.json` ให้ใช้ `gemini-2.5-flash` เป็นหลักเพื่อแก้ปัญหา error 404 สำหรับผู้ใช้ใหม่
+
+### [Update 2026-03-31] Project Audit & Master Documentation Overhaul 📖🤖
+- **Full Project Audit**: ดำเนินการตรวจสอบ Codebase ครั้งใหญ่ (Deep Audit) ครอบคลุมระบบ Evolution, Swarm, Memory และ Voice Interaction เพื่อให้มั่นใจว่าเอกสารและโค้ดมีความสอดคล้องกัน 100%
+- **Master README Overhaul**: ปรับปรุง `README.md` เป็นฉบับสมบูรณ์ (Master) ที่สะท้อนถึงขีดความสามารถที่แท้จริงของระบบ รวมถึงสถาปัตยกรรม "Second Brain" และ "Jarvis Live Call"
+- **Architectural Sync**: บันทึกรายละเอียดของ 11-Phase Implementation Pipeline และระบบ Graph-Enhanced Architecture Intelligence ลงใน Skill และ README เพื่อเป็นมาตรฐานการพัฒนา
+- **Git Sync**: ตรวจสอบและเตรียมความพร้อมของโค้ดทั้งหมดเพื่อทำการ Synchronize ขึ้น GitHub Repository (`skyliner2008/PersonalAIBot`)
+
+### [Update 2026-03-30] Core Tools & Cold Boot Protection 🛠️❄️
+- **Core Agent Tools**: เพิ่มและลงทะเบียนเครื่องมือหลัก 6 ตัว (`search_knowledge`, `read_file`, `view_file`, `multi_replace_file_content`, `system_terminal`, `notify_user`) เพื่อเพิ่มศักยภาพในการทำงานอัตโนมัติ
+- **Dynamic Router Optimization**: ปรับปรุงระบบ Tool Routing ใน `agent.ts` ให้ฉลาดขึ้น โดยลดจำนวนเครื่องมือเหลือเพียงตัวที่จำเป็น (Essential Tools) เพื่อประหยัด Token และเพิ่มความแม่นยำ
+- **Cold Boot Protection**: เพิ่มระบบป้องกัน `COLD_BOOT.flag` เพื่อปิดระบบ Self-Upgrade อัตโนมัติเมื่อเริ่มรัน Server ใหม่ ป้องกันการทำงานที่ไม่ได้ตั้งใจจน Token หมด
+- **Unified Communication**: ปรับปรุง `BotContext` ให้รองรับ `replyWithText` ทำให้ Agent สามารถแจ้งเตือนผู้ใช้ผ่าน Dashboard และ Chat ได้อย่างเป็นสถานะเดียวกัน
+
+### [Update 2026-03-29] Universal AI Provider & Agnostic Tooling 🛰️⚡
+- **Universal AI Interface**: ปฏิรูป `baseProvider.ts` และ `types.ts` ให้เป็น Provider-Agnostic 100% โดยลบการพึ่งพา Gemini SDK (`@google/genai`) ออกจาก core logic ของ Agent และ Tooling
+- **Universal Tooling (`AITool`)**: Refactor เครื่องมือทั้งหมด (40+ tools) รวมถึง `swarmTools.ts` และ `adminTools.ts` ให้ใช้ Interface `AITool` ที่เป็นมาตรฐานสากล รองรับการเรียกใช้งานจากทุก Provider (Gemini, OpenAI, Anthropic, etc.)
+- **Agnostic Routing**: ปรับปรุง `aiRouter.ts` และ `streamManager.ts` ให้รับส่ง Message ในรูปแบบสากล ทำให้ระบบ Failover และ Streaming ทำงานได้อย่างราบรื่นข้าม Provider
+- **Model Optimization**: อัปเดต `ai_routing_config.json` ให้ใช้ Gemini 2.5 Flash/Pro และ Gemini 3 Flash Preview เป็นหลักเพื่อประสิทธิภาพสูงสุด
+
+### [Update 2026-03-28] Codebase Sync & Evolution Stability Patch 🚀🛡️
+- **Sync to b32d069**: อัปเดตโครงสร้างโค้ดทั้งหมดตาม commit `b32d069` จาก repository ภายนอก (`skyliner2008`) เพื่อรับฟีเจอร์ล่าสุดและความเสถียรที่สูงขึ้น
+- **Evolution Stability**: ยืนยันความถูกต้องของ `testGenerator.ts` ที่มากับชุดอัปเดตใหม่ ซึ่งมีการเพิ่มระบบ `validateTestQuality` และการจัดการเครื่องหมายปีกกาที่สมบูรณ์ ป้องกันปัญหา Build Error แบบเดิม
+- **Codebase Integrity**: ตรวจสอบและแก้ไขโครงสร้าง Git และไฟล์เอกสารให้สอดคล้องกับเวอร์ชันปัจจุบัน
+
 ### [Update 2026-03-24] Gemini Model & Dynamic Router Patch 🛰️🛠️
 - **Unlock Gemini 3 Series**: แก้ไขปัญหา Model Selection Lockdown โดยปรับปรุง `geminiProvider.ts` (Alias Persistence) และ `configManager.ts` (STALE_MODEL_MAP Removal) ทำให้เลือกใช้ `gemini-3-flash-preview` ได้ถาวร
 - **Resilient Tool Selection**: ปรับปรุง `agent.ts` เพื่อจัดการกับ `JSON parsing failed` โดยเน้นการดักจับ JSON Array ของ String ที่แม่นยำขึ้น ป้องกัน SyntaxError จากข้อความรบกวนของ LLM
@@ -12,8 +40,8 @@ description: "Complete architecture reference for PersonalAIBotV2 — Agentic AI
 
 # PersonalAIBotV2 — Complete Architecture Reference
 
-> **Last audited**: 2026-03-23  
-> **Stack**: TypeScript, Express, Socket.IO, React+Vite, SQLite, Google GenAI SDK
+> **Last audited**: 2026-03-29  
+> **Stack**: TypeScript, Express, Socket.IO, React+Vite, SQLite, Unified AI Providers (Agnostic)
 
 This is the authoritative reference for `PersonalAIBotV2`. Read this document fully before making any changes to the project. It covers all subsystems, file locations, data flows, and operational details.
 

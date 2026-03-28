@@ -1,4 +1,4 @@
-import { Type, type FunctionDeclaration } from '@google/genai';
+import type { AITool } from '../providers/baseProvider.js';
 import { dbAll, dbRun, dbGet } from '../../database/db.js';
 import { v4 as uuidv4 } from 'uuid';
 import { refreshCronJobs } from '../../scheduler/scheduler.js';
@@ -8,22 +8,22 @@ import { getSocketIO } from '../../utils/socketBroadcast.js';
 // Tool Declarations
 // ==========================================
 
-export const createCronJobDeclaration: FunctionDeclaration = {
+export const createCronJobDeclaration: AITool = {
   name: "create_cron_job",
   description: "ตั้งเวลาให้ตัวเอง (AI) ทำงานบางอย่างในอนาคต หรือทำซ้ำๆ ตามรอบเวลา โดยใช้ Cron Expression (เช่น '0 8 * * *' สำหรับ 8 โมงเช้าทุกวัน). หากผู้ใช้สั่งให้ 'เตือนฉัน', 'เช็คราคา', หรือ 'สรุปข่าวทุกๆ...' ให้ใช้เครื่องมือนี้",
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
       name: {
-        type: Type.STRING,
+        type: 'string',
         description: "ชื่องานแบบสั้นๆ ให้จำง่าย (เช่น 'Daily News', 'Gold Price Check')",
       },
       cron_expression: {
-        type: Type.STRING,
+        type: 'string',
         description: "รูปแบบเวลาแบบ Cron Expression 5 ตำแหน่ง (เช่น '0 8 * * *', '*/30 * * * *'). หมายเหตุ: Server ใช้เวลา Timezone ของระบบ (Asia/Bangkok)",
       },
       prompt: {
-        type: Type.STRING,
+        type: 'string',
         description: "คำสั่งเต็มรูปแบบที่จะให้ตัวเองทำเมื่อถึงเวลา เช่น 'สรุปข่าวไอทีล่าสุด 3 ข่าว แล้วส่งมาให้หน่อย'",
       }
     },
@@ -31,23 +31,23 @@ export const createCronJobDeclaration: FunctionDeclaration = {
   },
 };
 
-export const listCronJobsDeclaration: FunctionDeclaration = {
+export const listCronJobsDeclaration: AITool = {
   name: "list_cron_jobs",
   description: "ดูรายการงานทั้งหมดที่คุณ (AI) ถูกตั้งเวลาไว้ในแชทนี้ เพื่อตรวจสอบหรือบอกผู้ใช้ว่ามีคิวงานอะไรบ้าง",
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {}, // No params needed, relies on context
   },
 };
 
-export const deleteCronJobDeclaration: FunctionDeclaration = {
+export const deleteCronJobDeclaration: AITool = {
   name: "delete_cron_job",
   description: "ลบหรือยกเลิกการตั้งเวลาทำงาน (Cron Job) ตาม ID งานที่ระบุ. ให้ใช้ list_cron_jobs ก่อนเพื่อหา ID งานที่จะลบ",
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
       job_id: {
-        type: Type.STRING,
+        type: 'string',
         description: "ID ของงานที่ต้องการลบ (เช่น 'some-uuid-1234')",
       }
     },

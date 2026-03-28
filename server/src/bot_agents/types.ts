@@ -2,8 +2,47 @@
 // Bot Agent Shared Types — replaces `any` across the codebase
 // ============================================================
 
-import type { FunctionDeclaration, Content } from '@google/genai';
-export type { FunctionDeclaration, Content };
+// ──────────────────────────────────────────────
+// Universal AI Message & Tool Types
+// ──────────────────────────────────────────────
+
+/** Generic message part for any AI provider */
+export interface AIMessagePart {
+  text?: string;
+  inlineData?: {
+    mimeType: string;
+    data: string; // base64
+  };
+  fileData?: {
+    mimeType: string;
+    fileUri: string;
+  };
+  functionCall?: {
+    name: string;
+    args: Record<string, unknown>;
+  };
+  functionResponse?: {
+    name: string;
+    response: Record<string, unknown>;
+  };
+}
+
+/** Generic message structure */
+export interface AIMessage {
+  role: 'user' | 'assistant' | 'system' | 'model'; // 'model' included for internal compatibility
+  parts: AIMessagePart[];
+}
+
+/** Generic tool definition (compatible with most providers) */
+export interface AITool {
+  name: string;
+  description: string;
+  parameters: {
+    type: 'object';
+    properties: Record<string, any>;
+    required?: string[];
+  };
+}
 
 // ──────────────────────────────────────────────
 // Tool Call — returned by AI provider
@@ -59,6 +98,8 @@ export interface BotContext {
     platform: 'telegram' | 'line' | 'facebook' | 'discord' | 'custom';
     /** Platform-specific file reply callback */
     replyWithFile: (filePath: string, caption?: string) => Promise<string>;
+    /** Platform-specific text reply callback */
+    replyWithText: (text: string) => Promise<any>;
     /** (Optional) Hint for task classification / model routing */
     taskType?: string;
 }
@@ -78,8 +119,8 @@ export interface TokenUsage {
 export interface AIResponse {
     text: string;
     toolCalls?: ToolCall[];
-    /** Raw model Content object — used by Gemini agentic loop */
-    rawModelContent?: Content;
+    /** Raw model response parts (optional, for debugging/advanced usage) */
+    rawModelContent?: any;
     usage?: TokenUsage;
 }
 

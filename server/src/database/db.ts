@@ -69,6 +69,9 @@ export interface MessageRow {
   role: 'user' | 'assistant' | 'system';
   content: string;
   fb_message_id: string | null;
+  source: string;              // 'chat', 'swarm_trace', 'system_log', etc.
+  metadata: string | null;     // JSON blob for extra context
+  is_internal: number;         // 0/1, should it be hidden from regular chat UI?
   timestamp: string;
 }
 
@@ -143,6 +146,20 @@ function runMigrations(dbInstance: SqliteDatabase): void {
     dbInstance.exec(`ALTER TABLE knowledge_nodes ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
   } catch (e) {
     logger.debug('Column updated_at already exists in knowledge_nodes', { error: String(e) });
+  }
+
+  // --- Messages migration (Unified Trace) ---
+  try {
+    const checkStmt = dbInstance.prepare(`PRAGMA table_info(messages)`).all() as { name: string }[];
+    const cols = checkStmt.map(c => c.name);
+    if (!cols.includes('source')) {
+      dbInstance.exec(`ALTER TABLE messages ADD COLUMN source TEXT DEFAULT 'chat'`);
+      dbInstance.exec(`ALTER TABLE messages ADD COLUMN metadata TEXT DEFAULT '{}'`);
+      dbInstance.exec(`ALTER TABLE messages ADD COLUMN is_internal INTEGER DEFAULT 0`);
+      logger.info('Migrated messages table for Unified Trace system');
+    }
+  } catch (e) {
+    logger.debug('Migration for messages table failed or already applied', { error: String(e) });
   }
 
   // --- Evolution System tables ---
@@ -643,10 +660,26 @@ export function getConversationMessages(convId: string, limit: number = 50): Mes
   ).reverse();
 }
 
-export function addMessage(convId: string, role: string, content: string, fbMessageId?: string): void {
+export function addMessage(
+  convId: string, 
+  role: string, 
+  content: string, 
+  fbMessageId?: string, 
+  source: string = 'chat', 
+  metadata: any = {}, 
+  isInternal: boolean = false
+): void {
   runSql(getDb(),
-    'INSERT INTO messages (conversation_id, role, content, fb_message_id) VALUES (?, ?, ?, ?)',
-    [convId, role, content, fbMessageId || null]
+    'INSERT INTO messages (conversation_id, role, content, fb_message_id, source, metadata, is_internal) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [
+      convId, 
+      role, 
+      content, 
+      fbMessageId || null, 
+      source, 
+      typeof metadata === 'string' ? metadata : JSON.stringify(metadata), 
+      isInternal ? 1 : 0
+    ]
   );
 }
 

@@ -5,8 +5,7 @@
 // ห้ามแก้ core files, ทุกการเปลี่ยน log ลง evolution_log
 import * as fs from 'fs';
 import * as path from 'path';
-import { Type } from '@google/genai';
-import type { FunctionDeclaration } from '@google/genai';
+import type { AITool } from '../providers/baseProvider.js';
 import { logEvolution, getEvolutionLog, getLearnings, addLearning, type LearningCategory } from '../../evolution/learningJournal.js';
 import { shouldReflect, triggerReflection } from '../../evolution/selfReflection.js';
 import { runHealthCheck } from '../../evolution/selfHealing.js';
@@ -54,14 +53,14 @@ function isPathAllowed(filePath: string, scope: 'personas' | 'source' | 'evoluti
 // ============================================================
 // Tool 1: self_read_source — อ่าน source code ของตัวเอง
 // ============================================================
-export const selfReadSourceDeclaration: FunctionDeclaration = {
+export const selfReadSourceDeclaration: AITool = {
     name: 'self_read_source',
     description: 'อ่าน source code ของตัวเอง เพื่อเข้าใจการทำงานและหาจุดปรับปรุง (read-only, จำกัดเฉพาะ server/src/)',
     parameters: {
-        type: Type.OBJECT,
+        type: 'object',
         properties: {
             file_path: {
-                type: Type.STRING,
+                type: 'string',
                 description: 'พาธไฟล์ที่ต้องการอ่าน (สัมพัทธ์จาก server/ เช่น "src/bot_agents/agent.ts")',
             },
         },
@@ -85,26 +84,26 @@ export async function selfReadSource({ file_path }: { file_path: string }): Prom
 // ============================================================
 // Tool 2: self_edit_persona — แก้ไข persona files
 // ============================================================
-export const selfEditPersonaDeclaration: FunctionDeclaration = {
+export const selfEditPersonaDeclaration: AITool = {
     name: 'self_edit_persona',
     description: 'แก้ไข persona ของตัวเอง (AGENTS.md, IDENTITY.md, SOUL.md, TOOLS.md) เพื่อปรับปรุงพฤติกรรมและการตอบ (auto-backup ก่อนแก้)',
     parameters: {
-        type: Type.OBJECT,
+        type: 'object',
         properties: {
             platform: {
-                type: Type.STRING,
+                type: 'string',
                 description: 'platform ที่ต้องการแก้ เช่น "telegram", "line"',
             },
             file_name: {
-                type: Type.STRING,
+                type: 'string',
                 description: 'ชื่อไฟล์: AGENTS.md, IDENTITY.md, SOUL.md, TOOLS.md',
             },
             new_content: {
-                type: Type.STRING,
+                type: 'string',
                 description: 'เนื้อหาใหม่ทั้งหมดที่ต้องการเขียน',
             },
             reason: {
-                type: Type.STRING,
+                type: 'string',
                 description: 'เหตุผลที่ต้องการแก้ไข (จะถูกบันทึกใน evolution log)',
             },
         },
@@ -141,18 +140,18 @@ export async function selfEditPersona(
 // ============================================================
 // Tool 3: self_add_learning — บันทึกสิ่งที่เรียนรู้
 // ============================================================
-export const selfAddLearningDeclaration: FunctionDeclaration = {
+export const selfAddLearningDeclaration: AITool = {
     name: 'self_add_learning',
     description: 'บันทึกสิ่งที่เรียนรู้จากการทำงาน เช่น error solution, user pattern, prompt improvement — จะถูกนำไปใช้ปรับปรุงการตอบในอนาคต',
     parameters: {
-        type: Type.OBJECT,
+        type: 'object',
         properties: {
             category: {
-                type: Type.STRING,
+                type: 'string',
                 description: 'หมวดหมู่: user_patterns, tool_usage, error_solutions, prompt_improvements, performance, general',
             },
             insight: {
-                type: Type.STRING,
+                type: 'string',
                 description: 'สิ่งที่เรียนรู้ เช่น "ผู้ใช้มักถามเรื่อง crypto pricing ด้วยคำว่า เช็คราคา"',
             },
         },
@@ -176,18 +175,18 @@ export async function selfAddLearning(
 // ============================================================
 // Tool 4: self_view_evolution — ดู history การ evolve ตัวเอง
 // ============================================================
-export const selfViewEvolutionDeclaration: FunctionDeclaration = {
+export const selfViewEvolutionDeclaration: AITool = {
     name: 'self_view_evolution',
     description: 'ดู history การ evolve ตัวเอง: การแก้ไข, การเรียนรู้, การซ่อมตัวเอง ทั้งหมด',
     parameters: {
-        type: Type.OBJECT,
+        type: 'object',
         properties: {
             view_type: {
-                type: Type.STRING,
+                type: 'string',
                 description: '"log" = evolution log, "learnings" = learning journal, "health" = health check',
             },
             limit: {
-                type: Type.NUMBER,
+                type: 'number',
                 description: 'จำนวนรายการ (ค่าเริ่มต้น 10)',
             },
         },
@@ -228,10 +227,10 @@ export async function selfViewEvolution(
 // ============================================================
 // Tool 5: self_reflect — บังคับทำ self-reflection ตอนนี้
 // ============================================================
-export const selfReflectDeclaration: FunctionDeclaration = {
+export const selfReflectDeclaration: AITool = {
     name: 'self_reflect',
     description: 'วิเคราะห์ตัวเอง: error patterns, performance, tool usage แล้วสร้าง insights เพื่อปรับปรุง',
-    parameters: { type: Type.OBJECT, properties: {} },
+    parameters: { type: 'object', properties: {} },
 };
 export async function selfReflect(): Promise<string> {
     try {
@@ -251,10 +250,10 @@ export async function selfReflect(): Promise<string> {
 // ============================================================
 // Tool 6: self_heal — บังคับทำ health check + auto-fix
 // ============================================================
-export const selfHealDeclaration: FunctionDeclaration = {
+export const selfHealDeclaration: AITool = {
     name: 'self_heal',
     description: 'ตรวจสอบสุขภาพระบบและซ่อมแซมปัญหาที่พบอัตโนมัติ: auto-switch model, clear stuck queues',
-    parameters: { type: Type.OBJECT, properties: {} },
+    parameters: { type: 'object', properties: {} },
 };
 export async function selfHeal(): Promise<string> {
     try {
@@ -277,26 +276,26 @@ export async function selfHeal(): Promise<string> {
 // Tool 7: create_tool — Create new dynamic tools
 // ============================================================
 import { registerDynamicTool, unregisterDynamicTool, listDynamicTools, getDynamicTool } from './dynamicTools.js';
-export const createToolDeclaration: FunctionDeclaration = {
+export const createToolDeclaration: AITool = {
     name: 'create_tool',
     description: 'สร้างเครื่องมือใหม่ที่ฉันสามารถใช้ได้ ให้ระบุชื่อ, คำอธิบาย, schema ของ parameter, และ code implementation',
     parameters: {
-        type: Type.OBJECT,
+        type: 'object',
         properties: {
             name: {
-                type: Type.STRING,
+                type: 'string',
                 description: 'ชื่อเครื่องมือ (kebab-case, เช่น fetch-weather, convert-units)',
             },
             description: {
-                type: Type.STRING,
+                type: 'string',
                 description: 'คำอธิบายว่าเครื่องมือนี้ทำอะไร',
             },
             parameters: {
-                type: Type.OBJECT,
+                type: 'object',
                 description: 'JSON Schema สำหรับ parameter ของเครื่องมือ (ใช้ type object)',
             },
             code: {
-                type: Type.STRING,
+                type: 'string',
                 description: 'TypeScript/JavaScript code สำหรับ handler ฟังก์ชัน (async function body, return ผลลัพธ์เป็น string)',
             },
         },
@@ -343,10 +342,10 @@ export async function createTool({
 // ============================================================
 // Tool 8: list_dynamic_tools — List all custom tools
 // ============================================================
-export const listDynamicToolsDeclaration: FunctionDeclaration = {
+export const listDynamicToolsDeclaration: AITool = {
     name: 'list_dynamic_tools',
     description: 'แสดงรายการเครื่องมือที่เราสร้างขึ้นเองทั้งหมด',
-    parameters: { type: Type.OBJECT, properties: {} },
+    parameters: { type: 'object', properties: {} },
 };
 export async function listDynamicToolsHandler(): Promise<string> {
     try {
@@ -380,14 +379,14 @@ export async function listDynamicToolsHandler(): Promise<string> {
 // ============================================================
 // Tool 9: delete_dynamic_tool — Delete a custom tool
 // ============================================================
-export const deleteDynamicToolDeclaration: FunctionDeclaration = {
+export const deleteDynamicToolDeclaration: AITool = {
     name: 'delete_dynamic_tool',
     description: 'ลบเครื่องมือที่สร้างขึ้นเอง (ไม่สามารถคืนได้)',
     parameters: {
-        type: Type.OBJECT,
+        type: 'object',
         properties: {
             name: {
-                type: Type.STRING,
+                type: 'string',
                 description: 'ชื่อของเครื่องมือที่ต้องการลบ',
             },
         },
@@ -412,7 +411,7 @@ export async function deleteDynamicTool({ name }: { name: string }): Promise<str
 // ============================================================
 // Export all declarations and handlers
 // ============================================================
-export const evolutionToolDeclarations: FunctionDeclaration[] = [
+export const evolutionToolDeclarations: AITool[] = [
     selfReadSourceDeclaration,
     selfEditPersonaDeclaration,
     selfAddLearningDeclaration,

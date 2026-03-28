@@ -1,5 +1,5 @@
-import type { Content } from '@google/genai';
 import type { AIProvider, AIProviderType, AIMessage, AICompletionOptions, AITask, AIChatResponse } from './types.js';
+import type { AIMessage as AgentMessage } from '../bot_agents/types.js';
 import { getSetting } from '../database/db.js';
 import { getAgentAllowOpenaiAutoFallback } from '../config/runtimeSettings.js';
 import { getFallbackOrder, getProvider as getRegistryProvider } from '../providers/registry.js';
@@ -26,17 +26,17 @@ function escapeHtml(text: string): string {
     .replace(/'/g, '&#039;');
 }
 
-function toRuntimeContents(messages: AIMessage[]): { systemInstruction: string; contents: Content[] } {
+function toRuntimeContents(messages: AIMessage[]): { systemInstruction: string; contents: AgentMessage[] } {
   const systemInstruction = messages
     .filter((message) => message.role === 'system')
     .map((message) => message.content.trim())
     .filter(Boolean)
     .join('\n\n');
 
-  const contents: Content[] = messages
+  const contents: AgentMessage[] = messages
     .filter((message) => message.role !== 'system')
     .map((message) => ({
-      role: message.role === 'assistant' ? 'model' : 'user',
+      role: message.role === 'assistant' ? 'assistant' : 'user',
       parts: [{ text: message.content }],
     }));
 

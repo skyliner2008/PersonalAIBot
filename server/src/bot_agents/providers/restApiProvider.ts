@@ -1,5 +1,4 @@
-import type { Content, FunctionDeclaration } from '@google/genai';
-import type { AIProvider, AIResponse } from './baseProvider.js';
+import type { AIProvider, AIResponse, AIMessage, AITool } from './baseProvider.js';
 import type { ProviderDefinition } from '../../providers/registry.js';
 import { createLogger } from '../../utils/logger.js';
 
@@ -17,11 +16,15 @@ export class RestApiProvider implements AIProvider {
   async generateResponse(
     modelName: string,
     systemInstruction: string,
-    contents: Content[],
-    tools?: FunctionDeclaration[]
+    history: AIMessage[],
+    tools?: AITool[]
   ): Promise<AIResponse> {
-    log.warn(`[RestApiProvider] text-out not natively supported yet. Please use OpenAI-Compatible definition for text generation.`, { modelName });
+    log.warn(`[RestApiProvider] text-out not natively supported yet.`, { modelName });
     return { text: "Error: generic REST provider currently only supports Media Generation." };
+  }
+
+  async syncModels(): Promise<{ success: boolean; updatedCount: number; models: string[] }> {
+    return { success: true, updatedCount: this.config.models?.length || 0, models: this.config.models || [] };
   }
 
   async listModels(): Promise<string[]> {

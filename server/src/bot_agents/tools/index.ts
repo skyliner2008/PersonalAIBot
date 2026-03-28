@@ -1,17 +1,33 @@
-import { Type } from '@google/genai';
-import type { FunctionDeclaration } from '@google/genai';
 import type { BotContext, ToolHandler, ToolHandlerMap, NgrokApiResponse } from '../types.js';
+import type { AITool } from '../providers/baseProvider.js';
 import {
   runCommand, runCommandDeclaration,
   openApplication, openApplicationDeclaration,
   closeApplication, closeApplicationDeclaration,
   runPython, runPythonDeclaration,
   systemInfo, systemInfoDeclaration,
+  systemTerminal, systemTerminalDeclaration,
   screenshotDesktop, screenshotDesktopDeclaration,
   clipboardRead, clipboardReadDeclaration,
   clipboardWrite, clipboardWriteDeclaration,
 } from './os.js';
-import { listFiles, listFilesDeclaration, readFileContent, readFileContentDeclaration, writeFileContent, writeFileContentDeclaration, deleteFile, deleteFileDeclaration, replaceCodeBlock, replaceCodeBlockDeclaration, searchCodebase, searchCodebaseDeclaration, astReplaceFunction, astReplaceFunctionDeclaration, astAddImport, astAddImportDeclaration, findReferences, findReferencesDeclaration, astRename, astRenameDeclaration } from './file.js';
+import {
+  listFiles, listFilesDeclaration,
+  readFileContent, readFileContentDeclaration,
+  readFile, readFileDeclaration,
+  viewFile, viewFileDeclaration,
+  writeFileContent, writeFileContentDeclaration,
+  deleteFile, deleteFileDeclaration,
+  replaceCodeBlock, replaceCodeBlockDeclaration,
+  multiReplaceFileContent, multiReplaceFileContentDeclaration,
+  searchCodebase, searchCodebaseDeclaration,
+  astReplaceFunction, astReplaceFunctionDeclaration,
+  astAddImport, astAddImportDeclaration,
+  findReferences, findReferencesDeclaration,
+  astRename, astRenameDeclaration
+} from './file.js';
+import { searchKnowledge, searchKnowledgeDeclaration, setKnowledgeChatId } from './knowledge.js';
+import { createCommunicationHandlers, notifyUserDeclaration } from './communication.js';
 import { browserNavigate, browserNavigateDeclaration, browserClick, browserClickDeclaration, browserType, browserTypeDeclaration, browserClose, browserCloseDeclaration } from './browser.js';
 import { webSearch, webSearchDeclaration, readWebpage, readWebpageDeclaration, mouseClick, mouseClickDeclaration, keyboardType, keyboardTypeDeclaration } from './limitless.js';
 import { systemToolDeclarations, getSystemToolHandlers, type SystemToolContext } from './system.js';
@@ -23,23 +39,23 @@ import { createCronJobDeclaration, listCronJobsDeclaration, deleteCronJobDeclara
 export type { BotContext, SystemToolContext };
 
 // Utility Tools
-const getCurrentTimeDeclaration: FunctionDeclaration = {
+const getCurrentTimeDeclaration: AITool = {
   name: "get_current_time",
   description: "บอกเวลาปัจจุบันของระบบ เพื่อช่วยจัดตารางงาน",
-  parameters: { type: Type.OBJECT, properties: {} },
+  parameters: { type: 'object', properties: {} },
 };
 
 function getCurrentTime() {
   return new Date().toLocaleString('th-TH');
 }
 
-const echoMessageDeclaration: FunctionDeclaration = {
+const echoMessageDeclaration: AITool = {
   name: "echo_message",
   description: "พิมพ์ข้อความออกทางหน้าจอ Console ของเครื่องที่รันบอทอยู่",
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
-      message: { type: Type.STRING, description: "ข้อความที่ต้องการพิมพ์" },
+      message: { type: 'string', description: "ข้อความที่ต้องการพิมพ์" },
     },
     required: ["message"],
   },
@@ -53,18 +69,18 @@ function echoMessage({ message }: { message: string }) {
 // ==========================================
 // Bot Specific Tools (File Transfer)
 // ==========================================
-export const sendFileToChatDeclaration: FunctionDeclaration = {
+export const sendFileToChatDeclaration: AITool = {
   name: "send_file_to_chat",
   description: "ส่งไฟล์จากคอมพิวเตอร์ไปยังแชทของผู้ใช้ (Telegram/LINE). ใช้เมื่อผู้ใช้ขอไฟล์หรือเอกสาร",
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
       file_path: {
-        type: Type.STRING,
+        type: 'string',
         description: "พาธของไฟล์ที่ต้องการส่ง (เช่น 'C:\\test.txt')",
       },
       caption: {
-        type: Type.STRING,
+        type: 'string',
         description: "คำอธิบายไฟล์ที่จะส่งไปพร้อมกัน (ถ้ามี)",
       }
     },
@@ -136,25 +152,25 @@ import {
   searchArchival, saveArchivalFact, searchRecall
 } from '../../memory/unifiedMemory.js';
 
-export const memorySearchDeclaration: FunctionDeclaration = {
+export const memorySearchDeclaration: AITool = {
   name: "memory_search",
   description: "ค้นหาข้อมูลจากความทรงจำระยะยาว (Archival Memory) ของผู้ใช้ ใช้เมื่อต้องการดึงข้อมูลเก่าที่เคยคุยกัน เช่น ชื่อ งาน สิ่งที่ชอบ",
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
-      query: { type: Type.STRING, description: "คำค้นหา เช่น 'ชื่อผู้ใช้', 'งานอดิเรก', 'อาหารที่ชอบ'" },
+      query: { type: 'string', description: "คำค้นหา เช่น 'ชื่อผู้ใช้', 'งานอดิเรก', 'อาหารที่ชอบ'" },
     },
     required: ["query"],
   },
 };
 
-export const memorySaveDeclaration: FunctionDeclaration = {
+export const memorySaveDeclaration: AITool = {
   name: "memory_save",
   description: "บันทึกข้อเท็จจริงใหม่เกี่ยวกับผู้ใช้ลงในความทรงจำระยะยาว ใช้เมื่อผู้ใช้บอกข้อมูลเกี่ยวกับตัวเอง เช่น ชื่อ อาชีพ ความชอบ",
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
-      fact: { type: Type.STRING, description: "ข้อเท็จจริงที่ต้องการบันทึก เช่น 'ผู้ใช้ชื่อ สมชาย ทำงานเป็นวิศวกร'" },
+      fact: { type: 'string', description: "ข้อเท็จจริงที่ต้องการบันทึก เช่น 'ผู้ใช้ชื่อ สมชาย ทำงานเป็นวิศวกร'" },
     },
     required: ["fact"],
   },
@@ -170,35 +186,31 @@ export const tools = [
   openApplicationDeclaration,
   closeApplicationDeclaration,
   systemInfoDeclaration,
+  systemTerminalDeclaration,
   screenshotDesktopDeclaration,
   clipboardReadDeclaration,
   clipboardWriteDeclaration,
   // File Operations
   listFilesDeclaration,
   readFileContentDeclaration,
+  readFileDeclaration,
+  viewFileDeclaration,
   writeFileContentDeclaration,
   deleteFileDeclaration,
   sendFileToChatDeclaration,
   // Surgical Edit & Search Tools
   replaceCodeBlockDeclaration,
+  multiReplaceFileContentDeclaration,
   searchCodebaseDeclaration,
   astReplaceFunctionDeclaration,
   astAddImportDeclaration,
   findReferencesDeclaration,
   astRenameDeclaration,
-  // Browser Tools
-  browserNavigateDeclaration,
-  browserClickDeclaration,
-  browserTypeDeclaration,
-  browserCloseDeclaration,
-  // Web & Search Tools
-  webSearchDeclaration,
-  readWebpageDeclaration,
-  mouseClickDeclaration,
-  keyboardTypeDeclaration,
-  // Memory Tools
+  // Memory & Knowledge
   memorySearchDeclaration,
   memorySaveDeclaration,
+  searchKnowledgeDeclaration,
+  notifyUserDeclaration,
   // System Self-Awareness Tools
   ...systemToolDeclarations,
   // Self-Evolution Tools
@@ -275,6 +287,13 @@ export const getFunctionHandlers = (ctx: BotContext, sysCtx?: SystemToolContext)
       await saveArchivalFact(_currentChatId, fact);
       return `✅ บันทึกลงความทรงจำแล้ว: "${fact}"`;
     },
+    // New Tools
+    search_knowledge: searchKnowledge,
+    read_file: readFile,
+    view_file: viewFile,
+    multi_replace_file_content: multiReplaceFileContent,
+    system_terminal: systemTerminal,
+    ...createCommunicationHandlers(ctx, _currentChatId),
   };
 
   // Register System Self-Awareness tools (if context provided)
@@ -289,4 +308,7 @@ export const getFunctionHandlers = (ctx: BotContext, sysCtx?: SystemToolContext)
 };
 
 /** Set the current chatId for memory tools — called by agent before tool execution */
-export function setCurrentChatId(chatId: string) { _currentChatId = chatId; }
+export function setCurrentChatId(chatId: string) { 
+  _currentChatId = chatId; 
+  setKnowledgeChatId(chatId);
+}

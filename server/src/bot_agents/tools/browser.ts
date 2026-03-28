@@ -1,5 +1,5 @@
 import { chromium, Browser, BrowserContext, Page } from 'playwright';
-import { Type, FunctionDeclaration } from '@google/genai';
+import type { AITool } from '../providers/baseProvider.js';
 import * as fs from 'fs';
 import * as os from 'os';
 import { createLogger } from '../../utils/logger.js';
@@ -64,14 +64,14 @@ async function cleanupBrowser() {
 // ==========================================
 // 1. Browser Navigate
 // ==========================================
-export const browserNavigateDeclaration: FunctionDeclaration = {
+export const browserNavigateDeclaration: AITool = {
   name: "browser_navigate",
   description: "เปิดเว็บเบราว์เซอร์และเข้าไปที่ URL ที่กำหนด พร้อมส่งคืนข้อความ (text) ทั้งหมดบนหน้าเว็บเพื่อให้อ่าน",
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
       url: {
-        type: Type.STRING,
+        type: 'string',
         description: "URL ของเว็บไซต์ที่ต้องการไป (ต้องมี http:// หรือ https://)",
       },
     },
@@ -104,14 +104,14 @@ export async function browserNavigate({ url }: { url: string }): Promise<string>
 // ==========================================
 // 2. Browser Click
 // ==========================================
-export const browserClickDeclaration: FunctionDeclaration = {
+export const browserClickDeclaration: AITool = {
   name: "browser_click",
   description: "คลิกปุ่มหรือลิงก์บนหน้าเว็บที่เปิดอยู่ โดยใช้ CSS Selector (เช่น button#submit หรือ .nav-link)",
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
       selector: {
-        type: Type.STRING,
+        type: 'string',
         description: "CSS Selector สำหรับอ้างอิง element ที่ต้องการคลิก",
       },
     },
@@ -134,18 +134,18 @@ export async function browserClick({ selector }: { selector: string }): Promise<
 // ==========================================
 // 3. Browser Type (Fill Text)
 // ==========================================
-export const browserTypeDeclaration: FunctionDeclaration = {
+export const browserTypeDeclaration: AITool = {
   name: "browser_type",
   description: "พิมพ์ข้อความลงในช่อง input บนหน้าเว็บ (เช่น ช่องค้นหา, ฟอร์มล็อกอิน) โดยอ้างอิงด้วย CSS Selector",
   parameters: {
-    type: Type.OBJECT,
+    type: 'object',
     properties: {
       selector: {
-        type: Type.STRING,
+        type: 'string',
         description: "CSS Selector สำหรับช่อง input (เช่น input[name=q])"
       },
       text: {
-        type: Type.STRING,
+        type: 'string',
         description: "ข้อความที่ต้องการพิมพ์",
       },
     },
@@ -166,10 +166,10 @@ export async function browserType({ selector, text }: { selector: string, text: 
 // ==========================================
 // 4. Browser Close
 // ==========================================
-export const browserCloseDeclaration: FunctionDeclaration = {
+export const browserCloseDeclaration: AITool = {
   name: "browser_close",
   description: "ปิดหน้าเว็บเบราว์เซอร์หลังจากใช้งานเสร็จแล้ว เพื่อคืนทรัพยากร",
-  parameters: { type: Type.OBJECT, properties: {} },
+  parameters: { type: 'object', properties: {} },
 };
 
 export async function browserClose(): Promise<string> {

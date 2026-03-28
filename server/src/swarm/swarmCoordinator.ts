@@ -22,9 +22,9 @@ import {
   getAvailableSpecialists,
 } from './specialists.js';
 import type { BotContext } from '../bot_agents/types.js';
-import type { Agent } from '../bot_agents/agent.js';
+import { Agent, getLatestRun } from '../bot_agents/agent.js';
 import { executeCommandDetailed, type CommandTokenUsage } from '../terminal/terminalGateway.js';
-import { saveArchivalFact } from '../memory/unifiedMemory.js';
+import { saveArchivalFact, addMessage as logToUnifiedMemory } from '../memory/unifiedMemory.js';
 import { getRootAdminIdentity, getRootAdminSpecialistName } from '../system/rootAdmin.js';
 import {
   type SwarmBatch,
@@ -202,6 +202,13 @@ export class SwarmCoordinator {
     return () => {
       this.stateStore.removeBatchCompleteListener(listener);
     };
+  }
+
+  /**
+   * Register a callback for when a specific task completes or fails.
+   */
+  onTaskDone(taskId: string, callback: TaskCallback): void {
+    this.taskQueue.onTaskDone(taskId, callback);
   }
 
   /**
@@ -444,14 +451,15 @@ export class SwarmCoordinator {
     status: TaskStatus;
     result?: string;
     error?: string;
+    transcript?: any[];
   }> {
     // Event-driven: try to resolve immediately via task listener
-    const earlyResult = await new Promise<{ status: TaskStatus; result?: string; error?: string } | null>((resolve) => {
+    const earlyResult = await new Promise<{ status: TaskStatus; result?: string; error?: string; transcript?: any[] } | null>((resolve) => {
       const timeout = setTimeout(() => resolve(null), Math.min(timeoutMs, 500));
       this.taskQueue.onTaskDone(taskId, async (task) => {
         clearTimeout(timeout);
-        if (task.status === 'completed') resolve({ status: 'completed', result: task.result });
-        else if (task.status === 'failed') resolve({ status: 'failed', error: task.error });
+        if (task.status === 'completed') resolve({ status: 'completed', result: task.result, transcript: task.transcript });
+        else if (task.status === 'failed') resolve({ status: 'failed', error: task.error, transcript: task.transcript });
         else resolve(null);
       });
     });
@@ -462,8 +470,8 @@ export class SwarmCoordinator {
     while (Date.now() - startTime < timeoutMs) {
       const task = await this.taskQueue.getStatus(taskId);
       if (!task) return { status: 'failed', error: 'Task not found' };
-      if (task.status === 'completed') return { status: 'completed', result: task.result };
-      if (task.status === 'failed') return { status: 'failed', error: task.error };
+      if (task.status === 'completed') return { status: 'completed', result: task.result, transcript: task.transcript };
+      if (task.status === 'failed') return { status: 'failed', error: task.error, transcript: task.transcript };
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
     return { status: 'failed', error: 'Task timeout' };
@@ -570,8 +578,8 @@ export class SwarmCoordinator {
       const execution = this.isCliSpecialist(specialist.name)
         ? await this.executeCliSpecialistTask(task, specialist.name, taskMessage)
         : this.shouldUseLocalSynthesis(task, specialist.name)
-          ? { output: this.buildLocalSynthesisForTask(task) }
-          : { output: await this.executeAgentSpecialistTask(task, specialist.name, taskMessage) };
+          ? { output: this.buildLocalSynthesisForTask(task) } as SpecialistExecutionResult
+          : await this.executeAgentSpecialistTask(task, specialist.name, taskMessage);
 
       const latestTaskState = await this.taskQueue.getStatus(task.id);
       if (!latestTaskState || latestTaskState.status !== 'processing') {
@@ -587,7 +595,7 @@ export class SwarmCoordinator {
 
       const sanitizedOutput = this.sanitizeAssignmentOutput(execution.output);
       this.recordSpecialistSuccess(specialist.name, Date.now() - executionStartedAt);
-      await this.taskQueue.complete(task.id, sanitizedOutput || '(no response)');
+      await this.taskQueue.complete(task.id, sanitizedOutput || '(no response)', execution.transcript);
       swarmInfo(`[SwarmCoordinator] Task completed: ${task.id}`);
       await this.reportResult(task);
     } catch (err) {
@@ -1052,6 +1060,7 @@ export class SwarmCoordinator {
         botName: rootAdmin.botName,
         platform: 'custom',
         replyWithFile: async () => '',
+        replyWithText: async (t) => console.log(`[Swarm Internal] ${t}`),
       },
       task.taskType,
       {
@@ -1276,6 +1285,7 @@ export class SwarmCoordinator {
         botName: rootAdmin.botName,
         platform: 'custom',
         replyWithFile: async () => '',
+        replyWithText: async (t) => console.log(`[Swarm Internal] ${t}`),
       },
       sourceAssignment.taskType,
       {
@@ -1713,11 +1723,10 @@ export class SwarmCoordinator {
     task: SwarmTask,
     specialistName: string,
     message: string,
-  ): Promise<string> {
+  ): Promise<SpecialistExecutionResult> {
     if (!this.agentInstance) {
       throw new Error('Agent instance not available');
     }
-
     const isJarvisLeader = specialistName === getRootAdminSpecialistName();
     const rootAdmin = getRootAdminIdentity();
     const executionContext: BotContext = {
@@ -1725,14 +1734,22 @@ export class SwarmCoordinator {
       botName: isJarvisLeader ? rootAdmin.botName : `Specialist: ${specialistName}`,
       platform: 'custom',
       replyWithFile: async (filePath: string) => `[Swarm] Would send file: ${filePath}`,
+      replyWithText: async (t: string) => `[Swarm] Repling with text: ${t}`,
     };
 
-    return await Promise.race([
-      this.agentInstance.processMessage(`swarm_${task.id}`, message, executionContext),
+    const conversationId = `swarm_${task.id}`;
+    const output = await Promise.race([
+      this.agentInstance.processMessage(conversationId, message, executionContext),
       new Promise<string>((_, reject) => {
         setTimeout(() => reject(new Error('Task execution timeout')), task.timeout);
       }),
     ]);
+
+    const latestRun = getLatestRun(conversationId);
+    return {
+      output,
+      transcript: latestRun?.transcript
+    };
   }
 
   private attachAssignmentTokenUsage(taskId: string, tokenUsage: CommandTokenUsage): void {
@@ -1839,6 +1856,29 @@ export class SwarmCoordinator {
         this.saveBatchToArchival(batch).catch((err) =>
           console.error('[SwarmCoordinator] Failed to save batch to archival:', err),
         );
+      }
+      if (task.status === 'processing' || task.status === 'completed' || task.status === 'failed') {
+        const traceChatId = batchId ? `trace_${batchId}` : (task.fromChatId || 'swarm_general');
+        const role = task.status === 'processing' ? 'system' : 'assistant';
+        let content = '';
+        
+        if (task.status === 'processing') {
+            content = `[${assignment.specialist}] เริ่มทำงาน: ${assignment.title}`;
+        } else if (task.status === 'completed') {
+            content = `[${assignment.specialist}] งานเสร็จสิ้น: ${assignment.title}\n\nผลลัพธ์: ${task.result?.substring(0, 500)}${(task.result?.length || 0) > 500 ? '...' : ''}`;
+        } else if (task.status === 'failed') {
+            content = `[${assignment.specialist}] งานล้มเหลว: ${assignment.title}\n\nข้อผิดพลาด: ${task.error}`;
+        }
+
+        if (content) {
+            logToUnifiedMemory(traceChatId, role, content, 'swarm_trace', {
+                taskId: task.id,
+                batchId,
+                specialist: assignment.specialist,
+                status: task.status,
+                title: assignment.title
+            }, true); // isInternal=true to allow filtering in UI
+        }
       }
     } catch (err) {
       console.error(`[SwarmCoordinator] Unhandled error in handleTaskLifecycleUpdate for task ${task.id}:`, err);
