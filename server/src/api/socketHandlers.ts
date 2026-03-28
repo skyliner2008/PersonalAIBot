@@ -428,7 +428,7 @@ function buildJarvisLiveSystemInstruction(): string {
             'If tool returns timeout error, tell user briefly and suggest trying again.',
         ].join('\n');
         const projectIdentity = [
-            `You are ${rootAdmin.botName} for the PersonalAIBotV2 project.`,
+            `You are ${rootAdmin.botName} for the PersonalAIBot project.`,
             'Always keep this identity while speaking in live call mode.',
             'Speak concisely, calm, practical, and supportive as a gentleman.',
             'If user speaks Thai, you MUST reply in Thai using "ครับ".',
@@ -442,7 +442,7 @@ function buildJarvisLiveSystemInstruction(): string {
     } catch {
         const rootAdmin = getRootAdminIdentity();
         return [
-            `You are ${rootAdmin.botName} for the PersonalAIBotV2 project.`,
+            `You are ${rootAdmin.botName} for the PersonalAIBot project.`,
             'Speak Thai by default, concise and practical.',
             'Never use English unless user explicitly requests it.',
             `Use ${LIVE_AGENT_TOOL_NAME}(command) when tool execution is required.`,

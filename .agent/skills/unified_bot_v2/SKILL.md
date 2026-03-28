@@ -1,6 +1,6 @@
 ---
 name: "Unified Bot Architecture (v2)"
-description: "Complete architecture reference for PersonalAIBotV2 — Agentic AI Platform with multi-agent orchestration, 4-layer MemGPT memory, self-evolution engine, 40+ tools, and production hardening. Read this before any project work."
+description: "Complete architecture reference for PersonalAIBot — Agentic AI Platform with multi-agent orchestration, 4-layer MemGPT memory, self-evolution engine, 40+ tools, and production hardening. Read this before any project work."
 ---
 
 ### [Update 2026-03-28] Cold Boot Safety & UI Precision (Phase 5) 🛠️❄️
@@ -38,12 +38,12 @@ description: "Complete architecture reference for PersonalAIBotV2 — Agentic AI
 - **AST Protection**: ปรับปรุงให้ระบบ Self-Upgrade ปกป้องเครื่องมือกลุ่ม AST (ast_rename, find_references) เสมอ เพื่อรักษาความสามารถในการแก้ไขโค้ดที่ซับซ้อน
 - **New API Providers**: รองรับโมเดลจาก Z.AI (glm-5) และ OpenCode.ai (kimi-k2.5) ใน `provider-registry.json`
 
-# PersonalAIBotV2 — Complete Architecture Reference
+# PersonalAIBot — Complete Architecture Reference
 
 > **Last audited**: 2026-03-29  
 > **Stack**: TypeScript, Express, Socket.IO, React+Vite, SQLite, Unified AI Providers (Agnostic)
 
-This is the authoritative reference for `PersonalAIBotV2`. Read this document fully before making any changes to the project. It covers all subsystems, file locations, data flows, and operational details.
+This is the authoritative reference for `PersonalAIBot`. Read this document fully before making any changes to the project. It covers all subsystems, file locations, data flows, and operational details.
 
 ---
 
@@ -645,7 +645,7 @@ Additional tables created at runtime:
 ## 13. Project File Structure
 
 ```
-PersonalAIBotV2/
+PersonalAIBot/
 ├── server/
 │   ├── src/
 │   │   ├── index.ts                      # Server entry point

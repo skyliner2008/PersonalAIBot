@@ -9,7 +9,7 @@ import type { Request, Response } from 'express';
 // Refactored by Jarvis
 
 const API_VERSION = '2.0.0';
-const API_TITLE = 'PersonalAIBotV2 API';
+const API_TITLE = 'PersonalAIBot API';
 
 export function getOpenAPISpec(): object {
   return {
@@ -18,7 +18,7 @@ export function getOpenAPISpec(): object {
       title: API_TITLE,
       version: API_VERSION,
       description: 'Multi-platform Agentic AI system with memory, swarm coordination, and multi-provider AI support.',
-      contact: { name: 'PersonalAIBotV2', url: 'https://github.com/PersonalAIBotV2' },
+      contact: { name: 'PersonalAIBot', url: 'https://github.com/PersonalAIBot' },
     },
     servers: [
       { url: 'https://localhost:3000', description: 'Development server' },

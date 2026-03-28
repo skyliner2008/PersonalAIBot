@@ -182,7 +182,7 @@ export function printConfigReport(result: ValidationResult): void {
   };
 
   console.log(`\n${border}`);
-  console.log(row('PersonalAIBotV2 - Configuration Report'));
+  console.log(row('PersonalAIBot - Configuration Report'));
   console.log(border);
 
   for (const info of result.info) {

@@ -227,7 +227,7 @@ export function getCliEnvironmentOverrides(backendId?: `${string}-cli`): Record<
  */
 function getPersonaHint(backendId: string): string {
   const name = backendId.replace('-cli', '').toUpperCase();
-  return `[IDENTITY: ${name} CLI Agent | SYSTEM: PersonalAIBotV2]\nYou are the ${name} autonomous specialist for this ecosystem. Assist with the user's request using your full capabilities and tools. If asked about your identity, confirm your role as the ${name} specialist here.\n\n`;
+  return `[IDENTITY: ${name} CLI Agent | SYSTEM: PersonalAIBot]\nYou are the ${name} autonomous specialist for this ecosystem. Assist with the user's request using your full capabilities and tools. If asked about your identity, confirm your role as the ${name} specialist here.\n\n`;
 }
 
 /**
