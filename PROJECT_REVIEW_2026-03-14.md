@@ -1,4 +1,4 @@
-# PersonalAIBotV2 — Project Review & Improvement Plan
+# PersonalAIBot — Project Review & Improvement Plan
 
 **Date**: 2026-03-14
 **Reviewer**: Claude Opus 4.6
@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-PersonalAIBotV2 เป็น Agentic AI Platform ที่มีความซับซ้อนสูง ประกอบด้วย multi-agent orchestration, 4-layer MemGPT memory, self-evolution engine, 40+ tools และ production hardening ที่ครบถ้วน
+PersonalAIBot เป็น Agentic AI Platform ที่มีความซับซ้อนสูง ประกอบด้วย multi-agent orchestration, 4-layer MemGPT memory, self-evolution engine, 40+ tools และ production hardening ที่ครบถ้วน
 
 **จุดแข็ง**: สถาปัตยกรรมออกแบบมาดี, ระบบ memory 4 ชั้นที่ซับซ้อน, failover chain ที่แข็งแกร่ง, runtime-tunable controls ที่ยืดหยุ่น
 
