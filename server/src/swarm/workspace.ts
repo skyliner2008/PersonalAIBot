@@ -192,6 +192,7 @@ If it needs more work, explain why and reply with: NEXT_STATE: executing.
       botName: `Workspace ${role.toUpperCase()}`,
       platform: 'custom',
       replyWithFile: async () => 'File transfer unsupported in background workspace',
+      replyWithText: async () => '',
     };
 
     // Determine taskType based on role for routing

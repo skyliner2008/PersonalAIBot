@@ -31,14 +31,21 @@ const router = Router();
 
 // Helper to clear cold boot flag when user manually interacts
 function clearColdBootFlag() {
-  const projectRoot = path.resolve(process.cwd());
+  // COLD_BOOT.flag is created at project root (parent of server/)
+  // process.cwd() = server/, so we need '../COLD_BOOT.flag'
+  const projectRoot = path.resolve(process.cwd(), '..');
   const flagPath = path.join(projectRoot, 'COLD_BOOT.flag');
-  if (fs.existsSync(flagPath)) {
-    try {
-      fs.unlinkSync(flagPath);
-      log.info('COLD_BOOT.flag cleared after manual user interaction');
-    } catch (err) {
-      log.error('Failed to clear COLD_BOOT.flag', { error: err });
+  // Also check inside cwd in case start_unified.bat created it there
+  const altFlagPath = path.join(process.cwd(), 'COLD_BOOT.flag');
+
+  for (const fp of [flagPath, altFlagPath]) {
+    if (fs.existsSync(fp)) {
+      try {
+        fs.unlinkSync(fp);
+        log.info(`COLD_BOOT.flag cleared: ${fp}`);
+      } catch (err) {
+        log.error(`Failed to clear COLD_BOOT.flag at ${fp}`, { error: err });
+      }
     }
   }
 }
@@ -234,7 +241,7 @@ router.get('/proposals/:id/log', asyncHandler(async (req, res) => {
 
 // POST /api/upgrade/scan — เปิด/ปิด โหมดสแกนต่อเนื่อง (Continuous Scan Toggle)
 router.post('/scan', asyncHandler(async (_req, res) => {
-  const rootDir = path.resolve(process.cwd(), 'src');
+  const rootDir = process.cwd();
   try {
     const isActive = await toggleContinuousScan(rootDir);
     if (isActive) clearColdBootFlag();
@@ -267,11 +274,12 @@ router.post('/stop-batch', asyncHandler(async (_req, res) => {
 }));
 
 router.post('/implement-all', asyncHandler(async (_req, res) => {
-  const rootDir = path.resolve(process.cwd(), 'src');
+  const rootDir = process.cwd();
   
   clearColdBootFlag();
-  // Set flag in database so it resumes on restart
-  setSetting('evolution_enabled', '1'); // Ensure enabled if batch start requested
+  // Set flags in database — unpause everything so batch can run and system continues after
+  setSetting('evolution_enabled', '1');
+  setSetting('upgrade_paused', 'false');
   setSetting('upgrade_implement_all', 'true');
   
   res.json({ ok: true, message: `Batch implementation started. The system will process approved proposals sequentially and survive server restarts.` });
@@ -297,7 +305,7 @@ router.post('/implement/:id', asyncHandler(async (req, res) => {
     res.status(400).json({ ok: false, error: 'Missing id' });
     return;
   }
-  const rootDir = path.resolve(process.cwd(), 'src');
+  const rootDir = process.cwd();
   
   clearColdBootFlag();
   updateProposalStatus(id, 'implementing');

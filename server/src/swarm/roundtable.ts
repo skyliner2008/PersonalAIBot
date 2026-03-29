@@ -474,6 +474,7 @@ async function jarvisSynthesize(
         botName: rootAdmin.botName,
         platform: 'custom',
         replyWithFile: async () => '',
+        replyWithText: async () => '',
       }),
       new Promise<string>((_, reject) =>
         setTimeout(() => reject(new Error('Synthesis timeout')), 60_000),

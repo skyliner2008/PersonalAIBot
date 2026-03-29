@@ -30,6 +30,7 @@ import { runHealthCheck } from '../evolution/selfHealing.js';
 import { buildLearningsContext } from '../evolution/learningJournal.js';
 import { createLogger } from '../utils/logger.js';
 import { notifyUserActivity } from '../evolution/selfUpgrade.js';
+import { getFeedbackLoop } from '../evolution/feedbackLoop.js';
 
 const log = createLogger('Agent');
 
@@ -86,6 +87,7 @@ function recordToolResult(toolName: string, success: boolean): void {
 const processingQueues: Map<string, Promise<string>> = new Map();
 const queueCounts: Map<string, number> = new Map();
 const MAX_QUEUE_DEPTH = 5;
+const TASK_TIMEOUT_MS = 60_000; // 60s max per individual agent task to prevent deadlock
 
 function enqueueForUser(chatId: string, task: () => Promise<string>): Promise<string> {
   const currentCount = queueCounts.get(chatId) ?? 0;
@@ -102,7 +104,7 @@ function enqueueForUser(chatId: string, task: () => Promise<string>): Promise<st
     try {
       const result = await Promise.race([
         task(),
-        new Promise<string>((_, reject) => setTimeout(() => reject(new Error('Task Queue Timeout')), AGENT_TIMEOUT_MS + 10000))
+        new Promise<string>((_, reject) => setTimeout(() => reject(new Error('Task Queue Timeout')), TASK_TIMEOUT_MS))
       ]);
       return result;
     } catch (err: any) {
@@ -162,6 +164,18 @@ function finishRun(run: AgentRun, stats: IAgentStats, reply?: string, error?: st
   run.reply = reply?.substring(0, 300);
   run.error = error;
   run.transcript = transcript;
+
+  // Record performance feedback for agent optimization
+  try {
+    const outcome = error ? 'failure' : (reply ? 'success' : 'partial');
+    getFeedbackLoop().recordOutcome(
+      run.chatId,
+      run.taskType || 'general',
+      outcome,
+      run.durationMs || 0,
+      run.totalTokens || 0
+    );
+  } catch { /* non-critical — don't break agent flow */ }
 }
 
 export function getRunHistory(): AgentRun[] {
@@ -189,19 +203,34 @@ export class Agent {
     });
   }
 
-  public processMessage(chatId: string, message: string, ctx: BotContext, attachments?: AIMessagePart[]): Promise<string> {
-    notifyUserActivity(); // Mark system as active for ANY AI intelligence operation (Chat, Cron, API)
-    return enqueueForUser(chatId, () => this._processMessageCore(chatId, message, ctx, attachments));
+  public async processMessage(
+    chatId: string,
+    message: string,
+    ctx?: BotContext,
+    attachments?: AIMessagePart[],
+    taskTypeOverride?: TaskType
+  ): Promise<string> {
+    return enqueueForUser(chatId, async () => {
+      return this._processMessageCore(chatId, message, ctx, attachments, taskTypeOverride);
+    });
   }
 
-  private async _processMessageCore(chatId: string, message: string, ctx: BotContext, attachments?: AIMessagePart[]): Promise<string> {
+  private async _processMessageCore(
+    chatId: string,
+    message: string,
+    ctx?: BotContext,
+    attachments?: AIMessagePart[],
+    taskTypeOverride?: TaskType
+  ): Promise<string> {
     const abortController = new AbortController();
     const timeoutId = setTimeout(() => abortController.abort(), AGENT_TIMEOUT_MS);
     const stats = newStats();
     let cleanMessage = message.includes('User request:\n') ? message.split('User request:\n').pop()!.trim() : message;
-    
-    const classification = classifyTask(cleanMessage, !!attachments);
-    const taskType = classification.confidence === 'low' ? TaskType.GENERAL : classification.type;
+    // Task Classification (with Override support)
+    const classification = taskTypeOverride 
+      ? { type: taskTypeOverride, confidence: 'high' as const, topScore: 10, secondScore: 0 }
+      : classifyTask(cleanMessage, !!attachments);
+    const taskType = classification.type;
     const agentRun = startRun(chatId, message, taskType);
 
     try {
@@ -247,6 +276,14 @@ export class Agent {
       // Persona & Identity
       const personaConfig = personaManager.loadPersona(ctx?.platform ?? 'telegram', ctx?.botId);
       let enabledToolNames = personaConfig.enabledTools || [];
+      
+      // Specialist Protocol Injection (Ensures AI stays in "Agent" mode)
+      const isSpecialist = ctx?.botId?.startsWith('specialist_');
+      let specialistPrompt = '';
+      if (isSpecialist) {
+        specialistPrompt = `\n\n[🚨 SPECIALIST PROTOCOL ACTIVE]\n- You are a specialized AGENT working for Jarvis.\n- Goal: Execute the delegated task with SURGICAL PRECISION.\n- Rule: ALWAYS use the available tools to achieve the goal. NEVER simulate or describe tool use in markdown.\n- Rule: If you need to edit files, use 'replace_code_block' or 'write_file_content'.\n- Rule: Do not say "I've updated the file" unless you have actually called the tool and received a success result.`;
+      }
+      
       const botInstance = ctx?.botId ? getBot(ctx.botId) : null;
       if (botInstance?.enabled_tools) {
         enabledToolNames = Array.from(new Set([...enabledToolNames, ...botInstance.enabled_tools]));
@@ -254,7 +291,7 @@ export class Agent {
 
       // Tool Handlers
       const sysCtx: SystemToolContext = {
-        ctx: ctx || { botId: 'default', botName: 'AI', platform: 'telegram', replyWithFile: async () => '' },
+        ctx: ctx || { botId: 'default', botName: 'AI', platform: 'telegram', replyWithFile: async () => '', replyWithText: async () => '' },
         listModels: (p) => this.getAvailableModels(p),
         getProviderNames: () => {
           return Object.keys(getRegistry().providers);
@@ -386,7 +423,7 @@ Strict Rules:
               ? '\n- IMPORTANT: Respond in ENGLISH only.' 
               : '\n- IMPORTANT: ตอบเป็นภาษาไทยเท่านั้น (Respond in THAI only).';
 
-            const systemInstruction = `${personaConfig.systemInstruction}\n- Model: ${modelName} (${providerName})\n- Task: ${taskType}\n${memoryCtx.coreMemoryText}${langInstruction}`;
+            const systemInstruction = `${personaConfig.systemInstruction}${specialistPrompt}\n- Model: ${modelName} (${providerName})\n- Task: ${taskType}\n${memoryCtx.coreMemoryText}${langInstruction}`;
 
             // Use correctly defined generateResponse from AIProvider
             const response = await provider.generateResponse(
@@ -441,6 +478,52 @@ Strict Rules:
               }
               currentContents.push({ role: 'user', parts: responseParts });
               continue;
+            }
+
+            // ── TEXT-BASED TOOL CALL FALLBACK ──
+            // Some models (especially thinking models) write tool calls as text
+            // e.g. [replace_code_block]{"file_path":"..."}[/replace_code_block]
+            // Parse these and execute them as real tool calls
+            if (response.text && !response.toolCalls) {
+              const textToolRegex = /\[(replace_code_block|multi_replace_file_content|read_file_content|find_references|ast_replace_function|ast_add_import|ast_rename|write_file_content|run_command)\]\s*```?(?:json)?\s*([\s\S]*?)```?\s*\[\/\1\]/g;
+              const textToolCalls: ToolCall[] = [];
+              let tm;
+              while ((tm = textToolRegex.exec(response.text)) !== null) {
+                try {
+                  const args = JSON.parse(tm[2].trim());
+                  textToolCalls.push({ name: tm[1], args });
+                } catch { /* skip malformed JSON */ }
+              }
+
+              if (textToolCalls.length > 0) {
+                console.log(`[Agent] Recovered ${textToolCalls.length} text-based tool call(s) from model response`);
+                // Push assistant message with text content
+                currentContents.push({ role: 'assistant', parts: [{ text: response.text }] });
+                // Execute the parsed tool calls
+                const responseParts: AIMessagePart[] = [];
+                for (const call of textToolCalls) {
+                  const toolStart = Date.now();
+                  if (isCircuitOpen(call.name)) {
+                    responseParts.push({ functionResponse: { name: call.name, response: { output: 'Circuit open' } } } as any);
+                    continue;
+                  }
+                  try {
+                    const handler = activeHandlers[call.name];
+                    let result = handler ? await handler(call.args) : 'Tool not enabled';
+                    result = typeof result === 'string' ? result : JSON.stringify(result);
+                    if (result.length > MAX_TOOL_OUTPUT) result = result.substring(0, MAX_TOOL_OUTPUT) + '...';
+                    responseParts.push({ functionResponse: { name: call.name, response: { output: result } } } as any);
+                    recordToolResult(call.name, true);
+                    stats.toolCalls.push({ name: call.name, durationMs: Date.now() - toolStart, success: true });
+                  } catch (e: any) {
+                    responseParts.push({ functionResponse: { name: call.name, response: { output: `Error: ${e.message}` } } } as any);
+                    recordToolResult(call.name, false);
+                    stats.toolCalls.push({ name: call.name, durationMs: Date.now() - toolStart, success: false });
+                  }
+                }
+                currentContents.push({ role: 'user', parts: responseParts });
+                continue; // Continue turn loop — model may want to call more tools
+              }
             }
 
             if (response.text) {

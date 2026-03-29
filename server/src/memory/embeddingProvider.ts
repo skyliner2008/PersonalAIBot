@@ -6,6 +6,7 @@
 import crypto from 'crypto';
 import { GoogleGenAI } from '@google/genai';
 import { createLogger } from '../utils/logger.js';
+import OpenAI from 'openai';
 
 const log = createLogger('EmbeddingProvider');
 
@@ -165,35 +166,25 @@ export class GeminiEmbeddingProvider extends BaseEmbeddingProvider {
 // ============================================================
 
 export class OpenAIEmbeddingProvider extends BaseEmbeddingProvider {
-  private apiKey: string;
+  private openaiClient: OpenAI;
   private model: string;
   private baseUrl: string;
 
   constructor(apiKey: string, model: string = 'text-embedding-3-small', baseUrl: string = 'https://api.openai.com/v1') {
     super();
-    this.apiKey = apiKey;
+    this.openaiClient = new OpenAI({ apiKey, baseURL: baseUrl });
     this.model = model;
     this.baseUrl = baseUrl;
     log.info(`OpenAI Embedding Provider initialized with model: ${model} at ${baseUrl}`);
   }
 
   protected async processBatchInternal(texts: string[]): Promise<number[][]> {
-    const response = await fetch(`${this.baseUrl}/embeddings`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.apiKey}`,
-      },
-      body: JSON.stringify({ input: texts, model: this.model }),
+    const response = await this.openaiClient.embeddings.create({
+      model: this.model,
+      input: texts,
     });
 
-    if (!response.ok) {
-      const err = await response.text();
-      throw new Error(`OpenAI Embedding Error (${response.status}): ${err}`);
-    }
-
-    const data = await response.json() as { data: { embedding: number[] }[] };
-    return data.data.map(d => d.embedding);
+    return response.data.map((d: any) => d.embedding);
   }
 
   getStats(): EmbeddingProviderStats {
@@ -218,15 +209,18 @@ export class OpenAIEmbeddingProvider extends BaseEmbeddingProvider {
 let defaultProvider: IEmbeddingProvider | null = null;
 
 export function initEmbeddingProvider(apiKey: string | undefined, type: 'gemini' | 'openai' = 'gemini', model?: string, baseUrl?: string): void {
-  if (!apiKey) {
-    log.warn('No API key provided for EmbeddingProvider initialization');
+  // Use provided apiKey OR fall back to env variables
+  const effectiveKey = apiKey || (type === 'gemini' ? process.env.GEMINI_API_KEY : process.env.OPENAI_API_KEY);
+
+  if (!effectiveKey) {
+    log.warn(`No API key provided or found in ENV for ${type} EmbeddingProvider initialization`);
     return;
   }
 
   if (type === 'gemini') {
-    defaultProvider = new GeminiEmbeddingProvider(apiKey, model);
+    defaultProvider = new GeminiEmbeddingProvider(effectiveKey, model);
   } else {
-    defaultProvider = new OpenAIEmbeddingProvider(apiKey, model || 'text-embedding-3-small', baseUrl);
+    defaultProvider = new OpenAIEmbeddingProvider(effectiveKey, model || 'text-embedding-3-small', baseUrl);
   }
 }
 

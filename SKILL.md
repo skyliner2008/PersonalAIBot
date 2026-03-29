@@ -3,34 +3,16 @@ name: "Unified Bot Architecture (v2)"
 description: "Complete architecture reference for PersonalAIBot — Agentic AI Platform with multi-agent orchestration, 4-layer MemGPT memory, self-evolution engine, 40+ tools, and production hardening. Read this before any project work."
 ---
 
-### [Update 2026-03-29] Brain Visualizer & Codebase Overhaul 🧠🧹
-- **Brain Visualizer Integration**: ติดตั้งระบบแสดงผล 3D Topology (`BrainVisualizer.tsx`, `brainRoutes.ts`) ที่แสดงโครงสร้าง First Brain และ Second Brain พร้อมสถานะ Token Pulses แบบ Real-time
-- **Codebase Cleanup**: ทำการล้างไฟล์สคริปต์ทดสอบเก่า (`.mjs`, `.cjs`) และไฟล์เครื่องมือเบื้องหลังที่ไม่ได้ใช้งานออกกว่า 40 ไฟล์ เพื่อความสะอาดและประสิทธิภาพของระบบ
-- **Schema Expansion**: อัพเดทตาราง `codebase_calls` และ `upgrade_scan_log` เพื่อรองรับการสแกนและวิเคราะห์โค้ดที่ละเอียดขึ้น
-- **Git Sync Ready**: เตรียมความพร้อมสำหรับ Major Version Push v2.6 ไปยัง GitHub
+### [Update 2026-03-28] Cold Boot Safety & UI Precision (Phase 5) 🛠️❄️
+- **Persistent Cold Boot**: ปรับปรุงระบบโปรเทคชั่น `COLD_BOOT.flag` ให้มีความปลอดภัยสูงสุด โดย flag จะไม่ถูกลบอัตโนมัติเมื่อเริ่มเครื่อง แต่จะมีการจดจำสถานะและบังคับปิดระบบ Self-Upgrade ทั้งหมดทันทีจนกว่าผู้ใช้จะสั่ง "เปิด" ทำงานด้วยตัวเองเท่านั้น
+- **Stop Scan UI Fix**: แก้ไข UI บัคที่ปุ่ม "หยุด scan" เมื่อกดแล้วยังค้างสถานะ "กำลังทำงาน..." โดยเพิ่มการ Reset `isUpgrading` status ทันที
+- **Gemini 2.5 Migration**: อัปเดต `ai_routing_config.json` ให้ใช้ `gemini-2.5-flash` เป็นหลักเพื่อแก้ปัญหา error 404 สำหรับผู้ใช้ใหม่
 
-### [Update 2026-03-29] Self-Upgrade Robustness Patch (Windows & API Integrity) 🚀🛡️
-- **Line Ending Normalization**: ปรับปรุง `file.ts` (`replace_code_block`) ให้ทำ Normalization ระหว่าง `\r\n` (Windows) และ `\n` (Unix) อัตโนมัติ แก้ปัญหาการ match โค้ดเดิมไม่เจอ
-- **Enhanced Error Reporting**: ปรับปรุง `os.ts` (`run_command`) ให้ส่งคืน `stderr` เมื่อคำสั่งรันพลาด เพื่อให้ AI Specialist เห็นรายละเอียด Error (เช่น tsc errors) และสามารถแก้ปัญหาได้เอง
-- **Robust JSON Repair**: เพิ่มฟังก์ชัน `extractAndRepairJSON` ใน `selfUpgrade.ts` เพื่อซ่อมแซม JSON ที่ไม่สมบูรณ์ (เช่น ลืมปิดปีกกา) ซึ่งมักเกิดขึ้นเมื่อ AI วิเคราะห์ไฟล์ขนาดใหญ่อย่าง `system.ts`
-- **Systemic Integrity**: ยืนยันระบบ Shadow Write และ Auto-Rollback ทำงานร่วมกับ BootGuardian อย่างสมบูรณ์ ป้องกัน Codebase พังถาวร
-
-### [Update 2026-03-29] Path Normalization & DB Locking (Stability Patch) 🚀🛡️
-- **Project Root Standardization**: ปรับปรุง `rootDir` ทั่วทั้งระบบ (index.ts, upgradeRoutes.ts) ให้ใช้ Project Root (`server/`) เป็นหลัก แทนการใช้ `src/` เพื่อป้องกันปัญหา Path ซ้ำซ้อน (`src/src`) และการสร้าง Sandbox ผิดตำแหน่ง
-- **Path Migration & Resilience**: เพิ่มระบบ Auto-Migration ใน `db.ts` เพื่อเติม `src/` ให้ทุก File Path ในฐานข้อมูล และปรับปรุง `selfUpgrade.ts` ให้หาไฟล์ได้ทั้งสองรูปแบบ (Resilient Resolution)
-- **Optimistic Locking (agent_plans)**: เพิ่ม Column `version` ให้กับตาราง `agent_plans` และนำ Logic การดักจับ Race Condition มาใช้งาน เพื่อป้องกันการเขียนทับข้อมูลแผนงานที่อาจเกิดขึ้นจากการทำงานพร้อมกัน
-- **AI Specialist Specialist Protocol**: บังคับใช้คำสั่ง `DONE`/`SKIP` ใน Prompt ของ AI Specialist เพื่อลด Error "NO files modified" และเพิ่มความโปร่งใสในการดำเนินงานของ Agent
-
-### [Update 2026-03-29] Safe-Upgrade 2.0 (Sandbox & Audit) 🕵️🛡️
-- **Virtual Sandbox Isolation**: ปฏิรูปกระบวนการอัปเกรดโค้ดอัตโนมัติโดยใช้ระบบ Sandbox (`data/upgrade_sandbox`) เพื่อแยกส่วนการรัน TSC และ Runtime Boot Test ออกจาก `src` หลัก 100% ป้องกันปัญหา "Stealth Rollback" จากการโดน Watcher รีสตาร์ทขัดจังหวะ
-- **Audit & Integrity Tool**: สร้างเครื่องมือ `auditUpgrade.ts` สำหรับตรวจสอบความสอดคล้องระหว่างไฟล์บน Disk กับประวัติใน DB เพื่อตรวจหาไฟล์ที่หลุดหายหรือมีโค้ดเก่าค้างอยู่ (พบและเตรียมแก้ปัญหา Stealth Rollback ถึง 13 รายการ)
-- **Security-First Provider**: ปรับปรุง `OpenAIEmbeddingProvider` ให้จัดการ API Key ใน Layer หน่วยความจำแทนการเก็บลง Member Variable เพื่อความปลอดภัยสูงสุด
-
-### [Update 2026-03-29] RefactorManager & Evolution Stability Patch 🛠️🧬
-- **RefactorManager Syntax Fix**: แก้ไขปัญหา `TransformError` (Expected identifier but found end of file) ใน `refactorManager.ts` ที่เกิดจากโค้ดขาดตอน
-- **Singleton Export**: เพิ่มการส่งออกอินสแตนซ์ `refactorManager` (Singleton) เพื่อให้ `selfUpgrade.ts` สามารถใช้งานได้ตามปกติ ปัญหา Import Error ในระบบ Evolution จึงถูกแก้ไข
-
-
+### [Update 2026-03-31] Project Audit & Master Documentation Overhaul 📖🤖
+- **Full Project Audit**: ดำเนินการตรวจสอบ Codebase ครั้งใหญ่ (Deep Audit) ครอบคลุมระบบ Evolution, Swarm, Memory และ Voice Interaction เพื่อให้มั่นใจว่าเอกสารและโค้ดมีความสอดคล้องกัน 100%
+- **Master README Overhaul**: ปรับปรุง `README.md` เป็นฉบับสมบูรณ์ (Master) ที่สะท้อนถึงขีดความสามารถที่แท้จริงของระบบ รวมถึงสถาปัตยกรรม "Second Brain" และ "Jarvis Live Call"
+- **Architectural Sync**: บันทึกรายละเอียดของ 11-Phase Implementation Pipeline และระบบ Graph-Enhanced Architecture Intelligence ลงใน Skill และ README เพื่อเป็นมาตรฐานการพัฒนา
+- **Git Sync**: ตรวจสอบและเตรียมความพร้อมของโค้ดทั้งหมดเพื่อทำการ Synchronize ขึ้น GitHub Repository (`skyliner2008/PersonalAIBot`)
 
 ### [Update 2026-03-30] Core Tools & Cold Boot Protection 🛠️❄️
 - **Core Agent Tools**: เพิ่มและลงทะเบียนเครื่องมือหลัก 6 ตัว (`search_knowledge`, `read_file`, `view_file`, `multi_replace_file_content`, `system_terminal`, `notify_user`) เพื่อเพิ่มศักยภาพในการทำงานอัตโนมัติ
@@ -368,9 +350,8 @@ The autonomous code modification engine. Scans the codebase for bugs/improvement
 | 7 | **Second Brain (Graph-Enhanced)** | Assembles multi-layer context from Dependency Graph + Architecture Map + Semantic Search (see below) |
 | 8 | **Planning** | LLM generates step-by-step implementation plan with risk assessment; can reject proposal before any code is written |
 | 9 | **Implement** | Delegates to specialist agents (coder → reviewer → codex-cli → claude-cli fallback chain) with full context injected |
-| 10 | **Sandbox Validation** | (Safe-Upgrade 2.0) คัดลอกโค้ดลง `data/upgrade_sandbox` และรัน TSC + esbuild check ในพื้นที่แยกส่วน |
-| 11 | **Runtime Boot Test** | เติมเต็มความมั่นใจโดยการรันเซิร์ฟเวอร์ทดสอบใน Sandbox บนพอร์ตอิสระ และเช็ค `/health` ภายใน 4 วินาที |
-| 12 | **Atomic Commit** | เขียนโค้ดชุดใหม่ลงดิสก์จริงในคราวเดียวหลังจากผ่านการทดสอบใน Sandbox 100% เท่านั้น |
+| 10 | **Gatekeeper Checks** | TSC baseline comparison + esbuild syntax validation (stdin-piped) — only rejects on NEW errors |
+| 11 | **Runtime Boot Test** | Spawns a child process on a test port, waits for `/health` endpoint to respond OK within 4 seconds |
 
 #### Second Brain — Graph-Enhanced Architecture Intelligence
 
@@ -409,9 +390,9 @@ The Second Brain (`codebase_map` + `codebase_edges` + `codebase_embeddings`) giv
 
 #### Implementation Protections & Resilience
 
-- **Self-Upgrade Engine (v2.6)**: 11-phase implementation pipeline with **Specialist Protocol** & **TaskType Override**.
-- **Swarm Resilience**: 10-minute timeout for multi-file code execution and deadlock-free user queues.
-- **Boot Guardian Integration**: Automatic rollback with WAL-aware status persistence.
+- **Resilient Status Updates**: `updateProposalStatus` wrapped in try/catch with retry — DB errors no longer leave proposals stuck in `implementing`
+- **PID-Aware Locking**: Lock files include the process ID (PID). Stale locks from crashed processes are automatically ignored during startup
+- **Stuck Recovery**: On server boot, any proposals stuck in `implementing` are automatically recovered or rejected after 3+ retries
 - **Immortal Core Sandbox**: Critical system files are hard-protected from modification but their architecture IS mapped into Second Brain for context
 - **esbuild Syntax Check (stdin-piped)**: Uses temp script file + stdin pipe instead of command line to avoid OS ENAMETOOLONG errors on large files
 
@@ -423,13 +404,12 @@ Safety net that auto-rollbacks failed self-upgrades on server crash:
 
 1. selfUpgrade writes `latest_upgrade.json` breadcrumb before each implementation
 2. selfUpgrade acquires `upgrade_in_progress.lock` to signal active upgrade
-3. **Shadow Edit Interception**: Code edits are buffered in `global.selfUpgradeShadowMap` and verified via `in-memory esbuild` before writing to disk, preventing `tsx watch` restart loops during generation.
-4. **Boot.ts Isolation**: The main application entry point is now `boot.ts` which loads `BootGuardian` *before* the main ESM dependency graph (`index.ts`). This ensures the `uncaughtException` listener catches transpilation `SyntaxError`s before the Node process dies.
-5. If server crashes within 15 seconds of boot:
+3. If server crashes within 15 seconds of boot:
    - BootGuardian reads breadcrumb → restores all backed-up files (multi-file rollback)
    - Updates DB status to `rejected` + WAL checkpoint (ensures persistence across rapid restarts)
    - Deletes breadcrumb to prevent rollback loop
-6. If server survives 15+ seconds → clears breadcrumb (upgrade confirmed safe)
+4. If upgrade lock is active during restart + not a syntax error → skip rollback (tsx watch restart)
+5. If server survives 15+ seconds → clears breadcrumb (upgrade confirmed safe)
 
 #### Scan Filtering
 

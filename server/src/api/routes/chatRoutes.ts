@@ -21,6 +21,7 @@ import { asyncHandler } from '../../utils/errorHandler.js';
 import { validateBody } from '../../utils/validation.js';
 import { SSEWriter, streamGeminiResponse } from '../../utils/streamManager.js';
 import { createLogger } from '../../utils/logger.js';
+import { broadcast } from '../../utils/socketBroadcast.js';
 
 const logger = createLogger('chat-routes');
 
@@ -67,6 +68,7 @@ chatRoutes.post('/chat/reply', validateBody(chatReplySchema), asyncHandler(async
   if (qaMatch) {
     const reply = qaMatch.answer;
     addMessage(convId, 'assistant', reply);
+    broadcast('chatbot:sentReply', { conversationId: convId, reply, timestamp: new Date().toISOString() });
     addLog('chat', 'Q&A match', `"${message.substring(0, 40)}" -> "${reply.substring(0, 40)}"`, 'success');
     return res.json({ reply, source: 'qa' });
   }
@@ -169,6 +171,7 @@ chatRoutes.post('/chat/reply', validateBody(chatReplySchema), asyncHandler(async
 
   addMessage(convId, 'assistant', reply);
   umAddMessage(chatMemId, 'assistant', reply);
+  broadcast('chatbot:sentReply', { conversationId: convId, reply, timestamp: new Date().toISOString() });
 
   addLog(
     'chat',
@@ -289,6 +292,7 @@ chatRoutes.post('/chat/stream', validateBody(chatReplySchema), asyncHandler(asyn
 
     addMessage(convId, 'assistant', reply);
     umAddMessage(fbChatId, 'assistant', reply);
+    broadcast('chatbot:sentReply', { conversationId: convId, reply, timestamp: new Date().toISOString() });
 
     writer.sendDone(reply, result?.usage);
   } catch (err: any) {

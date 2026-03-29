@@ -169,7 +169,8 @@ export async function runCommand(
     return `✅ Output:\n${stdout || '(ไม่มี output)'}`;
   } catch (error: any) {
     console.error(`❌ Command Error:`, error);
-    return `❌ Error: ${error.message}`;
+    const stderrPart = error.stderr ? `\n\n[Stderr Output]:\n${error.stderr}` : '';
+    return `❌ Error: ${error.message}${stderrPart}`;
   }
 }
 

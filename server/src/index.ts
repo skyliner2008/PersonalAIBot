@@ -1,5 +1,5 @@
 // Web CLI Restart Trigger
-import './bootGuardian.js';
+
 import express from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
@@ -443,6 +443,9 @@ async function main() {
   await initSelfReflection();
 
   // --- Cold Boot Protection (Self-Upgrade Safety) ---
+  // COLD_BOOT.flag is created by start_unified.bat/start.bat at project root
+  // It means "this is the FIRST boot after user launched the app" — disable self-upgrade for safety.
+  // The flag is DELETED after being read so tsx watch restarts don't re-trigger cold boot protection.
   const projectRoot = path.resolve(__dirname, '../..');
   const coldBootFlag = path.join(projectRoot, 'COLD_BOOT.flag');
   if (fs.existsSync(coldBootFlag)) {
@@ -453,7 +456,15 @@ async function main() {
     setSetting('upgrade_implement_all', 'false');
     setSetting('upgrade_continuous_scan', 'false');
     addLog('system', 'Cold Boot Protection', 'Disabled Self-Upgrade system due to COLD_BOOT.flag', 'info');
-    
+
+    // DELETE the flag immediately so tsx watch restarts don't re-trigger cold boot protection
+    try {
+      fs.unlinkSync(coldBootFlag);
+      startupInfo('[ColdBoot] COLD_BOOT.flag deleted — subsequent restarts will honor user settings.');
+    } catch (delErr: any) {
+      startupInfo(`[ColdBoot] Warning: Could not delete COLD_BOOT.flag: ${delErr.message}`);
+    }
+
     // Also clean up any stale upgrade lock
     const lockPath = path.resolve(projectRoot, 'data/upgrade_in_progress.lock');
     if (fs.existsSync(lockPath)) {
@@ -700,7 +711,7 @@ async function main() {
       // Start Proactive Idle Loop using a standalone System Agent instance
       startIdleLoop(systemAgent);
       // Start Self-Upgrade System (scans codebase when idle)
-      startSelfUpgrade(path.resolve(process.cwd(), 'src'));
+      startSelfUpgrade(process.cwd());
       startupInfo('[SelfEvolution] Autonomous evolution system initialized');
     } else {
       startupInfo('[SelfEvolution] Autonomous evolution system is DISABLED (default)');
@@ -714,7 +725,7 @@ async function main() {
           ensureUpgradeTable();
           startupInfo('[SelfUpgrade] Resuming pending batch implementation (evolution disabled but batch was active)...');
           setTimeout(() => {
-            resumeBatchImplementation(path.resolve(process.cwd(), 'src')).catch(e => {
+            resumeBatchImplementation(process.cwd()).catch(e => {
               console.error('[SelfUpgrade] Failed to resume batch:', e.message);
             });
           }, 3000);

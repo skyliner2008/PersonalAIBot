@@ -94,7 +94,8 @@ Do not include any other explanations.
   const botContext = {
     ...rootAdmin,
     platform: 'system' as any,
-    replyWithFile: async () => 'Not supported'
+    replyWithFile: async () => 'Not supported',
+    replyWithText: async () => '',
   };
 
   const taskId = await coordinator.delegateTask(
@@ -138,10 +139,10 @@ function validateTestQuality(testCode: string): { valid: boolean; reason?: strin
   const hasDescribe = /describe\s*\(/.test(testCode);
   const hasItBlock = /\bit\s*\(/.test(testCode) || /\btest\s*\(/.test(testCode);
 
-  if (assertionCount < 2) {
+  if (assertionCount < 3) {
     return {
       valid: false,
-      reason: `Test has only ${assertionCount} assertion(s), minimum 2 required. Tests without meaningful assertions are vacuous.`,
+      reason: `Test has only ${assertionCount} assertion(s), minimum 3 required. Tests without meaningful assertions are vacuous.`,
       assertionCount,
     };
   }

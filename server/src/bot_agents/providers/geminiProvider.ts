@@ -102,26 +102,38 @@ export class GeminiProvider implements AIProvider {
     
     return withRetry(async () => {
       const toolsConfig: any[] = [];
+      let toolConfig: any = undefined;
       if (tools && tools.length > 0) {
         toolsConfig.push({ functionDeclarations: tools.map(t => ({
           name: t.name,
           description: t.description,
           parameters: t.parameters
         })) });
+        // Tell Gemini to use AUTO function calling mode — model will decide when to call tools
+        // This ensures the model knows it SHOULD use tools rather than just describing the answer
+        toolConfig = { functionCallingConfig: { mode: 'AUTO' } };
       } else if (useGoogleSearch) {
         toolsConfig.push({ googleSearch: {} });
       }
 
+      // IMPORTANT: tools and toolConfig must be inside `config`, NOT at top-level
+      // See: https://ai.google.dev/gemini-api/docs/function-calling
+      // SDK example: ai.models.generateContent({ model, contents, config: { tools, toolConfig, ... } })
       const requestPayload: any = {
         model: modelName,
         contents,
         systemInstruction,
-        tools: toolsConfig.length > 0 ? toolsConfig : undefined,
         config: {
           temperature: 0.7,
-          maxOutputTokens: 16384,
+          maxOutputTokens: 65536,
+          tools: toolsConfig.length > 0 ? toolsConfig : undefined,
+          toolConfig,
         }
       };
+
+      if (tools && tools.length > 0) {
+        logger.debug(`[Gemini] Sending ${tools.length} function declarations to model ${modelName}`);
+      }
 
       let client = this.getClientForModel(modelName);
       let response: any;

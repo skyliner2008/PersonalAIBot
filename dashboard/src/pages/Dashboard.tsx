@@ -105,7 +105,7 @@ export function Dashboard({ status, emit, on }: Props) {
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-6 pb-24 space-y-6">
       <h2 className="text-2xl font-bold text-white">Dashboard</h2>
 
       {/* AI Agent Stats */}
@@ -273,7 +273,7 @@ function AgentRuntimeCard({ agent }: { agent: TopologyAgent }) {
 }
 
 function MiniStat({ icon: Icon, label, value, color, pulse }: {
-  icon: any; label: string; value: string | number; color: string; pulse?: boolean;
+   icon: any; label: string; value: string | number; color: string; pulse?: boolean;
 }) {
   return (
     <div className="bg-gray-900 rounded-xl border border-gray-800 px-4 py-3 flex items-center gap-3">

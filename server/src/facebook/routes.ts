@@ -81,11 +81,12 @@ function verifyFacebookSignature(req: any): boolean {
 
   try {
     // Parse signature: sha1=...
-    const [algorithm, providedHash] = xHubSignature.split('=');
-    if (algorithm !== 'sha1' || !providedHash) {
+    const sigMatch = xHubSignature.match(/^sha1=([a-f0-9]+)$/);
+    if (!sigMatch) {
       console.warn('[Webhook] Unexpected signature algorithm or format:', xHubSignature);
       return false;
     }
+    const providedHash = sigMatch[1];
 
     // Compute hash
     const computedHash = crypto

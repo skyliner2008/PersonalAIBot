@@ -21,6 +21,7 @@ export interface AgentPlan {
     status: 'active' | 'completed' | 'failed' | 'paused';
     createdAt: number;
     updatedAt: number;
+    version: number; // Added for optimistic locking
 }
 
 /**
@@ -46,8 +47,8 @@ export function createPlan(chatId: string, objective: string, steps: string[]): 
         const stepsJson = JSON.stringify(planSteps);
         
         db.prepare(`
-            INSERT INTO agent_plans (id, chat_id, objective, steps_json, status)
-            VALUES (?, ?, ?, ?, 'active')
+            INSERT INTO agent_plans (id, chat_id, objective, steps_json, status, version)
+            VALUES (?, ?, ?, ?, 'active', 1)
         `).run(planId, chatId, objective, stepsJson);
 
         plan = {
@@ -57,7 +58,8 @@ export function createPlan(chatId: string, objective: string, steps: string[]): 
             steps: planSteps,
             status: 'active',
             createdAt: Date.now(),
-            updatedAt: Date.now()
+            updatedAt: Date.now(),
+            version: 1
         };
 
         db.exec('COMMIT;');
@@ -93,7 +95,8 @@ export function getActivePlan(chatId: string): AgentPlan | null {
             steps: JSON.parse(row.steps_json),
             status: row.status,
             createdAt: new Date(row.created_at).getTime(),
-            updatedAt: new Date(row.updated_at).getTime()
+            updatedAt: new Date(row.updated_at).getTime(),
+            version: row.version || 1
         };
     } catch (e) {
         log.error(`Failed to parse active plan json`, { planId: row.id, error: e });
@@ -122,11 +125,17 @@ export function updatePlanStep(chatId: string, stepId: string, status: StepStatu
 
     const db = getDb();
     try {
-        db.prepare(`
+        // Use optimistic locking with WHERE version = ?
+        const info = db.prepare(`
             UPDATE agent_plans 
-            SET steps_json = ?, status = ?, updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-        `).run(JSON.stringify(plan.steps), newStatus, plan.id);
+            SET steps_json = ?, status = ?, version = version + 1, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND version = ?
+        `).run(JSON.stringify(plan.steps), newStatus, plan.id, plan.version);
+
+        if (info.changes === 0) {
+            log.warn(`Optimistic lock failure for plan ${plan.id} (version mismatch)`);
+            return false;
+        }
 
         log.info(`Plan step updated`, { planId: plan.id, stepId, status });
         return true;

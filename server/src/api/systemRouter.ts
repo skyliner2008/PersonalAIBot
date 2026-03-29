@@ -158,7 +158,7 @@ function buildGenericAgentSnapshot(definition: AgentDefinition) {
     };
 }
 
-function buildAgentSnapshots() {
+export function buildAgentSnapshots() {
     // Cache results of listBots, getActiveBotIds, and getPluginRuntimeSnapshots
     // to avoid multiple lookups during the mapping process.
     const cachedBots = listBots();

@@ -6,6 +6,22 @@ import { refactorManager } from '../../evolution/refactorManager.js';
 
 declare global {
   var onFileWrittenByTool: ((filePath: string) => void) | undefined;
+  var selfUpgradeShadowMap: Map<string, string> | undefined;
+}
+
+/**
+ * Sanitize content before writing to disk:
+ * - Strip null bytes (caused by AI model padding or interrupted writes)
+ * - Ensure file ends with a single newline
+ */
+function sanitizeFileContent(content: string): string {
+  // Remove all null bytes
+  let cleaned = content.replace(/\0/g, '');
+  // Ensure trailing newline for source files
+  if (cleaned.length > 0 && !cleaned.endsWith('\n')) {
+    cleaned += '\n';
+  }
+  return cleaned;
 }
 
 // ============================================================
@@ -178,7 +194,12 @@ export async function readFileContent({ file_path }: { file_path: string }): Pro
   if (!check.safe) return check.reason!;
   try {
     const resolvedPath = path.resolve(file_path);
-    const content = fs.readFileSync(resolvedPath, 'utf8');
+    let content = '';
+    if ((global as any).selfUpgradeShadowMap && (global as any).selfUpgradeShadowMap.has(resolvedPath)) {
+      content = (global as any).selfUpgradeShadowMap.get(resolvedPath);
+    } else {
+      content = fs.readFileSync(resolvedPath, 'utf8');
+    }
     const lines = content.split('\n');
     const numberedContent = lines.map((line, index) => `${index + 1}: ${line}`).join('\n');
     return `เนื้อหาในไฟล์ ${resolvedPath} (พร้อมเลขบรรทัด):\n---\n${numberedContent}\n---`;
@@ -217,7 +238,12 @@ export async function viewFile({ file_path, start_line = 1, end_line }: { file_p
   if (!check.safe) return check.reason!;
   try {
     const resolvedPath = path.resolve(file_path);
-    const content = fs.readFileSync(resolvedPath, 'utf8');
+    let content = '';
+    if ((global as any).selfUpgradeShadowMap && (global as any).selfUpgradeShadowMap.has(resolvedPath)) {
+      content = (global as any).selfUpgradeShadowMap.get(resolvedPath);
+    } else {
+      content = fs.readFileSync(resolvedPath, 'utf8');
+    }
     const allLines = content.split('\n');
     
     const start = Math.max(0, start_line - 1);
@@ -268,8 +294,13 @@ export async function writeFileContent({ file_path, content }: { file_path: stri
       return `Error: การบันทึกถูกระงับเนื่องจากพบ Syntax Error - ${syntaxCheck.error}. กรุณาตรวจสอบโค้ดให้ถูกต้องก่อนลองใหม่อีกครั้ง`;
     }
 
-    fs.writeFileSync(resolvedPath, content, 'utf8');
-    
+    const finalContent = sanitizeFileContent(content);
+    if ((global as any).selfUpgradeShadowMap) {
+      (global as any).selfUpgradeShadowMap.set(resolvedPath, finalContent);
+    } else {
+      fs.writeFileSync(resolvedPath, finalContent, 'utf8');
+    }
+
     // Allow external listeners (e.g. SelfUpgrade) to react before the server restarts
     if (typeof (global as any).onFileWrittenByTool === 'function') {
       (global as any).onFileWrittenByTool(resolvedPath);
@@ -348,9 +379,46 @@ export async function replaceCodeBlock({ file_path, exact_old_string, new_string
     if (!fs.existsSync(resolvedPath)) {
       return `Error: ไม่พบไฟล์ที่กำหนด: ${resolvedPath}`;
     }
-    const content = fs.readFileSync(resolvedPath, 'utf8');
+    
+    let content = '';
+    if ((global as any).selfUpgradeShadowMap && (global as any).selfUpgradeShadowMap.has(resolvedPath)) {
+      content = (global as any).selfUpgradeShadowMap.get(resolvedPath);
+    } else {
+      content = fs.readFileSync(resolvedPath, 'utf8');
+    }
+
     if (!content.includes(exact_old_string)) {
-      return `Error: ค้นหา exact_old_string ไม่เจอ กรุณาตรวจสอบว่าก็อปปี้มารวม \n และช่องว่าง (Space/Tab) ตรงตามต้นฉบับหรือไม่`;
+      // Fallback: Line Ending Normalization (Windows \r\n vs Unix \n)
+      const normalizedContent = content.replace(/\r\n/g, '\n');
+      const normalizedOld = exact_old_string.replace(/\r\n/g, '\n');
+      
+      if (normalizedContent.includes(normalizedOld)) {
+        // Match found after normalization!
+        // We need to find where it starts and ends in the ORIGINAL content to replace it correctly.
+        // A simpler way: replace in normalized content and then convert back if original was CRLF
+        const replacedNormalized = normalizedContent.replace(normalizedOld, new_string);
+        const finalContent = content.includes('\r\n') ? replacedNormalized.replace(/\n/g, '\r\n') : replacedNormalized;
+        
+        // Update local memory and file
+        const syntaxCheck = validateCodeSyntax(resolvedPath, finalContent);
+        if (!syntaxCheck.ok) {
+          return `Error: การแก้ไขถูกระงับเนื่องจากพบ Syntax Error - ${syntaxCheck.error}. กรุณาตรวจสอบโค้ดให้ถูกต้องก่อนลองใหม่อีกครั้ง`;
+        }
+
+        const sanitized = sanitizeFileContent(finalContent);
+        if ((global as any).selfUpgradeShadowMap) {
+          (global as any).selfUpgradeShadowMap.set(resolvedPath, sanitized);
+        } else {
+          fs.writeFileSync(resolvedPath, sanitized, 'utf8');
+        }
+        
+        if (typeof (global as any).onFileWrittenByTool === 'function') {
+          (global as any).onFileWrittenByTool(resolvedPath);
+        }
+        return `Successfully replaced (with line-ending normalization) in ${resolvedPath}.`;
+      }
+      
+      return `Error: ค้นหา exact_old_string ไม่เจอ กรุณาตรวจสอบว่าก็อปปี้มารวม \\n และช่องว่าง (Space/Tab) ตรงตามต้นฉบับหรือไม่`;
     }
     const newContent = content.replace(exact_old_string, new_string);
 
@@ -359,8 +427,13 @@ export async function replaceCodeBlock({ file_path, exact_old_string, new_string
       return `Error: การแก้ไขถูกระงับเนื่องจากพบ Syntax Error - ${syntaxCheck.error}. กรุณาตรวจสอบโค้ดให้ถูกต้องก่อนลองใหม่อีกครั้ง`;
     }
 
-    fs.writeFileSync(resolvedPath, newContent, 'utf8');
-    
+    const finalContent = sanitizeFileContent(newContent);
+    if ((global as any).selfUpgradeShadowMap) {
+      (global as any).selfUpgradeShadowMap.set(resolvedPath, finalContent);
+    } else {
+      fs.writeFileSync(resolvedPath, finalContent, 'utf8');
+    }
+
     // Allow external listeners (e.g. SelfUpgrade) to react
     if (typeof (global as any).onFileWrittenByTool === 'function') {
       (global as any).onFileWrittenByTool(resolvedPath);
@@ -405,20 +478,39 @@ export async function multiReplaceFileContent({ file_path, replacements }: { fil
   if (!check.safe) return check.reason!;
   try {
     const resolvedPath = path.resolve(file_path);
-    if (!fs.existsSync(resolvedPath)) return `Error: ไม่พบไฟล์ ${resolvedPath}`;
+    if (!fs.existsSync(resolvedPath) && !((global as any).selfUpgradeShadowMap && (global as any).selfUpgradeShadowMap.has(resolvedPath))) {
+      return `Error: ไม่พบไฟล์ ${resolvedPath}`;
+    }
     
-    let content = fs.readFileSync(resolvedPath, 'utf8');
+    let content = '';
+    if ((global as any).selfUpgradeShadowMap && (global as any).selfUpgradeShadowMap.has(resolvedPath)) {
+      content = (global as any).selfUpgradeShadowMap.get(resolvedPath);
+    } else {
+      content = fs.readFileSync(resolvedPath, 'utf8');
+    }
+    
     let successfulCount = 0;
     
     for (const r of replacements) {
       if (content.includes(r.exact_old_string)) {
         content = content.replace(r.exact_old_string, r.new_string);
         successfulCount++;
+      } else {
+        // Fallback: Normalize for this specific replacement
+        const normalizedContent = content.replace(/\r\n/g, '\n');
+        const normalizedOld = r.exact_old_string.replace(/\r\n/g, '\n');
+        
+        if (normalizedContent.includes(normalizedOld)) {
+          const replacedNormalized = normalizedContent.replace(normalizedOld, r.new_string);
+          // Restore line endings based on majority of existing content
+          content = content.includes('\r\n') ? replacedNormalized.replace(/\n/g, '\r\n') : replacedNormalized;
+          successfulCount++;
+        }
       }
     }
     
     if (successfulCount === 0) {
-      return `Error: ค้นหา exact_old_string ไม่เจอเลยสักจุดใน ${replacements.length} รายการที่ส่งมา`;
+      return `Error: ค้นหา exact_old_string ไม่เจอเลยสักจุดใน ${replacements.length} รายการที่ส่งมา (ลอง normalize บรรทัดแล้วก็ยังไม่เจอ)`;
     }
 
     const syntaxCheck = validateCodeSyntax(resolvedPath, content);
@@ -426,8 +518,13 @@ export async function multiReplaceFileContent({ file_path, replacements }: { fil
       return `Error: การแก้ไขถูกระงับเนื่องจากพบ Syntax Error - ${syntaxCheck.error}`;
     }
 
-    fs.writeFileSync(resolvedPath, content, 'utf8');
-    
+    const finalContent = sanitizeFileContent(content);
+    if ((global as any).selfUpgradeShadowMap) {
+      (global as any).selfUpgradeShadowMap.set(resolvedPath, finalContent);
+    } else {
+      fs.writeFileSync(resolvedPath, finalContent, 'utf8');
+    }
+
     if (typeof (global as any).onFileWrittenByTool === 'function') {
       (global as any).onFileWrittenByTool(resolvedPath);
     }
@@ -547,7 +644,13 @@ export async function astReplaceFunction({ file_path, function_name, new_functio
   try {
     const resolvedPath = path.resolve(file_path);
     astEditor.replaceFunction(resolvedPath, function_name, new_function_code);
-    await astEditor.saveFile(resolvedPath);
+    
+    const updatedContent = astEditor.getFileContent(resolvedPath);
+    if ((global as any).selfUpgradeShadowMap) {
+      (global as any).selfUpgradeShadowMap.set(resolvedPath, updatedContent);
+    } else {
+      await astEditor.saveFile(resolvedPath);
+    }
     
     // Trigger external listeners
     if (typeof (global as any).onFileWrittenByTool === 'function') {
@@ -599,7 +702,13 @@ export async function astAddImport({ file_path, module_specifier, named_imports,
   try {
     const resolvedPath = path.resolve(file_path);
     astEditor.addImport(resolvedPath, module_specifier, named_imports, default_import);
-    await astEditor.saveFile(resolvedPath);
+    
+    const updatedContent = astEditor.getFileContent(resolvedPath);
+    if ((global as any).selfUpgradeShadowMap) {
+      (global as any).selfUpgradeShadowMap.set(resolvedPath, updatedContent);
+    } else {
+      await astEditor.saveFile(resolvedPath);
+    }
     
     // Trigger external listeners
     if (typeof (global as any).onFileWrittenByTool === 'function') {

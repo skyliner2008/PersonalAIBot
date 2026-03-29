@@ -356,7 +356,7 @@ export class SwarmCoordinator {
         .map((idx) => taskIds[idx]);
       const cliSpecialist = isCliSpecialistName(task.specialist);
       const dbTimeoutMs = getSwarmTimeoutMs();
-      const defaultTimeoutMs = cliSpecialist ? dbTimeoutMs : Math.min(dbTimeoutMs, 45_000); // 45s max or fallback for normal agents
+      const defaultTimeoutMs = cliSpecialist ? dbTimeoutMs : Math.min(dbTimeoutMs, 180_000); // Increased from 45s to 180s for agents
       const timeoutMs = task.timeout ?? defaultTimeoutMs;
       
       const defaultMaxRetries = cliSpecialist ? 0 : getMaxToolRetries();
@@ -1739,7 +1739,7 @@ export class SwarmCoordinator {
 
     const conversationId = `swarm_${task.id}`;
     const output = await Promise.race([
-      this.agentInstance.processMessage(conversationId, message, executionContext),
+      this.agentInstance.processMessage(conversationId, message, executionContext, undefined, task.taskType as any),
       new Promise<string>((_, reject) => {
         setTimeout(() => reject(new Error('Task execution timeout')), task.timeout);
       }),

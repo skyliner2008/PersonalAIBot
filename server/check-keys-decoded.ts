@@ -1,1 +1,0 @@
-import { initDb, getCredential } from './src/database/db.js'; initDb().then(() => { console.log('Gemini: ...' + getCredential('provider_key_gemini')?.slice(-4)); console.log('OpenAI: ...' + getCredential('provider_key_openai')?.slice(-4)); });

@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "start": "tsx src/index.ts",
+    "dev": "tsx watch src/boot.ts",
+    "start": "tsx src/boot.ts",
     "build": "tsc",
     "test": "vitest run",
     "test:watch": "vitest",

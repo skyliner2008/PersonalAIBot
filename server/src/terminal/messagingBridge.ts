@@ -219,6 +219,7 @@ async function tryHandleJarvisSwarmCommand(
     botName: rootAdmin.botName,
     platform: 'custom' as any,
     replyWithFile: async () => '',
+    replyWithText: async () => '',
   };
 
   const batch = await swarmCoordinator.orchestrateJarvisTeam(

@@ -69,11 +69,12 @@ export class RefactorManager {
         const refNode = reference.getNode();
         const refSourceFile = refNode.getSourceFile();
         const line = refNode.getStartLineNumber();
+        const snippet = refSourceFile.getLineText(line - 1) || refNode.getText();
         
         results.push({
           file: refSourceFile.getFilePath(),
           line: line,
-          snippet: refNode.getParent()?.getText() || refNode.getText()
+          snippet: snippet
         });
       }
     }

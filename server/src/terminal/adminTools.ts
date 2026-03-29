@@ -502,6 +502,7 @@ async function adminDelegateToSwarm(args: { taskType: string; message: string; s
       botName: rootAdmin.botName,
       platform: 'custom' as const,
       replyWithFile: async () => 'not supported from admin',
+      replyWithText: async () => '',
     };
     const taskId = await sc.delegateTask(adminCtx, args.taskType as any, { message: args.message }, {
       toSpecialist: args.specialist,

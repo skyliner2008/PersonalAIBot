@@ -19,13 +19,14 @@ import { TaskQueueMonitor } from './pages/TaskQueueMonitor';
 import { GoalTracker } from './pages/GoalTracker';
 import SelfUpgrade from './pages/SelfUpgrade';
 import { CronManager } from './pages/CronManager';
+import BrainVisualizer from './pages/BrainVisualizer';
 import {
   LayoutDashboard, MessageCircle, FileEdit, User, Database,
   Settings as SettingsIcon, Wifi, WifiOff, Bot, Brain, Activity, Wrench, Users, GitBranch, PhoneCall,
   ListTodo, Target, Dna, Clock
 } from 'lucide-react';
 
-type Page = 'dashboard' | 'jarvis-call' | 'multi-agent' | 'chat' | 'posts' | 'persona' | 'qa' | 'settings' | 'agent-monitor' | 'memory' | 'agents' | 'tools' | 'system-health' | 'task-queue' | 'goal-tracker' | 'self-upgrade' | 'cron';
+type Page = 'dashboard' | 'jarvis-call' | 'multi-agent' | 'chat' | 'posts' | 'persona' | 'qa' | 'settings' | 'agent-monitor' | 'memory' | 'agents' | 'tools' | 'system-health' | 'task-queue' | 'goal-tracker' | 'self-upgrade' | 'cron' | 'brain-visualizer';
 
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -151,6 +152,7 @@ export default function App() {
     { id: 'system-health', label: 'System Health', icon: Activity },
     { id: 'task-queue', label: 'Task Queue', icon: ListTodo },
     { id: 'goal-tracker', label: 'Goal Tracker', icon: Target },
+    { id: 'brain-visualizer', label: 'Brain Visualizer', icon: Brain },
     { id: 'self-upgrade', label: 'Self-Upgrade', icon: Dna },
     { id: 'memory', label: 'Memory Viewer', icon: Brain },
     { id: 'chat', label: 'Chat Bot', icon: MessageCircle },
@@ -199,7 +201,7 @@ export default function App() {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 p-2 space-y-1">
+        <nav className="flex-1 p-2 space-y-1 overflow-y-auto custom-scrollbar">
           {navItems.map(item => (
             <button
               key={item.id}
@@ -241,6 +243,7 @@ export default function App() {
         {page === 'posts' && <PostManager />}
         {page === 'persona' && <PersonaEditor />}
         {page === 'qa' && <QADatabase />}
+        {page === 'brain-visualizer' && <BrainVisualizer />}
         {page === 'settings' && <Settings status={status} emit={emit} on={on} />}
       </main>
       </div>

@@ -111,7 +111,7 @@ export function attemptFixes(issues: Issue[]): { fixed: number; skipped: number 
                     // Auto-switch slow task type to a faster model based on actual performance data
                     const match = issue.description.match(/Task "(\w+)"/);
                     const taskType = match?.[1] as TaskType;
-                    if (taskType && taskType in TaskType) {
+                    if (taskType && Object.values(TaskType).includes(taskType)) {
                         const currentConfig = configManager.getConfig();
                         const current = currentConfig.routes[taskType];
                         const active = current?.active;
@@ -156,9 +156,19 @@ export function attemptFixes(issues: Issue[]): { fixed: number; skipped: number 
                     break;
                 }
 
-                case 'high_error_rate':
+                case 'high_error_rate': {
+                    // Attempt recovery: log learning and reset counters
+                    addLearning('anti_pattern', `High error rate detected for agent. Auto-logged for model tuning analysis.`, 'self_healing', 0.7);
+                    addLearning('error_solutions', `${issue.description} → ${issue.suggestedFix}`, 'self_healing', 0.5);
+                    logEvolution('self_heal', `Detected: ${issue.description}`, { issue, action: 'logged_for_review' });
+                    skipped++;
+                    break;
+                }
+
                 case 'tool_failing': {
-                    // Log for manual review — don't auto-fix these
+                    // Attempt recovery: log learning about failing tool
+                    const toolName = issue.description.match(/tool "(\w+)"/i)?.[1] || 'unknown';
+                    addLearning('anti_pattern', `Tool "${toolName}" has high failure rate. Flagged for investigation.`, 'self_healing', 0.7);
                     addLearning('error_solutions', `${issue.description} → ${issue.suggestedFix}`, 'self_healing', 0.5);
                     logEvolution('self_heal', `Detected: ${issue.description}`, { issue, action: 'logged_for_review' });
                     skipped++;

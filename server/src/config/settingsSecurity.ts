@@ -87,16 +87,17 @@ export function getManagedSetting(key: string): string | null {
     if (!raw) continue;
 
     const value = getCredential(candidate);
-    if (!value) continue;
+    if (value !== null) {
 
-    if (candidate !== canonicalKey || !isEncryptedSettingValue(raw)) {
-      setCredential(canonicalKey, value);
-      if (candidate !== canonicalKey) {
-        deleteSetting(candidate);
+      if (candidate !== canonicalKey || !isEncryptedSettingValue(raw)) {
+        setCredential(canonicalKey, value);
+        if (candidate !== canonicalKey) {
+          deleteSetting(candidate);
+        }
       }
-    }
 
-    return value;
+      return value;
+    }
   }
 
   return null;

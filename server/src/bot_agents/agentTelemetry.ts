@@ -72,13 +72,24 @@ export function getCircuitBreakerStats(): Array<{
 // Per-user processing queue (ป้องกัน race condition)
 // ============================================================
 const processingQueues: Map<string, Promise<string>> = new Map();
+const TASK_TIMEOUT_MS = 60_000;
 
 export function enqueueForUser(chatId: string, task: () => Promise<string>): Promise<string> {
   const prev = processingQueues.get(chatId) ?? Promise.resolve('');
-  const next = prev.catch(() => { /* swallow prev error to ensure task runs */ }).then(task).catch(e => {
-    log.error(`Task for user ${chatId} failed:`, e);
-    return '';
-  });
+  
+  const executeWithTimeout = async () => {
+    try {
+      return await Promise.race([
+        task(),
+        new Promise<string>((_, reject) => setTimeout(() => reject(new Error('Task Queue Timeout')), TASK_TIMEOUT_MS))
+      ]);
+    } catch (e: any) {
+      log.error(`Task for user ${chatId} failed:`, e);
+      return `❌ System Error: ${e.message}`;
+    }
+  };
+
+  const next = prev.catch(() => { /* swallow prev error to ensure task runs */ }).then(executeWithTimeout);
   processingQueues.set(chatId, next);
   next.finally(() => {
     if (processingQueues.get(chatId) === next) processingQueues.delete(chatId);

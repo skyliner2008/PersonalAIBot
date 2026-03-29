@@ -1,7 +1,6 @@
 import type { TaskType } from './taskQueue.js';
 import type { JarvisDelegationTask } from './swarmCoordinator.js';
 import { getRootAdminSpecialistName } from '../system/rootAdmin.js';
-
 type ObjectiveMode = 'research' | 'engineering' | 'operations' | 'general';
 type WorkIntent =
   | 'fact_gathering'
@@ -10,23 +9,19 @@ type WorkIntent =
   | 'execution_blueprint'
   | 'quality_gate'
   | 'scenario_mapping';
-
 type CliSpecialistName = 'gemini-cli-agent' | 'codex-cli-agent' | 'claude-cli-agent';
 const JARVIS_TERMINAL_DIRECT_MODE = process.env.JARVIS_TERMINAL_DIRECT_MODE !== '0';
-
 export interface JarvisSpecialistHealthSignal {
   state?: 'healthy' | 'degraded' | 'unavailable' | 'idle';
   consecutiveFailures?: number;
   lastError?: string;
   lastFailureAt?: string;
 }
-
 export interface JarvisPlannerOptions {
   multipass?: boolean;
   health?: Partial<Record<CliSpecialistName, JarvisSpecialistHealthSignal>>;
   englishObjective?: string;
 }
-
 interface CliSpecialistProfile {
   specialist: CliSpecialistName;
   displayName: string;
@@ -36,7 +31,6 @@ interface CliSpecialistProfile {
   modeBias: Record<ObjectiveMode, number>;
   summaryFocus: string;
 }
-
 interface WorkPackage {
   id: string;
   title: string;
@@ -46,12 +40,10 @@ interface WorkPackage {
   instructions: string[];
   whyThisMatters: string;
 }
-
 interface AssignedPackage extends WorkPackage {
   specialist: CliSpecialistName;
   rationale: string;
 }
-
 interface ObjectiveSignals {
   requiresExternalEvidence: boolean;
   requiresScenarioAnalysis: boolean;
@@ -64,7 +56,6 @@ interface ObjectiveSignals {
   simpleLookupIntent: boolean;
   complexityScore: number;
 }
-
 interface ExplicitLaneDirective {
   specialist: CliSpecialistName;
   objective: string;
@@ -72,12 +63,10 @@ interface ExplicitLaneDirective {
   title: string;
   workIntent: WorkIntent;
 }
-
 function isMultipassEnabled(explicit?: boolean): boolean {
   if (typeof explicit === 'boolean') return explicit;
   return process.env.JARVIS_MULTIPASS === '1';
 }
-
 const CLI_PROFILES: CliSpecialistProfile[] = [
   {
     specialist: 'gemini-cli-agent',
@@ -143,7 +132,6 @@ const CLI_PROFILES: CliSpecialistProfile[] = [
     summaryFocus: 'risk control, edge-cases, failure modes, and challenge analysis',
   },
 ];
-
 export const JARVIS_SPECIALIST_SKILL_MAP: Record<CliSpecialistName, {
   bestFor: string[];
   primaryCapabilities: TaskType[];
@@ -165,43 +153,34 @@ export const JARVIS_SPECIALIST_SKILL_MAP: Record<CliSpecialistName, {
     summaryFocus: 'risks, gaps, and safeguards',
   },
 };
-
 function containsThaiScript(value: string): boolean {
   return /[\u0E00-\u0E7F]/.test(value);
 }
-
 function containsNonAscii(value: string): boolean {
   return /[^\x00-\x7F]/.test(value);
 }
-
 function detectObjectiveMode(objective: string): ObjectiveMode {
   const text = objective.toLowerCase();
   const hasThaiScript = containsThaiScript(objective);
-
   const engineeringHints = [
     'code', 'coding', 'bug', 'refactor', 'api', 'backend', 'frontend', 'deploy',
     'test', 'fix', 'debug', 'typescript', 'node', 'react', 'python', 'java',
   ];
   if (engineeringHints.some((hint) => text.includes(hint))) return 'engineering';
-
   const researchHints = [
     'analyze', 'analysis', 'market', 'trend', 'research', 'study', 'report',
     'forecast', 'sector', 'sentiment', 'macro', 'geopolitical', 'economy',
     'war', 'impact', 'signal',
   ];
   if (researchHints.some((hint) => text.includes(hint))) return 'research';
-
   const opsHints = [
     'workflow', 'pipeline', 'automation', 'process', 'ops', 'runbook',
     'monitoring', 'incident', 'reliability', 'operations',
   ];
   if (opsHints.some((hint) => text.includes(hint))) return 'operations';
-
   if (hasThaiScript) return 'research';
-
   return 'general';
 }
-
 function defaultTaskTypeForIntent(intent: WorkIntent, mode: ObjectiveMode): TaskType {
   if (intent === 'fact_gathering') return 'web_search';
   if (intent === 'structured_analysis') return mode === 'engineering' ? 'code_generation' : 'data_analysis';
@@ -210,27 +189,23 @@ function defaultTaskTypeForIntent(intent: WorkIntent, mode: ObjectiveMode): Task
   if (intent === 'scenario_mapping') return 'data_analysis';
   return mode === 'engineering' ? 'code_review' : 'summarization';
 }
-
 function capabilityFitScore(profile: CliSpecialistProfile, taskType: TaskType): number {
   if (profile.primaryCapabilities.includes(taskType)) return 3;
   if (profile.secondaryCapabilities.includes(taskType)) return 1;
   return 0;
 }
-
 function healthPenalty(
   specialist: CliSpecialistName,
   health: JarvisPlannerOptions['health'],
 ): number {
   const signal = health?.[specialist];
   if (!signal) return 0;
-
   const failurePenalty = Math.max(0, signal.consecutiveFailures || 0) * 4;
   if (signal.state === 'unavailable') return 40 + failurePenalty;
   if (signal.state === 'degraded') return 10 + failurePenalty;
   if (signal.state === 'healthy') return -2;
   return failurePenalty;
 }
-
 function specialistScore(
   profile: CliSpecialistProfile,
   workIntent: WorkIntent,
@@ -246,7 +221,6 @@ function specialistScore(
   const runtimePenalty = healthPenalty(profile.specialist, health);
   return intentScore + modeScore + capabilityScore - loadPenalty - runtimePenalty;
 }
-
 function chooseSpecialist(
   workIntent: WorkIntent,
   taskType: TaskType,
@@ -260,26 +234,21 @@ function chooseSpecialist(
     const scoreA = specialistScore(a, workIntent, taskType, mode, usage[a.specialist], health);
     return scoreB - scoreA;
   });
-
   const healthyUniquePick = ranked.find((profile) => {
     if (avoid.has(profile.specialist)) return false;
     return health?.[profile.specialist]?.state !== 'unavailable';
   });
   if (healthyUniquePick) return healthyUniquePick;
-
   const healthyReusePick = ranked.find((profile) => health?.[profile.specialist]?.state !== 'unavailable');
   if (healthyReusePick) return healthyReusePick;
-
   const uniquePick = ranked.find((profile) => !avoid.has(profile.specialist));
   return uniquePick || ranked[0];
 }
-
 function buildObjectiveSignals(objective: string, mode: ObjectiveMode): ObjectiveSignals {
   const text = objective.toLowerCase();
   const hasThaiScript = containsThaiScript(objective);
   const tokenCount = objective.trim().split(/\s+/).filter(Boolean).length;
   const hasAny = (hints: string[]) => hints.some((hint) => text.includes(hint));
-
   const externalHints = [
     'latest', 'recent', 'today', 'news', 'market', 'economy', 'sector', 'signal',
     'web', 'compare', 'benchmark', 'war', 'conflict', 'geopolitical', 'trend',
@@ -318,7 +287,6 @@ function buildObjectiveSignals(objective: string, mode: ObjectiveMode): Objectiv
     && !hasAny(riskHints)
     && !hasAny(scenarioHints)
     && tokenCount <= 18;
-
   const requiresExternalEvidence = mode === 'research' || hasAny(externalHints) || likelyLongformAnalysis;
   const requiresScenarioAnalysis = hasAny(scenarioHints) || hasAny(conflictHints) || likelyLongformAnalysis;
   const requiresImplementationPlan = mode === 'engineering' || mode === 'operations' || hasAny(planHints);
@@ -327,7 +295,6 @@ function buildObjectiveSignals(objective: string, mode: ObjectiveMode): Objectiv
   const requiresTranslation = hasAny(translationHints);
   const mentionsUrgency = hasAny(urgencyHints);
   const mentionsConflict = hasAny(conflictHints);
-
   let complexityScore = 1;
   if (requiresExternalEvidence) complexityScore += 1;
   if (requiresScenarioAnalysis) complexityScore += 1;
@@ -337,7 +304,6 @@ function buildObjectiveSignals(objective: string, mode: ObjectiveMode): Objectiv
   if (mentionsConflict) complexityScore += 1;
   if (tokenCount >= 30) complexityScore += 1;
   if (simpleLookupIntent) complexityScore = 0;
-
   return {
     requiresExternalEvidence,
     requiresScenarioAnalysis,
@@ -351,12 +317,12 @@ function buildObjectiveSignals(objective: string, mode: ObjectiveMode): Objectiv
     complexityScore,
   };
 }
-
 function createWorkPackages(
   objective: string,
   mode: ObjectiveMode,
   signals: ObjectiveSignals,
 ): WorkPackage[] {
+  // TODO: Implement work package creation logic here, or remove if this function is not needed.
   const rawMaxLanes = Number.parseInt(String(process.env.JARVIS_MAX_STAGE_A_LANES || ''), 10);
   const maxLanes = Number.isFinite(rawMaxLanes) && rawMaxLanes > 0
     ? Math.min(6, Math.max(1, rawMaxLanes))
@@ -369,7 +335,6 @@ function createWorkPackages(
       : signals.complexityScore >= 4
         ? Math.min(maxLanes, 4)
         : Math.min(maxLanes, 2);
-
   if (signals.simpleLookupIntent) {
     packages.push({
       id: 'A1',
@@ -385,7 +350,6 @@ function createWorkPackages(
       ],
     });
   }
-
   if (!signals.simpleLookupIntent && signals.requiresExternalEvidence) {
     packages.push({
       id: 'A1',
@@ -401,7 +365,6 @@ function createWorkPackages(
       ],
     });
   }
-
   if (!signals.simpleLookupIntent && signals.requiresScenarioAnalysis) {
     packages.push({
       id: 'A2',
@@ -417,7 +380,6 @@ function createWorkPackages(
       ],
     });
   }
-
   const needsStructuredAnalysis = !signals.simpleLookupIntent && (
     mode === 'engineering'
     || mode === 'operations'
@@ -450,7 +412,6 @@ function createWorkPackages(
       ],
     });
   }
-
   if (!signals.simpleLookupIntent && (signals.requiresRiskReview || signals.complexityScore >= 4)) {
     packages.push({
       id: `A${packages.length + 1}`,
@@ -466,7 +427,6 @@ function createWorkPackages(
       ],
     });
   }
-
   if (!signals.simpleLookupIntent && signals.complexityScore >= 5) {
     packages.push({
       id: `A${packages.length + 1}`,
@@ -482,7 +442,6 @@ function createWorkPackages(
       ],
     });
   }
-
   if (!signals.simpleLookupIntent && signals.requiresTranslation) {
     packages.push({
       id: `A${packages.length + 1}`,
@@ -497,7 +456,6 @@ function createWorkPackages(
       ],
     });
   }
-
   return packages
     .sort((a, b) => b.priority - a.priority)
     .slice(0, laneBudget)
@@ -507,19 +465,18 @@ function createWorkPackages(
       title: pkg.title.replace(/^A\d?/, `A${index + 1}`),
     }));
 }
-
 function rationaleFor(
   profile: CliSpecialistProfile,
   workPackage: WorkPackage,
   mode: ObjectiveMode,
   health: JarvisPlannerOptions['health'],
 ): string {
+  // TODO: Implement rationale generation logic here, or remove if this function is not needed.
   const capabilityLabel = profile.primaryCapabilities.includes(workPackage.taskType) ? 'primary' : 'secondary';
   const healthSignal = health?.[profile.specialist];
   const healthNote = healthSignal?.state === 'degraded'
     ? ` Runtime note: this lane is currently degraded, so keep output concise and high-signal.`
     : '';
-
   return [
     `Assigned to ${profile.displayName} for ${workPackage.intent.replace(/_/g, ' ')}.`,
     `Reason: ${workPackage.taskType} is in ${capabilityLabel} capability set and mode bias is ${mode}.`,
@@ -527,7 +484,6 @@ function rationaleFor(
     `Why now: ${workPackage.whyThisMatters}.${healthNote}`,
   ].join(' ');
 }
-
 function buildModeRules(mode: ObjectiveMode): string[] {
   if (mode === 'engineering') {
     return [
@@ -552,19 +508,17 @@ function buildModeRules(mode: ObjectiveMode): string[] {
     'Optimize for practical actions, decision points, and clear next steps.',
   ];
 }
-
 function buildDirectTerminalDelegationMessage(
   assignment: AssignedPackage,
   objective: string,
 ): string {
+  // TODO: Implement direct terminal delegation message building logic here, or remove if this function is not needed.
   const taskLines = assignment.instructions.filter((line) => !/^Objective:/i.test(line));
-
   const roleHint = assignment.specialist === 'gemini-cli-agent'
     ? 'ค้นหาข้อมูลเชิงข้อเท็จจริงจากแหล่งอ้างอิงที่เชื่อถือได้'
     : assignment.specialist === 'codex-cli-agent'
       ? 'วิเคราะห์เชิงโครงสร้างและแผนตัดสินใจแบบเป็นขั้นตอน'
       : 'รีวิวความเสี่ยง ช่องโหว่ และสิ่งที่อาจผิดพลาด';
-
   return [
     `${assignment.title}`,
     `Objective: ${objective}`,
@@ -573,7 +527,6 @@ function buildDirectTerminalDelegationMessage(
     'Output now as final result. Do not ask follow-up questions.',
   ].join('\n');
 }
-
 function buildDelegationMessage(
   assignment: AssignedPackage,
   objective: string,
@@ -584,10 +537,10 @@ function buildDelegationMessage(
     omitRawObjective?: boolean;
   },
 ): string {
+  // TODO: Implement delegation message building logic here, or remove if this function is not needed.
   if (JARVIS_TERMINAL_DIRECT_MODE) {
     return buildDirectTerminalDelegationMessage(assignment, objective);
   }
-
   const profile = CLI_PROFILES.find((item) => item.specialist === assignment.specialist);
   const modeRules = buildModeRules(mode);
   const taskLines = assignment.instructions.filter((line) => !/^Objective:/i.test(line));
@@ -595,7 +548,6 @@ function buildDelegationMessage(
   const healthNote = healthSignal?.state === 'degraded'
     ? ['Runtime note:', '- Your lane is degraded right now, so keep the output concise and high-signal.']
     : [];
-
   const objectiveLines = options?.omitRawObjective
     ? [
         ...(containsNonAscii(objective) ? [] : [`Objective: ${objective}`]),
@@ -611,7 +563,6 @@ function buildDelegationMessage(
         '- End with an "English handoff" section containing 2-4 concise English bullets for cross-lane sharing.',
       ]
     : [];
-
   if (assignment.specialist === 'codex-cli-agent') {
     const codexTopic = options?.omitRawObjective
       ? (containsNonAscii(objective) ? 'Use dependency context below as the source of truth.' : objective)
@@ -631,7 +582,6 @@ function buildDelegationMessage(
       ...healthNote,
     ].join('\n');
   }
-
   return [
     `Task brief for ${profile?.displayName || assignment.specialist}:`,
     `Lane: ${assignment.intent.replace(/_/g, ' ')}`,
@@ -646,18 +596,17 @@ function buildDelegationMessage(
     ...healthNote,
   ].join('\n');
 }
-
 function buildFollowUpMessage(
   objective: string,
   mode: ObjectiveMode,
   assignment: AssignedPackage,
 ): string {
+  // TODO: Implement follow-up message building logic here, or remove if this function is not needed.
   const profile = CLI_PROFILES.find((item) => item.specialist === assignment.specialist);
   const modeRules = buildModeRules(mode);
   const followUpGoal = assignment.intent === 'risk_review'
     ? 'Condense your earlier review into a red-team brief with only the critical risks, trigger signals, and mitigations.'
     : 'Turn your earlier output into an execution-ready brief with explicit steps, checkpoints, and decision thresholds.';
-
   return [
     `Follow-up brief for ${profile?.displayName || assignment.specialist}:`,
     `Lane: ${assignment.intent.replace(/_/g, ' ')}`,
@@ -668,7 +617,6 @@ function buildFollowUpMessage(
     ...modeRules.map((line) => `- ${line}`),
   ].join('\n');
 }
-
 function buildFinalSynthesisMessage(objective: string, mode: ObjectiveMode): string {
   const modeRules = buildModeRules(mode);
   return [
@@ -689,13 +637,13 @@ function buildFinalSynthesisMessage(objective: string, mode: ObjectiveMode): str
     '- Do not pretend a missing lane answered.',
   ].join('\n');
 }
-
 function buildAssignedStageA(
   objective: string,
   mode: ObjectiveMode,
   signals: ObjectiveSignals,
   health: JarvisPlannerOptions['health'],
 ): AssignedPackage[] {
+  // TODO: Implement assigned stage A logic here, or remove if this function is not needed.
   const usage: Record<CliSpecialistName, number> = {
     'gemini-cli-agent': 0,
     'codex-cli-agent': 0,
@@ -703,12 +651,10 @@ function buildAssignedStageA(
   };
   const usedInStageA = new Set<CliSpecialistName>();
   const assigned: AssignedPackage[] = [];
-
   for (const pkg of createWorkPackages(objective, mode, signals)) {
     const profile = chooseSpecialist(pkg.intent, pkg.taskType, mode, usage, usedInStageA, health);
     usage[profile.specialist] += 1;
     usedInStageA.add(profile.specialist);
-
     assigned.push({
       ...pkg,
       specialist: profile.specialist,
@@ -717,13 +663,10 @@ function buildAssignedStageA(
   }
   return assigned;
 }
-
 const minimumCompletedDependencies = (total: number): number => Math.max(1, Math.ceil(total * 0.6));
-
 function parseExplicitLaneDirective(objective: string): ExplicitLaneDirective | null {
   const trimmed = objective.trim();
   if (!trimmed) return null;
-
   const candidates: Array<{
     specialist: CliSpecialistName;
     title: string;
@@ -759,7 +702,6 @@ function parseExplicitLaneDirective(objective: string): ExplicitLaneDirective | 
       ],
     },
   ];
-
   for (const candidate of candidates) {
     for (const pattern of candidate.patterns) {
       const match = trimmed.match(pattern);
@@ -775,10 +717,8 @@ function parseExplicitLaneDirective(objective: string): ExplicitLaneDirective | 
       };
     }
   }
-
   return null;
 }
-
 export function buildJarvisDelegationPlan(
   objective: string,
   options?: JarvisPlannerOptions,
@@ -791,7 +731,6 @@ export function buildJarvisDelegationPlan(
       `Objective: ${explicitLaneDirective.objective}`,
       'Output now as final result. Do not ask follow-up questions.',
     ].join('\n');
-
     return [
       {
         title: explicitLaneDirective.title,
@@ -825,7 +764,6 @@ export function buildJarvisDelegationPlan(
       },
     ];
   }
-
   const delegationObjective = JARVIS_TERMINAL_DIRECT_MODE
     ? normalizedObjective
     : options?.englishObjective?.trim() || normalizedObjective;
@@ -833,7 +771,6 @@ export function buildJarvisDelegationPlan(
   const enableMultipass = isMultipassEnabled(options?.multipass);
   const signals = buildObjectiveSignals(normalizedObjective, mode);
   const hasThaiObjective = containsThaiScript(normalizedObjective);
-
   const tasks: JarvisDelegationTask[] = [];
   const stageA = buildAssignedStageA(delegationObjective, mode, signals, options?.health);
   const hasCodexStageA = stageA.some((assignment) => assignment.specialist === 'codex-cli-agent');
@@ -845,7 +782,6 @@ export function buildJarvisDelegationPlan(
         return aCodex - bCodex;
       })
     : stageA;
-
   const stageATaskIndexes: number[] = [];
   const nonCodexStageIndexes: number[] = [];
   for (const assignment of orderedStageA) {
@@ -853,7 +789,6 @@ export function buildJarvisDelegationPlan(
       requireCodexEnglishHandoff &&
       assignment.specialist === 'codex-cli-agent' &&
       nonCodexStageIndexes.length > 0;
-
     stageATaskIndexes.push(tasks.length);
     tasks.push({
       title: assignment.title,
@@ -874,12 +809,10 @@ export function buildJarvisDelegationPlan(
         omitRawObjective: codexNeedsDependencyContext,
       }),
     });
-
     if (assignment.specialist !== 'codex-cli-agent') {
       nonCodexStageIndexes.push(tasks.length - 1);
     }
   }
-
   const stageBIndexes: number[] = [];
   if (enableMultipass) {
     for (let i = 0; i < orderedStageA.length; i++) {
@@ -901,7 +834,6 @@ export function buildJarvisDelegationPlan(
       });
     }
   }
-
   const finalDependencyIndexes = stageBIndexes.length > 0 ? stageBIndexes : stageATaskIndexes;
   tasks.push({
     title: 'C - Jarvis final synthesis',
@@ -919,6 +851,5 @@ export function buildJarvisDelegationPlan(
     },
     message: buildFinalSynthesisMessage(normalizedObjective, mode),
   });
-
   return tasks;
 }

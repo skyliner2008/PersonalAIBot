@@ -6,6 +6,7 @@ import settingsRoutes from './routes/settingsRoutes.js';
 import chatRoutes from './routes/chatRoutes.js';
 import memoryRoutes from './routes/memoryRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
+import brainRoutes from './brainRoutes.js';
 import { dbAll, dbGet, dbRun, getRecentLogs, getAllPersonas, getDefaultPersona, addLog, findQAMatch } from '../database/db.js';
 import { isRunning } from '../automation/browser.js';
 import { isLoggedIn, login } from '../automation/facebook.js';
@@ -435,6 +436,9 @@ router.use(memoryRoutes);
 
 // ============ Admin & Ops ============
 router.use(adminRoutes);
+
+// ============ Brain Visualizer ============
+router.use('/brain', brainRoutes);
 
 // ============ Dynamic Tools ============
 

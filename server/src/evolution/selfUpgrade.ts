@@ -2736,8 +2736,9 @@ WORKFLOW:
 2. \`read_file_content\` on EVERY file you will edit.
 3. Use file editing tools (e.g. \`multi_replace_file_content\` or \`replace_code_block\`) for each change.
 4. VERIFY: Count brackets in your edits. Check no duplicate declarations.
-5. If the file DOES NOT need changes (it is already safe), you MUST reply "SKIP: [reason]".
-6. Otherwise, reply "DONE".
+5. If the fix is ALREADY present in the file (code is already correct), reply "ALREADY_FIXED: [reason]" — this marks the proposal as successfully implemented.
+6. If the change is too risky or complex, reply "SKIP: [reason]".
+7. Otherwise, reply "DONE".
 
 Proposal: ${proposal.title}
 Description: ${proposal.description}
@@ -2767,9 +2768,10 @@ WORKFLOW:
 2. \`read_file_content\` on "${fullPath}" to get current state.
 3. Use AST tools (\`ast_replace_function\`, \`ast_add_import\`) for precise surgery.
 4. Use standard editing tools (\`multi_replace_file_content\` or \`replace_code_block\`) as fallback.
-4. VERIFY: Count brackets. Check no duplicates. Check all variables are defined.
-5. If the file DOES NOT need changes (it is already safe), you MUST reply "SKIP: [reason]".
-6. Otherwise, reply "DONE".
+5. VERIFY: Count brackets. Check no duplicates. Check all variables are defined.
+6. If the fix is ALREADY present in the file (code is already correct), reply "ALREADY_FIXED: [reason]" — this marks the proposal as successfully implemented.
+7. If the change is too risky or complex, reply "SKIP: [reason]".
+8. Otherwise, reply "DONE".
 
 Proposal: ${proposal.title}
 Description: ${proposal.description}
@@ -2951,6 +2953,30 @@ ${originalContent}
               .run(`\n\n[AI SKIP]: ${skipReason}`, id);
             rollbackAll();
             return false;
+          }
+
+          // §ALREADY_FIXED: Specialist confirmed code is already correct — no edit needed.
+          // Mark as 'implemented' (success) instead of failing with "no files modified".
+          // This prevents false-negatives when a fix was applied in a prior run.
+          const alreadyFixedMatch = resultText.match(/ALREADY[_\s-]FIXED[:\s—]+(.+?)(?:\n|$)/i);
+          const impliesAlreadyFixed =
+            alreadyFixedMatch ||
+            (/already\s+(implemented|safe|exists|present|handled|correct)/i.test(resultText) &&
+             /no\s+(change|modification|edit)\s+(needed|required|necessary)/i.test(resultText));
+
+          if (impliesAlreadyFixed) {
+            const reason = alreadyFixedMatch?.[1] || 'Code is already correct — no modification needed';
+            phaseLog('🤖 Implement', `ALREADY_FIXED by ${specialistName}: ${reason.substring(0, 80)}`);
+            console.log(`\x1b[32m  └─ ✅ Already Fixed — marking as implemented\x1b[0m`);
+            addLearning('anti_pattern',
+              `Proposal "${proposal.title}" for ${relativePath} was already correct. Dedup check may need tightening.`,
+              `selfUpgrade:already_fixed:#${id}`, 0.7);
+            db.prepare(`UPDATE upgrade_proposals SET status = 'implemented', reviewed_at = CURRENT_TIMESTAMP, description = description || ? WHERE id = ?`)
+              .run(`\n\n[ALREADY_FIXED by ${specialistName}]: ${reason}`, id);
+            rollbackAll();
+            releaseFileLock(relativePath);
+            releaseUpgradeLock();
+            return true;
           }
 
           // Check which files were actually modified
@@ -3330,6 +3356,15 @@ ${commonSafetyRules}`;
         } else {
           lastError = result.error || 'Unknown error';
           phaseLog('🤖 Implement', `${specialistName} failed: ${(lastError || '').substring(0, 80)}`);
+
+          // §TOOL_ERROR_DETECT: Log known "Unbalanced square brackets" tool failure as a learning
+          // so future proposals on files with complex generics use write_file instead.
+          if (/Unbalanced square bracket/i.test(lastError)) {
+            log.warn(`[SelfUpgrade] Detected "Unbalanced square brackets" tool error for #${id} (${relativePath}). Complex generics may be incompatible with replace_code_block.`);
+            addLearning('tool_usage',
+              `ANTI-PATTERN: "Unbalanced square brackets" in replace_code_block on ${relativePath}. File has complex generic types — use write_file (full replacement) as fallback.`,
+              `selfUpgrade:tool_error:#${id}`, 0.8);
+          }
         }
       } catch (err: any) {
         lastError = err.message;

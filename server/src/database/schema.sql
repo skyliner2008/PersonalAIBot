@@ -248,6 +248,7 @@ CREATE TABLE IF NOT EXISTS agent_plans (
   objective TEXT NOT NULL,
   steps_json TEXT NOT NULL, -- Array of { id, description, status }
   status TEXT DEFAULT 'active' CHECK(status IN ('active', 'completed', 'failed', 'paused')),
+  version INTEGER DEFAULT 1,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );

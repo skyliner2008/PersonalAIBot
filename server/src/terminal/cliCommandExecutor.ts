@@ -139,7 +139,7 @@ function copyCliFileIfNeeded(sourcePath: string, targetPath: string): boolean {
  * Resolve Codex auth source home directory
  */
 function resolveCodexAuthSourceHome(isolatedHome: string): string | null {
-  const candidates = [
+  const candidates: string[] = [
     process.env.SWARM_CODEX_AUTH_SOURCE?.trim(),
     process.env.CODEX_HOME?.trim(),
     process.env.USERPROFILE ? path.join(process.env.USERPROFILE, '.codex') : null,

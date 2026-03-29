@@ -34,7 +34,20 @@ export class AstEditor {
     const sourceFile = this.project.getSourceFile(filePath);
     if (!sourceFile) throw new Error(`File not loaded: ${filePath}`);
     await sourceFile.save();
+    // Verify file was actually written to disk
+    const stat = require('fs').statSync(filePath);
+    if (!stat || stat.size === 0) {
+      throw new Error(`Save verification failed: ${filePath} is empty or missing`);
+    }
     log.info(`[AstEditor] Saved changes to ${filePath}`);
+  }
+
+  /**
+   * Retrieves the current full text of the file from the AST without saving
+   */
+  public getFileContent(filePath: string): string {
+    const sourceFile = this.getFile(filePath);
+    return sourceFile.getFullText();
   }
 
   /**

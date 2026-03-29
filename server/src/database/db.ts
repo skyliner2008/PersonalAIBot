@@ -5,6 +5,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { config } from '../config.js';
 import { createLogger } from '../utils/logger.js';
+import { agentEvents } from '../utils/socketBroadcast.js';
 
 const logger = createLogger('db');
 
@@ -102,6 +103,38 @@ export interface QAPair {
 type SqlParam = string | number | null | Buffer;
 
 // ============ Helper functions ============
+
+function extractTableName(sql: string): string | null {
+  const normalizedSql = sql.trim();
+  // Skip counting queries used for visualization/stats to avoid "all flashing" noise
+  if (/^SELECT\s+count\(\*\)/i.test(normalizedSql) && !/WHERE/i.test(normalizedSql)) return null;
+  // Skip internal sqlite metadata queries
+  if (/sqlite_master/i.test(normalizedSql) || /PRAGMA/i.test(normalizedSql)) return null;
+
+  // Extract the table name from common SQL patterns
+  const match = normalizedSql.match(/(?:FROM|INTO|UPDATE|JOIN|TABLE|DELETE\s+FROM)\s+\[?([a-zA-Z0-9_]+)\]?/i);
+  return match ? match[1] : null;
+}
+
+function notifyDbAccess(sql: string) {
+  try {
+    const table = extractTableName(sql);
+    if (table) {
+      agentEvents.dbAccess(table);
+    }
+  } catch (err) {
+    // Fail silently to ensure DB operations are never interrupted
+  }
+}
+
+// Global Monkey-patch for better-sqlite3 to capture ALL database activity
+// This ensures that even direct .prepare() calls are tracked for the Brain Visualizer
+const originalPrepare = (Database.prototype as any).prepare;
+(Database.prototype as any).prepare = function(sql: string, ...args: any[]) {
+  notifyDbAccess(sql);
+  return originalPrepare.apply(this, [sql, ...args]);
+};
+
 function allRows<T = Record<string, unknown>>(
   dbInstance: ReturnType<typeof Database>, sql: string, params: SqlParam[] = []
 ): T[] {
@@ -272,6 +305,26 @@ function runMigrations(dbInstance: SqliteDatabase): void {
       console.warn('[DB migration] error setting up upgrade_proposals:', String(e));
     }
 
+    // --- Path Migration: Standarize to Project Root (Mar 2026) ---
+    try {
+      const tablesToMigrate = ['upgrade_proposals', 'codebase_map', 'codebase_calls', 'codebase_embeddings', 'upgrade_scan_log'];
+      for (const table of tablesToMigrate) {
+        // Find existing paths that don't start with 'src/' and are clearly relative source files
+        // We exclude things like 'multiple_files', 'N/A', or absolute paths if any
+        let colName = 'file_path';
+        if (table === 'codebase_calls') {
+          // Special case: codebase_calls has caller_file AND callee_file
+          dbInstance.exec(`UPDATE codebase_calls SET caller_file = 'src/' || caller_file WHERE caller_file NOT LIKE 'src/%' AND caller_file NOT LIKE '.%' AND caller_file NOT LIKE '/%' AND caller_file NOT LIKE '%:%' AND caller_file != 'multiple_files'`);
+          dbInstance.exec(`UPDATE codebase_calls SET callee_file = 'src/' || callee_file WHERE callee_file NOT LIKE 'src/%' AND callee_file NOT LIKE '.%' AND callee_file NOT LIKE '/%' AND callee_file NOT LIKE '%:%' AND callee_file != 'multiple_files'`);
+        } else {
+          dbInstance.exec(`UPDATE ${table} SET ${colName} = 'src/' || ${colName} WHERE ${colName} NOT LIKE 'src/%' AND ${colName} NOT LIKE '.%' AND ${colName} NOT LIKE '/%' AND ${colName} NOT LIKE '%:%' AND ${colName} != 'multiple_files'`);
+        }
+      }
+      logger.info('Migrated Evolution Database paths to standardized "src/" prefix for project-root context.');
+    } catch (e) {
+      logger.debug('Path migration skipped or already consistent', { error: String(e) });
+    }
+
     try {
       dbInstance.exec(`CREATE TABLE IF NOT EXISTS upgrade_scan_log (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -283,6 +336,18 @@ function runMigrations(dbInstance: SqliteDatabase): void {
       dbInstance.exec(`CREATE INDEX IF NOT EXISTS idx_scan_file ON upgrade_scan_log(file_path)`);
     } catch (e) {
       console.warn('[DB migration] error setting up upgrade_scan_log:', String(e));
+    }
+
+    // --- Agent Plans migration (Proposal #902) ---
+    try {
+      const checkStmt = dbInstance.prepare(`PRAGMA table_info(agent_plans)`).all() as { name: string }[];
+      const cols = checkStmt.map(c => c.name);
+      if (cols.length > 0 && !cols.includes('version')) {
+        dbInstance.exec(`ALTER TABLE agent_plans ADD COLUMN version INTEGER DEFAULT 1`);
+        logger.info('Migrated agent_plans table for Optimistic Locking (added version)');
+      }
+    } catch (e) {
+      logger.debug('Migration for agent_plans table failed or already applied', { error: String(e) });
     }
   } catch (e) {
     console.warn('[DB migration] unexpected error creating evolution/system tables:', String(e));
@@ -681,6 +746,9 @@ export function addMessage(
       isInternal ? 1 : 0
     ]
   );
+  if (source === 'swarm_trace') {
+    agentEvents.trace({ message: content });
+  }
 }
 
 // -- Conversation Summary (Layer 2) --

@@ -211,6 +211,7 @@ router.post('/tasks', async (req, res) => {
       botName: 'Manual Submission',
       platform: fromPlatform as any,
       replyWithFile: async () => '',
+      replyWithText: async () => '',
     };
 
     const parsedPriority = priority ? parseInt(priority) : undefined;
@@ -281,6 +282,7 @@ router.post('/jarvis/orchestrate', async (req, res) => {
       botName: rootAdmin.botName,
       platform: String(fromPlatform) as any,
       replyWithFile: async () => '',
+      replyWithText: async () => '',
     };
 
     const normalizedTasks: JarvisDelegationTask[] = Array.isArray(tasks) && tasks.length > 0
@@ -358,6 +360,7 @@ router.post('/task-chain', async (req, res) => {
       botName: 'Manual Chain Submission',
       platform: fromPlatform as any,
       replyWithFile: async () => '',
+      replyWithText: async () => '',
     };
 
     let chainTasks: any[];

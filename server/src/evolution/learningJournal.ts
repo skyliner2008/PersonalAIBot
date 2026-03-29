@@ -108,7 +108,10 @@ export function applyLearning(id: number, success: boolean = true): void {
                 `UPDATE learning_journal SET times_applied = times_applied + 1, confidence = MAX(confidence - 0.08, 0.05) WHERE id = ?`
             ).run(id);
         }
-    } catch (err) { log.debug('Failed to apply learning', { id, error: String(err) }); }
+    } catch (err: any) {
+        log.error('Failed to apply learning', { id, success, error: err.message, stack: err.stack });
+        throw err;
+    }
 }
 
 /**

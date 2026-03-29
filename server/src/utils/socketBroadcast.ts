@@ -54,4 +54,12 @@ export const agentEvents = {
   modelUpdated(data: { botId?: string; isGlobal?: boolean }) {
     broadcast('agent:modelUpdated', data);
   },
+  /** Database table accessed (read or write) */
+  dbAccess(tableName: string) {
+    broadcast('db:access', { table: tableName });
+  },
+  /** Agent internal trace / reasoning step */
+  trace(data: { runId?: string; message: string; level?: 'info'|'debug'|'error' }) {
+    broadcast('agent:trace', data);
+  },
 };

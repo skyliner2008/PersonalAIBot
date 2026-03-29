@@ -589,4 +589,10 @@ export const api = {
   updateCronJob: (id: string, data: any) => request(`/cron-jobs/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteCronJob: (id: string) => request(`/cron-jobs/${id}`, { method: 'DELETE' }),
   toggleCronJob: (id: string) => request(`/cron-jobs/${id}/toggle`, { method: 'POST' }),
+
+  // Brain Visualizer (new)
+  getBrainGraph: () => request('/brain/graph'),
+  getBrainOverrides: () => request('/brain/overrides'),
+  saveBrainOverrides: (data: { overrides: any; hemOverrides: any; corpusOverride: any }) =>
+    request('/brain/overrides', { method: 'POST', body: JSON.stringify(data) }),
 };

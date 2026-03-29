@@ -12,15 +12,7 @@ export type TaskStatus = 'queued' | 'processing' | 'completed' | 'failed';
 /**
  * Task type indicates what kind of work needs to be done
  */
-export type TaskType =
-  | 'vision_analysis'
-  | 'code_review'
-  | 'code_generation'
-  | 'translation'
-  | 'web_search'
-  | 'data_analysis'
-  | 'summarization'
-  | 'general';
+export type TaskType = 'default' | 'vision_analysis' | 'code_review' | 'code_generation' | 'translation' | 'web_search' | 'data_analysis' | 'summarization' | 'general' | string;
 
 export type DependencyMode = 'all_success' | 'all_settled' | 'minimum_completed';
 
@@ -538,6 +530,12 @@ export class TaskQueue {
 
     if (!['queued', 'processing', 'completed', 'failed'].includes(task.status)) {
       return false;
+    }
+
+    if (task.status === 'completed') {
+      this.totalCompletedCount--;
+    } else if (task.status === 'failed') {
+      this.totalFailedCount--;
     }
 
     this.processingTasks.delete(taskId);

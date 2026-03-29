@@ -20,21 +20,17 @@ import { startChatMonitor, stopChatMonitor } from '../automation/chatBot.js';
 import { startCommentMonitor, stopCommentMonitor } from '../automation/commentBot.js';
 import { getSocketIO } from '../utils/socketBroadcast.js';
 import { getAdminIds } from '../terminal/messagingBridge.js';
-
 dotenv.config();
-
 const TELEGRAM_MESSAGE_MAX_LENGTH = 4096;
 const TELEGRAM_TYPING_PULSE_MS = 4500;
 const TELEGRAM_HANDLER_TIMEOUT_MS = 240_000;
 const STARTUP_COMPACT = process.env.STARTUP_COMPACT === '1';
 const logger = createLogger('BotManager');
-
 function botInfo(message: string): void {
     if (!STARTUP_COMPACT) {
         logger.info(message);
     }
 }
-
 /**
  * Utility to truncate long messages and append ellipsis.
  * Prevents performance issues with extremely large strings and respects platform limits.
@@ -43,12 +39,10 @@ function truncateMessage(text: string, maxLength: number): string {
     if (text.length <= maxLength) return text;
     return text.substring(0, maxLength - 3) + '...';
 }
-
 /** Standardizes chatId construction across platforms */
 function formatChatId(platform: string, id: string | number): string {
     return `${platform}_${id}`;
 }
-
 function hasConfiguredLlmApiKey(): boolean {
     try {
         return getAgentCompatibleProviders({ enabledOnly: true }).some((provider) => Boolean(getProviderApiKey(provider.id)));
@@ -61,19 +55,15 @@ function hasConfiguredLlmApiKey(): boolean {
         );
     }
 }
-
 // Shared AI Agent (singleton)
 let aiAgent: Agent | null = null;
-
 function getAiAgent(): Agent | null {
     if (aiAgent) {
         return aiAgent;
     }
-
     if (!hasConfiguredLlmApiKey()) {
         return null;
     }
-
     try {
         aiAgent = new Agent();
         return aiAgent;
@@ -82,31 +72,24 @@ function getAiAgent(): Agent | null {
         return null;
     }
 }
-
 /** Helper to mark a bot as error in the registry */
 function updateBotStatusOnError(botId: string, errorMessage: string): void {
     updateBot(botId, { status: 'error', last_error: errorMessage });
 }
-
 // Active bot instances
 // Maps bot registry ID to the running instance handle
 const activeBots = new Map<string, { type: string; instance: any; stop: () => void }>();
-
 // Maps LINE bot ID -> its currently active Express router
 const lineRouters = new Map<string, express.Router>();
-
 // Store Express app reference for dynamic bot start/stop from dashboard
 let _expressApp: express.Express | null = null;
-
 // Helpers
-
 async function getPartFromTelegram(ctx: any, fileId: string, mimeType: string): Promise<AIMessagePart> {
     const fileLink = await ctx.telegram.getFileLink(fileId);
     const response = await axios.get(fileLink.toString(), { responseType: 'arraybuffer' });
     const data = Buffer.from(response.data).toString('base64');
     return { inlineData: { data, mimeType } };
 }
-
 async function sendTelegramText(bot: Telegraf<any>, chatId: number | string, text: string): Promise<void> {
     const message = String(text || '').trim() || '(no output)';
     for (let i = 0; i < message.length; i += TELEGRAM_MESSAGE_MAX_LENGTH) {
@@ -114,7 +97,6 @@ async function sendTelegramText(bot: Telegraf<any>, chatId: number | string, tex
         await bot.telegram.sendMessage(chatId, chunk);
     }
 }
-
 function runTelegramAdminCommandAsync(
     bot: Telegraf<any>,
     botId: string,
@@ -127,7 +109,6 @@ function runTelegramAdminCommandAsync(
             logger.debug(`[Telegram:${botId}] Failed to send typing action: ${err.message}`);
         });
     }, TELEGRAM_TYPING_PULSE_MS);
-
     void (async () => {
         try {
             const result = await handleAdminCommand(userMessage, 'telegram', userId);
@@ -140,14 +121,11 @@ function runTelegramAdminCommandAsync(
         }
     })();
 }
-
 // Telegram bot helpers
-
 async function handleTelegramMultimodal(ctx: any, agent: Agent, botConfig: BotInstance) {
     const chatId = formatChatId('telegram', ctx.chat.id);
     let fileId = '';
     let mimeType = '';
-
     if ('document' in ctx.message) {
         fileId = ctx.message.document.file_id;
         mimeType = ctx.message.document.mime_type || 'application/octet-stream';
@@ -156,7 +134,6 @@ async function handleTelegramMultimodal(ctx: any, agent: Agent, botConfig: BotIn
         fileId = photo.file_id;
         mimeType = 'image/jpeg';
     }
-
     if (fileId) {
         await ctx.reply('Analyzing file/image with multimodal pipeline...');
         try {
@@ -187,28 +164,22 @@ async function handleTelegramMultimodal(ctx: any, agent: Agent, botConfig: BotIn
         }
     }
 }
-
 async function handleTelegramText(ctx: any, bot: Telegraf<any>, agent: Agent, botConfig: BotInstance) {
     const userMessage = ctx.message.text;
     const chatId = formatChatId('telegram', ctx.chat.id);
     // Allow admin commands and empty messages (in boss mode) to pass
     if (userMessage.startsWith('/') && !userMessage.startsWith('/admin')) return;
-
     const userId = ctx.from?.id?.toString() || '';
-
     // Intercept admin commands AND active Boss Mode sessions from text
     if (isAdminCommand(userMessage) || isBossModeActive('telegram', userId)) {
         runTelegramAdminCommandAsync(bot, botConfig.id, ctx.chat.id, userMessage, userId);
         return;
     }
-
     if (!getAutoReplyEnabled()) {
         return; // Auto-reply disabled globally
     }
-
     logger.info(`[Telegram:${botConfig.id}] ${chatId}: ${userMessage}`);
     await ctx.sendChatAction('typing').catch((err: any) => logger.debug(`[Telegram:${botConfig.id}] Failed to send typing action: ${err?.message}`));
-
     try {
         upsertConversation(chatId, ctx.chat.id.toString(), "Telegram User");
         const responseText = await agent.processMessage(chatId, userMessage, {
@@ -229,7 +200,6 @@ async function handleTelegramText(ctx: any, bot: Telegraf<any>, agent: Agent, bo
         await sendTelegramText(bot, ctx.chat.id, 'An error occurred while sending a reply.');
     }
 }
-
 function setupTelegramBotHandlers(bot: Telegraf<any>, agent: Agent, botConfig: BotInstance) {
     bot.catch(async (err, ctx) => {
         const errorText = String((err as any)?.message || err || '');
@@ -242,39 +212,30 @@ function setupTelegramBotHandlers(bot: Telegraf<any>, agent: Agent, botConfig: B
             }
         }
     });
-
     bot.start((ctx) => {
         ctx.reply(`Hello! I am ${botConfig.name} - Personal AI Assistant`);
     });
-
     bot.command('clear', (ctx) => {
         const chatId = formatChatId('telegram', ctx.chat.id);
         clearMemory(chatId);
         ctx.reply('Memory cleared successfully.');
     });
-
     bot.on(['document', 'photo'], (ctx) => handleTelegramMultimodal(ctx, agent, botConfig));
-
     // Handle Approval System Inline Callbacks
     bot.action(/^(approve|reject)_(.+)$/, async (ctx) => {
         const action = ctx.match[1];
         const approvalId = ctx.match[2];
         const isApproved = action === 'approve';
-        
         const resolved = approvalSystem.resolveApproval(approvalId, isApproved);
-        
         if (resolved) {
             await ctx.editMessageText(`[OK] Request ${isApproved ? 'approved' : 'rejected'} successfully.`);
         } else {
             await ctx.answerCbQuery('This approval request is expired or already handled.');
         }
     });
-
     bot.on('text', (ctx) => handleTelegramText(ctx, bot, agent, botConfig));
 }
-
 // Telegram bot factory
-
 function startTelegramBot(botConfig: BotInstance): void {
     const agent = getAiAgent();
     if (!agent) {
@@ -287,7 +248,6 @@ function startTelegramBot(botConfig: BotInstance): void {
         updateBotStatusOnError(botConfig.id, 'Missing bot_token');
         return;
     }
-
     // Check if another active bot is already using the same token (prevent 409)
     for (const [activeId, activeBot] of activeBots.entries()) {
         if (activeId !== botConfig.id && activeBot.type === 'telegram') {
@@ -300,14 +260,11 @@ function startTelegramBot(botConfig: BotInstance): void {
             }
         }
     }
-
     try {
         const bot = new Telegraf(token, { handlerTimeout: TELEGRAM_HANDLER_TIMEOUT_MS });
         setupTelegramBotHandlers(bot, agent, botConfig);
-
         botInfo(`[BotManager] Telegram bot "${botConfig.id}" starting...`);
         updateBot(botConfig.id, { status: 'active', last_error: null });
-
         const launchBot = async (retryCount = 0) => {
             try {
                 // Ensure no old webhooks are present before polling
@@ -317,13 +274,11 @@ function startTelegramBot(botConfig: BotInstance): void {
             } catch (err: any) {
                 const raw = String(err?.description || err?.message || err || '');
                 const isConflict = /409|terminated by other getUpdates request|Conflict/i.test(raw);
-
                 if (isConflict && retryCount < 1) {
                     logger.warn(`[BotManager] Telegram bot "${botConfig.id}" conflict (409). Waiting 2s before retry...`);
                     await new Promise(resolve => setTimeout(resolve, 2000));
                     return launchBot(retryCount + 1);
                 }
-
                 console.error(`[BotManager] Telegram bot "${botConfig.id}" launch failed:`, err);
                 const humanMessage = isConflict
                     ? '409 Telegram polling conflict: token is being used by another running bot/process. Try restarting the server after a few seconds.'
@@ -332,9 +287,7 @@ function startTelegramBot(botConfig: BotInstance): void {
                 if (isConflict) activeBots.delete(botConfig.id);
             }
         };
-
         void launchBot();
-
         activeBots.set(botConfig.id, {
             type: 'telegram',
             instance: bot,
@@ -351,9 +304,7 @@ function startTelegramBot(botConfig: BotInstance): void {
         updateBotStatusOnError(botConfig.id, err.message);
     }
 }
-
 // LINE bot helpers
-
 async function handleLineFileReply(lineClient: LineClient, userId: string, fileUrl: string, caption?: string): Promise<string> {
     if (!userId) {
         logger.error('[LINE] handleLineFileReply: userId is missing');
@@ -367,7 +318,6 @@ async function handleLineFileReply(lineClient: LineClient, userId: string, fileU
         const videoExts = ['mp4', 'mpeg', 'mov'];
         const audioExts = ['mp3', 'wav', 'm4a'];
         let message: any;
-        
         if (imageExts.includes(ext)) {
             message = { type: 'image', originalContentUrl: sanitizedUrl, previewImageUrl: sanitizedUrl };
         } else if (videoExts.includes(ext)) {
@@ -392,15 +342,12 @@ async function handleLineFileReply(lineClient: LineClient, userId: string, fileU
         return `Failed to send file: ${err.message}`;
     }
 }
-
 async function handleLineEvent(event: WebhookEvent, agent: Agent, botConfig: BotInstance, lineClient: LineClient): Promise<void> {
     if (event.type !== 'message' || event.message.type !== 'text') return;
-
     const userMessage = event.message.text;
     const userId = event.source.userId;
     if (!userId) return;
     const chatId = formatChatId('line', userId);
-
     try {
         // Intercept admin commands AND active Boss Mode sessions from LINE
         if (isAdminCommand(userMessage) || isBossModeActive('line', userId)) {
@@ -409,11 +356,9 @@ async function handleLineEvent(event: WebhookEvent, agent: Agent, botConfig: Bot
             await lineClient.pushMessage(userId, { type: 'text', text: trimmed });
             return;
         }
-
         if (!getAutoReplyEnabled()) {
             return; // Auto-reply disabled globally
         }
-
         logger.info(`[LINE:${botConfig.id}] ${chatId}: ${userMessage}`);
         upsertConversation(chatId, userId, "LINE User");
         const responseText = await agent.processMessage(chatId, userMessage, {
@@ -432,9 +377,7 @@ async function handleLineEvent(event: WebhookEvent, agent: Agent, botConfig: Bot
         throw err;
     }
 }
-
 // LINE bot factory
-
 function startLineBot(app: express.Express, botConfig: BotInstance): void {
     const agent = getAiAgent();
     if (!agent) {
@@ -443,24 +386,19 @@ function startLineBot(app: express.Express, botConfig: BotInstance): void {
     }
     const accessToken = botConfig.credentials.channel_access_token;
     const secret = botConfig.credentials.channel_secret;
-
     if (!accessToken || !secret) {
         console.warn(`[BotManager] LINE bot "${botConfig.id}" - missing credentials`);
         updateBotStatusOnError(botConfig.id, 'Missing channel_access_token or channel_secret');
         return;
     }
-
     try {
         const lineConfig = { channelAccessToken: accessToken, channelSecret: secret };
         const lineClient = new LineClient(lineConfig);
-
         const webhookPaths = [`/webhook/line/${botConfig.id}`];
         if (String(botConfig.id || '').toLowerCase() === 'env-line') {
             webhookPaths.push('/webhook/line');
         }
-
         const lineRouter = express.Router();
-
         for (const webhookPath of webhookPaths) {
             lineRouter.post(webhookPath, lineMiddleware(lineConfig), (req, res) => {
                 res.status(200).json({});
@@ -476,14 +414,11 @@ function startLineBot(app: express.Express, botConfig: BotInstance): void {
                 });
             });
         }
-
         (lineRouter as any).botId = botConfig.id;
         app.use('/', lineRouter);
         lineRouters.set(botConfig.id, lineRouter);
-
         botInfo(`[BotManager] LINE bot "${botConfig.id}" webhook ready at ${webhookPaths.join(', ')}`);
         updateBot(botConfig.id, { status: 'active', last_error: null });
-
         activeBots.set(botConfig.id, {
             type: 'line',
             instance: lineClient,
@@ -504,13 +439,10 @@ function startLineBot(app: express.Express, botConfig: BotInstance): void {
         updateBotStatusOnError(botConfig.id, err.message);
     }
 }
-
 // Legacy .env migration removed — all bot credentials are now stored in DB (bot_instances table).
 // If process.env.TELEGRAM_BOT_TOKEN or LINE_CHANNEL_ACCESS_TOKEN still exist in .env,
 // they are safely ignored. Bot management is fully handled via dashboard + DB registry.
-
 // Public API
-
 /** Start a single bot by registry ID (uses stored app reference) */
 export function startBotInstance(app: express.Express | null, botId: string): boolean {
     const effectiveApp = app || _expressApp;
@@ -523,13 +455,10 @@ export function startBotInstance(app: express.Express | null, botId: string): bo
         updateBotStatusOnError(botId, 'Missing LLM provider API key (e.g. Gemini). Please configure one.');
         return false;
     }
-
     const botConfig = getBot(botId);
     if (!botConfig) return false;
-
     // Stop existing instance if running
     stopBotInstance(botId);
-
     switch (botConfig.platform) {
         case 'telegram':
             startTelegramBot(botConfig);
@@ -544,7 +473,6 @@ export function startBotInstance(app: express.Express | null, botId: string): bo
                 updateBotStatusOnError(botId, 'Socket.IO subsystem not ready for Facebook Automation');
                 return false;
             }
-            
             // Start both Chat and Comment monitors
             startChatMonitor(io).catch(err => {
                 logger.error('[BotManager] Error starting FB Chat Monitor:', err);
@@ -552,7 +480,6 @@ export function startBotInstance(app: express.Express | null, botId: string): bo
             startCommentMonitor(io).catch(err => {
                 logger.error('[BotManager] Error starting FB Comment Monitor:', err);
             });
-
             // Register in activeBots so it can be stopped
             activeBots.set(botConfig.id, {
                 type: 'facebook',
@@ -573,7 +500,6 @@ export function startBotInstance(app: express.Express | null, botId: string): bo
             return false;
     }
 }
-
 /** Stop a single bot by registry ID */
 export function stopBotInstance(botId: string): void {
     const active = activeBots.get(botId);
@@ -588,16 +514,20 @@ export function stopBotInstance(botId: string): void {
     }
     updateBot(botId, { status: 'stopped', last_error: null });
 }
-
 /** Async version of stopBotInstance — waits for Telegram polling to fully close */
 export async function stopBotInstanceAsync(botId: string): Promise<void> {
     const active = activeBots.get(botId);
     if (active) {
         try {
             // Telegraf.stop() returns a Promise; wait for polling to fully close
+            // For non-Telegram bots, active.stop() might be sync or async,
+            // Promise.resolve() handles both cases gracefully.
             await Promise.resolve(active.stop());
+            // Telegraf.stop() returns a Promise; wait for polling to fully close
             // Give Telegram API a moment to release the polling session
-            await new Promise(resolve => setTimeout(resolve, 500));
+            if (active.type === 'telegram') {
+                await new Promise(resolve => setTimeout(resolve, 500));
+            }
         } catch (e) {
             logger.error(`[BotManager] Failed to stop bot instance "${botId}":`, e);
         }
@@ -606,25 +536,20 @@ export async function stopBotInstanceAsync(botId: string): Promise<void> {
     }
     updateBot(botId, { status: 'stopped', last_error: null });
 }
-
 /** Start all bots (called at server startup) */
 export function startBots(app: express.Express) {
     // Store app reference for later dynamic start/stop
     _expressApp = app;
-
     if (!getAiAgent()) {
         console.error("[BotManager] Missing LLM provider keys. Telegram/LINE bots cannot start.");
         console.error("[BotManager] 💡 กรุณาเพิ่ม API Key (เช่น OpenRouter, Gemini) ผ่าน Dashboard > Settings");
     }
-
     // All bot credentials are stored in DB — no .env migration needed
-
     // Start all registered bots that are marked 'active'
     // (newly migrated bots are set to 'active', manually stopped bots stay 'stopped')
     // IMPORTANT: Detect duplicate tokens to prevent 409 Conflict errors
     const bots = listBots();
     const launchedTokens = new Map<string, string>(); // token -> bot.id that launched it
-
     for (const bot of bots) {
         if (bot.status === 'active' || bot.status === 'error') {
             // Check for duplicate Telegram tokens before launching
@@ -643,17 +568,14 @@ export function startBots(app: express.Express) {
             startBotInstance(app, bot.id);
         }
     }
-
     // Verify CLI API Health in the background
     verifyCliConnections().catch((err: any) => {
         console.error('[BotManager] Error verifying CLI connections:', err);
     });
 }
-
 /** Broadcast an alert message to all configured Admin Telegram/Line IDs */
 export async function broadcastToAdmins(message: string): Promise<void> {
     const formattedMessage = `🚨 [SYSTEM ALERT]\n${message}`;
-    
     // Broadcast via active Telegram Bots
     const telegramAdmins = getAdminIds('telegram');
     if (telegramAdmins.size > 0) {
@@ -670,7 +592,6 @@ export async function broadcastToAdmins(message: string): Promise<void> {
             }
         }
     }
-
     // Broadcast via active LINE Bots
     const lineAdmins = getAdminIds('line');
     if (lineAdmins.size > 0) {
@@ -688,51 +609,41 @@ export async function broadcastToAdmins(message: string): Promise<void> {
         }
     }
 }
-
 export function setupBotManagerRoutes(app: express.Express) {
     // Dashboard API and static files
     app.use('/personal-ai', express.static('public_personal_ai'));
-
     app.get('/api/config', (_req, res) => {
         res.json(configManager.getConfig());
     });
-
     app.post('/api/config', (req, res) => {
         configManager.updateConfig(req.body);
         res.json({ success: true });
     });
-
     app.get('/api/memory/episodes', (_req, res) => {
         const episodes = getDb().prepare('SELECT * FROM episodes ORDER BY id DESC LIMIT 100').all();
         res.json(episodes);
     });
-
     app.get('/api/memory/knowledge', (_req, res) => {
         const knowledge = getDb().prepare('SELECT id, chat_id, fact, timestamp FROM knowledge ORDER BY id DESC').all();
         res.json(knowledge);
     });
-
     app.delete('/api/memory/knowledge/:id', (req, res) => {
         getDb().prepare('DELETE FROM knowledge WHERE id = ?').run(req.params.id);
         res.json({ success: true });
     });
-
     app.post('/api/cli/chat', async (req, res) => {
         const agent = getAiAgent();
         if (!agent) {
             res.status(500).json({ error: 'AI Agent is not initialized' });
             return;
         }
-
         const { message, chatId = 'web_dashboard_user', platform = 'web', botId = 'web-cli' } = req.body;
         if (!message) {
             res.status(400).json({ error: 'Message is required' });
             return;
         }
-
         try {
             upsertConversation(chatId, 'web_dashboard', 'Web Dashboard User');
-
             const ctx = {
                 botId,
                 botName: 'Web CLI Bot',
@@ -745,7 +656,6 @@ export function setupBotManagerRoutes(app: express.Express) {
                     return 'File sent successfully (file preview is limited in this simple CLI mode)';
                 }
             };
-
             const responseText = await agent.processMessage(chatId, message, ctx);
             res.json({ reply: responseText });
         } catch (err: any) {
@@ -753,7 +663,6 @@ export function setupBotManagerRoutes(app: express.Express) {
             res.status(500).json({ error: err.message });
         }
     });
-
     app.get('/api/models/:provider', async (req, res) => {
         const agent = getAiAgent();
         let models: any[] = [];
@@ -768,7 +677,6 @@ export function setupBotManagerRoutes(app: express.Express) {
         res.json(models);
     });
 }
-
 /** Stop all bot agents gracefully */
 export function stopBots(): void {
     for (const [id, bot] of activeBots) {
@@ -781,7 +689,6 @@ export function stopBots(): void {
     }
     activeBots.clear();
 }
-
 /** Async version — waits for all bots to fully stop (use in graceful shutdown) */
 export async function stopBotsAsync(): Promise<void> {
     const stopPromises = Array.from(activeBots.entries()).map(async ([id, bot]) => {
@@ -795,12 +702,10 @@ export async function stopBotsAsync(): Promise<void> {
     await Promise.allSettled(stopPromises);
     activeBots.clear();
 }
-
 /** Get list of active bot IDs */
 export function getActiveBotIds(): string[] {
     return Array.from(activeBots.keys());
 }
-
 /** Headless message sending for Agents and Cron Jobs */
 export async function sendDirectMessage(botId: string, chatPlatformId: string, text: string): Promise<boolean> {
     const act = activeBots.get(botId);
@@ -808,7 +713,6 @@ export async function sendDirectMessage(botId: string, chatPlatformId: string, t
         console.warn(`[BotManager] Cannot send direct message: bot ${botId} is not active`);
         return false;
     }
-
     try {
         if (act.type === 'telegram') {
             const telegraf = act.instance as Telegraf;
@@ -830,6 +734,3 @@ export async function sendDirectMessage(botId: string, chatPlatformId: string, t
         return false;
     }
 }
-
-
-
