@@ -384,7 +384,7 @@ export const api = {
 
   // Conversations
   getConversations: () => request('/conversations'),
-  getConversationMessages: (convId: string) => request(`/conversations/${convId}/messages`),
+  getConversationMessages: (convId: string) => request(`/conversations/${encodeURIComponent(convId)}/messages`),
 
   // Bot Personas (file-based: AGENTS.md / IDENTITY.md / SOUL.md / TOOLS.md)
   getAllBotPersonas: () => request('/bot-personas'),
@@ -462,6 +462,18 @@ export const api = {
 
   // Terminal backends
   getTerminalBackends: (refresh = false) => request(`/terminal/backends${refresh ? '?refresh=1' : ''}`),
+
+  // CLI Manager — Dynamic CLI discovery, login status, model listing, per-CLI settings
+  getCliTopology: (refresh = false) => request(`/cli-manager/discover${refresh ? '?refresh=1' : ''}`),
+  getCliStatus: (cliId: string) => request(`/cli-manager/status/${encodeURIComponent(cliId)}`),
+  getCliModels: (cliId: string) => request(`/cli-manager/models/${encodeURIComponent(cliId)}`),
+  saveCliSettings: (cliId: string, settings: Record<string, unknown>) =>
+    request(`/cli-manager/settings/${encodeURIComponent(cliId)}`, { method: 'POST', body: JSON.stringify(settings) }),
+  testCliConnection: (cliId: string) =>
+    request(`/cli-manager/test/${encodeURIComponent(cliId)}`, { method: 'POST' }),
+  getCliMentionMap: () => request('/cli-manager/mention-map'),
+  updateCliMentionConfig: (cliId: string, enabled: boolean, model?: string) =>
+    request('/cli-manager/mention-config', { method: 'POST', body: JSON.stringify({ cliId, enabled, model }) }),
 
   // MeetingRoom (Roundtable)
   startMeeting: (data: { objective: string; maxRounds?: number; timeoutPerCliMs?: number }) =>
@@ -544,6 +556,8 @@ export const api = {
     request('/upgrade/proposals/retry-rejected', { method: 'POST' }),
   deleteAllRejectedProposals: () =>
     request('/upgrade/proposals/rejected', { method: 'DELETE' }),
+  resetAllUpgradeProposals: () =>
+    request('/upgrade/proposals/reset-all', { method: 'POST' }),
   triggerUpgradeScan: () =>
     request('/upgrade/scan', { method: 'POST' }),
   updateUpgradeConfig: (config: { intervalMs?: number, idleThresholdMs?: number, autoFix?: boolean }) =>
@@ -578,10 +592,14 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ reason })
     }),
+  forceStopUpgrade: () =>
+    request('/upgrade/force-stop', { method: 'POST' }),
   getUpgradeProposalLog: (id: number) =>
     request(`/upgrade/proposals/${id}/log`),
   getUpgradeProposalTrace: (id: number) =>
     request(`/upgrade/proposals/${id}/trace`),
+  resetUpgradeTokens: () =>
+    request('/upgrade/tokens/reset', { method: 'POST' }),
 
   // Cron Jobs (Agentic Automation)
   getCronJobs: () => request('/cron-jobs'),

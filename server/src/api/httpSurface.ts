@@ -12,6 +12,7 @@ import providerRoutes from './providerRoutes.js';
 import systemRouter from './systemRouter.js';
 import upgradeRoutes from './upgradeRoutes.js';
 import cronRoutes from './cronRoutes.js';
+import cliManagerRoutes from './cliManagerRoutes.js';
 import { chatQueue, webhookQueue } from '../queue.js';
 import { setWebhookBroadcast } from '../facebook/webhookHandler.js';
 import { requireReadWriteAuth } from '../utils/auth.js';
@@ -80,6 +81,7 @@ function setupApiRoutes(app: express.Express, readWriteGuard: express.RequestHan
   app.use('/api/providers', providerRoutes);
   app.use('/api', goalRoutes);
   app.use('/api/upgrade', readWriteGuard, upgradeRoutes);
+  app.use('/api/cli-manager', cliManagerRoutes);
   app.use('/webhook', fbRouter);
 }
 

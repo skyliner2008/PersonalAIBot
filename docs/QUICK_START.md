@@ -5,7 +5,7 @@
 ### 1. Build the Project
 
 ```bash
-cd /sessions/intelligent-modest-gauss/mnt/PersonalAIBotV2/server
+cd /sessions/intelligent-modest-gauss/mnt/PersonalAIBot/server
 npm run build
 ```
 

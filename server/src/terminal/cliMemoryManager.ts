@@ -114,16 +114,29 @@ export async function migrateLegacyCliMemoryIfNeeded(
   const newConversationId = buildCliConversationId(backendId, userInput, platform, userId);
   const legacyConversationId = buildLegacyCliConversationId(backendId, userInput, platform, userId);
 
-  // Check if legacy conversation exists
+  // Skip migration when the new conversation already has data.
+  const newMessageCount = await getMessageCount(newConversationId);
+  if (newMessageCount > 0) {
+    return null;
+  }
+
+  // Only migrate when legacy conversation actually has data.
   const legacySummary = await getConversationSummary(legacyConversationId);
-  if (!legacySummary) {
+  const legacyMessageCount = await getMessageCount(legacyConversationId);
+  const hasLegacyData =
+    legacyMessageCount > 0 ||
+    legacySummary.summaryMsgCount > 0 ||
+    legacySummary.summary.trim().length > 0;
+
+  if (!hasLegacyData) {
     return null;
   }
 
   // Migrate to new conversation
   try {
     const legacyMessages = await getConversationMessages(legacyConversationId);
-    await upsertConversation(newConversationId, 'legacy-user-id', 'Migrated User');
+    const cliLabel = backendId.replace(/-cli$/i, '').toUpperCase();
+    await upsertConversation(newConversationId, 'legacy-user-id', `CLI Session (${cliLabel})`);
 
     for (const msg of legacyMessages) {
       await addMessage(newConversationId, msg.role, msg.content, msg.fb_message_id ?? undefined);

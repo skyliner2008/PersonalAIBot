@@ -36,11 +36,38 @@ export function safeJsonParse<T = any>(text: string): T {
     }
 
     if (start !== -1 && end !== -1 && end > start) {
-      const extracted = cleaned.substring(start, end + 1);
+      let extracted = cleaned.substring(start, end + 1);
+      
+      // Basic AI JSON Healing
+      // 1. Fix unescaped multiline strings (LLM common error)
+      // JSON.parse fails if there are raw newlines inside strings.
+      extracted = extracted.replace(/"((?:[^"\\]|\\.)*)"/g, (match, content) => {
+        return '"' + content.replace(/\n/g, '\\n') + '"';
+      });
+
+      // 2. Remove trailing commas before closing braces/brackets
+      extracted = extracted.replace(/,\s*([\]}])/g, '$1');
+
+      // 3. Try to add missing commas between property-value pairs (heuristic)
+      // Handles: "val" "key":, 123 "key":, true "key":, ] "key":, } "key":
+      // Improved: Handle property names with dots, dashes, slashes, and spaces
+      extracted = extracted.replace(/(\d|true|false|null|["}\]])\s*(\n\s*)?(\s*["\w\-\.\/ ]+":)/g, '$1,$2$3');
+      
+      // 4. Fix missing comma between successive objects/arrays: } { -> }, {
+      extracted = extracted.replace(/}\s*{/g, '},{');
+      extracted = extracted.replace(/]\s*\[/g, '],[');
+
+      // 5. Fix missing closing braces if basic structure is detectable
+      const openBraces = (extracted.match(/{/g) || []).length;
+      const closeBraces = (extracted.match(/}/g) || []).length;
+      if (openBraces > closeBraces) {
+        extracted = extracted.trim() + '}'.repeat(openBraces - closeBraces);
+      }
+
       try {
         return JSON.parse(extracted);
       } catch (innerErr: any) {
-        throw new Error(`Failed to parse JSON even after extraction. Original error: ${err.message}. Content: ${extracted.substring(0, 100)}...`);
+        throw new Error(`Failed to parse JSON even after extraction. Original error: ${err.message}. Content: ${extracted.substring(0, 150)}...`);
       }
     }
     

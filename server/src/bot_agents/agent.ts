@@ -249,7 +249,13 @@ export class Agent {
 
       // 2. Build Context
       const memoryCtx = await buildContext(chatId, cleanMessage, { maxArchival: 5, archivalThreshold: 0.55 });
-      umAddMessage(chatId, 'user', cleanMessage);
+      const memoryMetadata = {
+        botId: ctx?.botId || undefined,
+        botName: ctx?.botName || undefined,
+        platform: ctx?.platform || undefined,
+        specialist: ctx?.botId?.startsWith('specialist_') ? ctx.botId.replace(/^specialist_/, '') : undefined,
+      };
+      umAddMessage(chatId, 'user', cleanMessage, 'chat', memoryMetadata);
       addEpisode(chatId, 'user', cleanMessage);
 
       const history: AIMessage[] = memoryCtx.workingMessages.map(m => ({
@@ -529,7 +535,7 @@ Strict Rules:
             if (response.text) {
               finalResponseText = response.text;
               currentContents.push({ role: 'assistant', parts: [{ text: finalResponseText }] });
-              umAddMessage(chatId, 'assistant', finalResponseText);
+              umAddMessage(chatId, 'assistant', finalResponseText, 'chat', memoryMetadata);
               addEpisode(chatId, 'model', finalResponseText);
               break;
             }

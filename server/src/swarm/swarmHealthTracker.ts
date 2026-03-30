@@ -137,7 +137,12 @@ export class SwarmHealthTracker {
       }
     }
 
-    this.specialistProcessing.delete(specialistName);
+    const currentQueue = this.specialistUpdateQueue.get(specialistName);
+    if(currentQueue && currentQueue.length > 0) {
+      process.nextTick(() => this.processQueue(specialistName));
+    } else {
+      this.specialistProcessing.delete(specialistName);
+    }
   }
 
   /**

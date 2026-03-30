@@ -26,6 +26,7 @@ import { Agent, getLatestRun } from '../bot_agents/agent.js';
 import { executeCommandDetailed, type CommandTokenUsage } from '../terminal/terminalGateway.js';
 import { saveArchivalFact, addMessage as logToUnifiedMemory } from '../memory/unifiedMemory.js';
 import { getRootAdminIdentity, getRootAdminSpecialistName } from '../system/rootAdmin.js';
+import { agentEvents } from '../utils/socketBroadcast.js';
 import {
   type SwarmBatch,
   type SwarmBatchStatus,
@@ -570,6 +571,9 @@ export class SwarmCoordinator {
     if (!started) return;
 
     swarmInfo(`[SwarmCoordinator] Executing task ${task.id} with specialist: ${specialist.name}`);
+
+    // Broadcast agent activation for Brain Visualizer node flash
+    agentEvents.active({ agentId: specialist.name });
 
     const taskMessage = this.resolveTaskMessage(task);
     const executionStartedAt = Date.now();
@@ -1775,6 +1779,12 @@ export class SwarmCoordinator {
       completionTokens,
       totalTokens,
     };
+
+    // Broadcast token usage for Brain Visualizer token pulse animation
+    agentEvents.tokenUsage({
+      promptTokens: promptTokens || 0,
+      completionTokens: completionTokens || 0,
+    });
   }
 
   /**

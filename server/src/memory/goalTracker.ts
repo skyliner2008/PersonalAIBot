@@ -137,7 +137,7 @@ export function updateSubGoal(goalId: string, subGoalId: string, updates: Partia
   // Use a transaction to ensure atomicity for the read-modify-write operation.
   const result = db.transaction(() => {
     const goal = getGoalById(goalId); // Re-fetch inside transaction to get latest state
-    if (!goal) return null;
+    if (!goal) { log.warn(`Goal with ID ${goalId} not found for subgoal update.`); return null; }
 
     const subGoals = goal.subGoals.map(sg => {
       if (sg.id === subGoalId) return { ...sg, ...updates };

@@ -376,56 +376,82 @@ function detectHuggingFace(): OAuthCredential | null {
   };
 }
 
-/** Ollama (local) — not OAuth but useful */
+/** Ollama (local/cloud) — not OAuth but useful */
 function detectOllama(): OAuthCredential | null {
-  const ollamaPath = execSafe('which ollama') || execSafe('where ollama');
+  const ollamaPath = execSafe('where ollama 2>nul') || execSafe('which ollama 2>/dev/null');
   if (!ollamaPath) return null;
 
-  // Check if Ollama is running
-  try {
-    const res = execSafe('curl -s -o /dev/null -w "%{http_code}" http://localhost:11434/api/tags', 2000);
-    if (res !== '200') {
-      return {
-        providerId: 'ollama',
-        name: 'Ollama (Local)',
-        cliTool: 'ollama',
-        source: 'Ollama local server',
-        valid: false,
-        providerType: 'openai-compatible',
-        category: 'llm',
-        error: 'Ollama not running. Start with: ollama serve',
-      };
+  // Determine Ollama host (supports remote/cloud Ollama instances)
+  const ollamaHost = process.env.OLLAMA_HOST || 'http://localhost:11434';
+  const baseApiUrl = ollamaHost.replace(/\/$/, '');
+
+  // Try to get model list via 'ollama list' command first (most reliable on Windows)
+  let models: string[] = [];
+  let serverRunning = false;
+
+  const ollamaListResult = execSafe('ollama list 2>&1', 5000);
+  if (ollamaListResult && !ollamaListResult.includes('Error') && !ollamaListResult.includes('connection refused') && !ollamaListResult.includes('could not connect')) {
+    serverRunning = true;
+    // Parse 'ollama list' output: first column is model name, skip header
+    const lines = ollamaListResult.split('\n').slice(1);
+    models = lines
+      .map(line => line.trim().split(/\s+/)[0])
+      .filter(m => m && m.length > 1 && m.includes(':'));
+    // Also include names without the :tag suffix for flexibility
+    if (models.length === 0) {
+      models = lines
+        .map(line => line.trim().split(/\s+/)[0])
+        .filter(m => m && m.length > 1);
     }
-  } catch {
+  }
+
+  // Fallback: try HTTP API if 'ollama list' didn't work
+  if (!serverRunning) {
+    try {
+      const curlCmd = process.platform === 'win32'
+        ? `curl -s -o nul -w "%%{http_code}" ${baseApiUrl}/api/tags`
+        : `curl -s -o /dev/null -w "%{http_code}" ${baseApiUrl}/api/tags`;
+      const res = execSafe(curlCmd, 3000);
+      if (res && (res.includes('200') || res === '200')) {
+        serverRunning = true;
+      }
+    } catch { /* ignore */ }
+  }
+
+  // Try HTTP API for models if 'ollama list' didn't get them
+  if (serverRunning && models.length === 0) {
+    try {
+      const modelsJson = execSafe(`curl -s ${baseApiUrl}/api/tags`, 5000);
+      if (modelsJson) {
+        const parsed = JSON.parse(modelsJson);
+        models = (parsed.models || []).map((m: any) => m.name).filter(Boolean);
+      }
+    } catch { /* ignore */ }
+  }
+
+  if (!serverRunning) {
     return {
       providerId: 'ollama',
       name: 'Ollama (Local)',
       cliTool: 'ollama',
-      source: 'Ollama local server',
-      valid: false,
+      source: `Ollama — ${ollamaPath.split('\n')[0].trim()}`,
+      valid: true, // CLI is installed — just not running right now
       providerType: 'openai-compatible',
       category: 'llm',
-      error: 'Cannot connect to Ollama. Start with: ollama serve',
+      baseUrl: `${baseApiUrl}/v1`,
+      defaultModel: 'llama3.1',
+      models: [],
+      error: 'Ollama not running. Start with: ollama serve',
     };
   }
-
-  // Get available models
-  let models: string[] = [];
-  try {
-    const modelsJson = execSafe('curl -s http://localhost:11434/api/tags', 3000);
-    if (modelsJson) {
-      const parsed = JSON.parse(modelsJson);
-      models = (parsed.models || []).map((m: any) => m.name).filter(Boolean);
-    }
-  } catch { /* ignore */ }
 
   return {
     providerId: 'ollama',
     name: 'Ollama (Local)',
     cliTool: 'ollama',
-    source: `Ollama local — ${models.length} models`,
+    source: `Ollama — ${models.length} models available`,
     valid: true,
-    baseUrl: 'http://localhost:11434/v1',
+    baseUrl: `${baseApiUrl}/v1`,
     defaultModel: models[0] || 'llama3.1',
     models,
     providerType: 'openai-compatible',
@@ -516,8 +542,17 @@ function detectGeminiCLI(): OAuthCredential | null {
   const version = execSafe('gemini --version 2>&1') || execSafe('gemini --help 2>&1');
   const valid = !!version && !version.includes('not found');
 
-  // Gemini CLI usually requires an API key, we won't auto-import it from .env
-  const apiKey = '';
+  // Gemini CLI may use GEMINI_API_KEY or Google OAuth
+  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '';
+
+  // Try to get live models if API key is available
+  let models = ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-1.5-flash'];
+  if (apiKey) {
+    const liveModels = fetchGeminiModels(apiKey);
+    if (liveModels.length > 0) {
+      models = liveModels;
+    }
+  }
 
   return {
     providerId: 'gemini-cli',
@@ -528,7 +563,7 @@ function detectGeminiCLI(): OAuthCredential | null {
     accessToken: apiKey || undefined,
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
     defaultModel: 'gemini-2.0-flash',
-    models: ['gemini-1.5-pro', 'gemini-2.0-flash', 'gemini-1.5-flash'],
+    models,
     providerType: 'gemini',
     category: 'llm',
     error: valid ? undefined : 'Gemini CLI found but may not be functional',
@@ -583,8 +618,17 @@ function detectClaudeCLI(): OAuthCredential | null {
     && !version.toLowerCase().includes('not found')
     && !version.toLowerCase().includes('no such file');
 
-  // Claude CLI uses an internal token or env var, we won't auto-import .env here
-  const apiKey = '';
+  // Claude CLI uses ANTHROPIC_API_KEY or internal OAuth
+  const apiKey = process.env.ANTHROPIC_API_KEY || '';
+
+  // Try to get live models
+  let models = ['claude-opus-4-20250514', 'claude-sonnet-4-20250514', 'claude-haiku-4-20250414'];
+  if (apiKey) {
+    const liveModels = fetchAnthropicModels(apiKey);
+    if (liveModels.length > 0) {
+      models = liveModels;
+    }
+  }
 
   return {
     providerId: 'claude-cli',
@@ -595,7 +639,7 @@ function detectClaudeCLI(): OAuthCredential | null {
     accessToken: apiKey || undefined,
     baseUrl: 'https://api.anthropic.com',
     defaultModel: 'claude-sonnet-4-20250514',
-    models: ['claude-opus-4-20250514', 'claude-sonnet-4-20250514', 'claude-haiku-4-20250414'],
+    models,
     providerType: 'anthropic',
     category: 'llm',
     error: valid ? undefined : 'Claude CLI found but may not be functional',
@@ -620,10 +664,23 @@ function detectOpenAICLI(): OAuthCredential | null {
       error: 'OpenAI CLI found but could not verify functionality.',
     };
   }
-  const apiKey = '';
+  const apiKey = process.env.OPENAI_API_KEY || '';
 
   // Valid if: openai binary exists AND version check passes
   const valid = !version.includes('not found') && !version.includes('is not recognized');
+
+  // Try live model listing
+  let models = ['gpt-4o', 'gpt-4o-mini', 'o3-mini', 'gpt-4-turbo'];
+  if (apiKey) {
+    const liveModels = fetchOpenAIModels(apiKey);
+    if (liveModels.length > 0) {
+      // Filter to chat models
+      const chatModels = liveModels.filter(m =>
+        m.includes('gpt-4') || m.includes('gpt-3.5') || m.includes('o3') || m.includes('o4') || m.includes('o1')
+      );
+      if (chatModels.length > 0) models = chatModels;
+    }
+  }
 
   return {
     providerId: 'openai-cli',
@@ -634,7 +691,7 @@ function detectOpenAICLI(): OAuthCredential | null {
     accessToken: apiKey || undefined,
     baseUrl: 'https://api.openai.com/v1',
     defaultModel: 'gpt-4o',
-    models: ['gpt-4o', 'gpt-4o-mini', 'o3-mini', 'gpt-4-turbo'],
+    models,
     providerType: 'openai-compatible',
     category: 'llm',
     error: valid ? undefined : 'OpenAI CLI found but needs OPENAI_API_KEY to function',
@@ -655,8 +712,21 @@ function detectCodexCLI(): OAuthCredential | null {
   const version = execSafe('codex --version 2>&1');
   const valid = !!version && !version.includes('not found');
 
-  // Don't auto-read .env for codex
-  const apiKey = '';
+  // Codex uses OPENAI_API_KEY
+  const apiKey = process.env.OPENAI_API_KEY || '';
+
+  // Try live model listing
+  let models = ['gpt-5.3-codex', 'o4-mini', 'gpt-4.1', 'gpt-4o'];
+  if (apiKey) {
+    const liveModels = fetchOpenAIModels(apiKey);
+    if (liveModels.length > 0) {
+      // Filter to coding-relevant models
+      const codingModels = liveModels.filter(m =>
+        m.includes('gpt-4') || m.includes('gpt-5') || m.includes('o3') || m.includes('o4') || m.includes('o1') || m.includes('codex')
+      );
+      if (codingModels.length > 0) models = codingModels;
+    }
+  }
 
   return {
     providerId: 'codex-cli',
@@ -667,7 +737,7 @@ function detectCodexCLI(): OAuthCredential | null {
     accessToken: apiKey || undefined,
     baseUrl: 'https://api.openai.com/v1',
     defaultModel: 'gpt-5.3-codex',
-    models: ['gpt-5.3-codex', 'o4-mini', 'gpt-4.1'],
+    models,
     providerType: 'openai-compatible',
     category: 'llm',
     error: valid ? undefined : 'Codex CLI found but may not be functional',
@@ -730,6 +800,202 @@ function detectKiloCLI(): OAuthCredential | null {
   };
 }
 
+/** Aider CLI — AI pair programming */
+function detectAiderCLI(): OAuthCredential | null {
+  const aiderPath = execSafe('where aider 2>nul') || execSafe('which aider 2>/dev/null');
+  if (!aiderPath) return null;
+
+  const version = execSafe('aider --version 2>&1');
+  const valid = !!version && !version.includes('not found') && !version.includes('is not recognized');
+
+  if (!valid) {
+    return {
+      providerId: 'aider-cli',
+      name: 'Aider CLI',
+      cliTool: 'aider',
+      source: `Aider CLI — ${aiderPath.split('\n')[0].trim()}`,
+      valid: false,
+      providerType: 'openai-compatible',
+      category: 'llm',
+      error: 'Aider CLI found but could not verify functionality.',
+    };
+  }
+
+  // Aider uses OPENAI_API_KEY or ANTHROPIC_API_KEY, or its own .aider.conf.yml
+  const hasOpenAI = !!(process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.length > 20);
+  const hasAnthropic = !!(process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY.length > 20);
+  // Check aider's own config files
+  const aiderConfPaths = [
+    path.join(os.homedir(), '.aider.conf.yml'),
+    path.join(os.homedir(), '.aider', 'config.yml'),
+  ];
+  const hasAiderConf = aiderConfPaths.some(p => fileExists(p));
+  const hasAuth = hasOpenAI || hasAnthropic || hasAiderConf;
+
+  return {
+    providerId: 'aider-cli',
+    name: 'Aider CLI',
+    cliTool: 'aider',
+    source: `Aider CLI — ${aiderPath.split('\n')[0].trim()}`,
+    valid: true, // CLI is functional — auth is separate
+    baseUrl: hasAnthropic ? 'https://api.anthropic.com' : 'https://api.openai.com/v1',
+    defaultModel: hasAnthropic ? 'claude-sonnet-4-20250514' : 'gpt-4o',
+    models: [
+      'gpt-4o', 'gpt-4-turbo', 'claude-sonnet-4-20250514',
+      'claude-haiku-4-20250414', 'gemini-2.0-flash',
+      'deepseek/deepseek-coder',
+    ],
+    providerType: hasAnthropic ? 'anthropic' : 'openai-compatible',
+    category: 'llm',
+    error: hasAuth ? undefined : 'Aider needs OPENAI_API_KEY or ANTHROPIC_API_KEY',
+  };
+}
+
+/** Qwen CLI (qwen) — Alibaba Qwen AI CLI */
+function detectQwenCLI(): OAuthCredential | null {
+  const qwenPath = execSafe('where qwen 2>nul') || execSafe('which qwen 2>/dev/null');
+  if (!qwenPath) return null;
+
+  const version = execSafe('qwen --version 2>&1') || execSafe('qwen --help 2>&1');
+  const valid = !!version && !version.includes('not found') && !version.includes('is not recognized');
+
+  if (!valid) {
+    return {
+      providerId: 'qwen-cli',
+      name: 'Qwen CLI',
+      cliTool: 'qwen',
+      source: `Qwen CLI — ${qwenPath.split('\n')[0].trim()}`,
+      valid: false,
+      providerType: 'openai-compatible',
+      category: 'llm',
+      error: 'Qwen CLI found but could not verify functionality.',
+    };
+  }
+
+  // Qwen CLI can use env var OR its own internal auth (login via browser OAuth)
+  const apiKey = process.env.DASHSCOPE_API_KEY || '';
+  // Check various config locations Qwen CLI might use
+  const qwenConfigPaths = [
+    path.join(os.homedir(), '.qwen', 'config.json'),
+    path.join(os.homedir(), '.qwen', 'credentials'),
+    path.join(os.homedir(), '.config', 'qwen', 'config.json'),
+    path.join(os.homedir(), '.dashscope', 'credentials'),
+  ];
+  const hasConfig = qwenConfigPaths.some(p => fileExists(p));
+  // If CLI responds to --version, it's installed and likely already authenticated via its own login
+  const hasAuth = apiKey.length > 10 || hasConfig;
+
+  return {
+    providerId: 'qwen-cli',
+    name: 'Qwen CLI',
+    cliTool: 'qwen',
+    source: `Qwen CLI — ${qwenPath.split('\n')[0].trim()}`,
+    valid: true, // CLI is functional — user confirmed it works
+    accessToken: apiKey || undefined,
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    defaultModel: 'qwen-max',
+    models: ['qwen-max', 'qwen-plus', 'qwen-turbo', 'qwen-long', 'qwen-vl-max'],
+    providerType: 'openai-compatible',
+    category: 'llm',
+    error: hasAuth ? undefined : undefined, // CLI handles its own auth internally
+  };
+}
+
+/** OpenCode CLI (opencode) — Multi-model coding CLI */
+function detectOpenCodeCLI(): OAuthCredential | null {
+  const opencodePath = execSafe('where opencode 2>nul') || execSafe('which opencode 2>/dev/null');
+  if (!opencodePath) return null;
+
+  const version = execSafe('opencode --version 2>&1') || execSafe('opencode --help 2>&1');
+  const valid = !!version && !version.includes('not found') && !version.includes('is not recognized');
+
+  if (!valid) {
+    return {
+      providerId: 'opencode-cli',
+      name: 'OpenCode CLI',
+      cliTool: 'opencode',
+      source: `OpenCode CLI — ${opencodePath.split('\n')[0].trim()}`,
+      valid: false,
+      providerType: 'openai-compatible',
+      category: 'llm',
+      error: 'OpenCode CLI found but could not verify functionality.',
+    };
+  }
+
+  // OpenCode stores auth in its own config directory
+  const hasKey = !!(process.env.OPENCODE_API_KEY && process.env.OPENCODE_API_KEY.length > 10);
+  const opencodeConfigPaths = [
+    path.join(os.homedir(), '.opencode', 'config.json'),
+    path.join(os.homedir(), '.opencode', 'credentials'),
+    path.join(os.homedir(), '.config', 'opencode', 'config.json'),
+    path.join(os.homedir(), '.opencode.json'),
+  ];
+  const hasConfig = opencodeConfigPaths.some(p => fileExists(p));
+
+  return {
+    providerId: 'opencode-cli',
+    name: 'OpenCode CLI',
+    cliTool: 'opencode',
+    source: `OpenCode CLI — ${opencodePath.split('\n')[0].trim()}`,
+    valid: true, // CLI is functional — user confirmed it works
+    baseUrl: '',
+    defaultModel: 'kimi-k2.5',
+    models: ['kimi-k2.5', 'kimi-k2', 'deepseek-r1', 'deepseek-v3', 'moonshot-v1-8k'],
+    providerType: 'openai-compatible',
+    category: 'llm',
+    error: (hasKey || hasConfig) ? undefined : undefined, // CLI handles its own auth
+  };
+}
+
+// ─── Live Model Fetching Helpers ────────────────────────────────────────────
+
+/** Try to get real models from Gemini API using the existing API key */
+function fetchGeminiModels(apiKey: string): string[] {
+  try {
+    const raw = execSafe(
+      `curl -s "https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}"`,
+      8000
+    );
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!parsed.models) return [];
+    return (parsed.models as any[])
+      .filter(m => m.supportedGenerationMethods?.includes('generateContent'))
+      .map(m => (m.name as string).replace('models/', ''))
+      .filter(name => name.startsWith('gemini'));
+  } catch { return []; }
+}
+
+/** Try to get real models from OpenAI-compatible API */
+function fetchOpenAIModels(apiKey: string, baseUrl = 'https://api.openai.com/v1'): string[] {
+  try {
+    const raw = execSafe(
+      `curl -s -H "Authorization: Bearer ${apiKey}" "${baseUrl}/models"`,
+      8000
+    );
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!parsed.data) return [];
+    return (parsed.data as any[])
+      .map(m => m.id as string)
+      .filter(id => id && !id.includes('embedding') && !id.includes('whisper') && !id.includes('dall-e') && !id.includes('tts'));
+  } catch { return []; }
+}
+
+/** Try to get real models from Anthropic API */
+function fetchAnthropicModels(apiKey: string): string[] {
+  try {
+    const raw = execSafe(
+      `curl -s -H "x-api-key: ${apiKey}" -H "anthropic-version: 2023-06-01" "https://api.anthropic.com/v1/models"`,
+      8000
+    );
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!parsed.data) return [];
+    return (parsed.data as any[]).map(m => m.id as string).filter(Boolean);
+  } catch { return []; }
+}
+
 // ─── Main Scanner ────────────────────────────────────────────────────────────
 
 const DETECTORS: Array<{ name: string; detect: () => OAuthCredential | null }> = [
@@ -746,6 +1012,9 @@ const DETECTORS: Array<{ name: string; detect: () => OAuthCredential | null }> =
   { name: 'OpenAI CLI', detect: detectOpenAICLI },
   { name: 'Codex CLI', detect: detectCodexCLI },
   { name: 'Kilo Code CLI', detect: detectKiloCLI },
+  { name: 'Aider CLI', detect: detectAiderCLI },
+  { name: 'Qwen CLI', detect: detectQwenCLI },
+  { name: 'OpenCode CLI', detect: detectOpenCodeCLI },
   // Local providers
   { name: 'Ollama (local)', detect: detectOllama },
   { name: 'LM Studio (local)', detect: detectLMStudio },
@@ -792,6 +1061,38 @@ export function refreshOAuthToken(providerId: string): OAuthCredential | null {
   });
   if (!detector) return null;
   return detector.detect();
+}
+
+/**
+ * Fetch live models for a provider using API key + provider type.
+ * Used as a fallback when ProviderFactory.listModels() fails for CLI-based providers.
+ */
+export function fetchLiveModelsForProvider(
+  providerId: string,
+  apiKey: string,
+  providerType?: string,
+  baseUrl?: string
+): string[] {
+  try {
+    // Determine provider type from ID
+    const type = providerType ||
+      (providerId.includes('gemini') ? 'gemini' :
+       providerId.includes('claude') || providerId.includes('anthropic') ? 'anthropic' :
+       'openai-compatible');
+
+    switch (type) {
+      case 'gemini':
+        return fetchGeminiModels(apiKey);
+      case 'anthropic':
+        return fetchAnthropicModels(apiKey);
+      case 'openai-compatible':
+        return fetchOpenAIModels(apiKey, baseUrl || 'https://api.openai.com/v1');
+      default:
+        return [];
+    }
+  } catch {
+    return [];
+  }
 }
 
 /** Get just the list of detected provider IDs (fast check) */

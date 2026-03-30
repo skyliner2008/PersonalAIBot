@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
 import { asyncHandler } from '../../utils/errorHandler.js';
 import { addLog, dbAll, dbGet, dbRun, getDb } from '../../database/db.js';
-import { formatCoreMemory, getCoreMemory, getMemoryStats, getWorkingMemory } from '../../memory/unifiedMemory.js';
+import { formatCoreMemory, getCoreMemory, getMemoryStats, getWorkingMemory, inferConversationDisplayName } from '../../memory/unifiedMemory.js';
 import { parseIntParam } from './shared.js';
 import { requireReadWriteAuth } from '../../utils/auth.js';
 
@@ -92,10 +92,39 @@ async function getConversations(limit: number, offset: number) {
     FROM conversations c
     LEFT JOIN messages m ON m.conversation_id = c.id
     GROUP BY c.id
-    ORDER BY c.last_message_at DESC LIMIT ? OFFSET ?
-  `, [limit, offset]);
-  const totalResult = await dbGet<{ c: number }>('SELECT COUNT(*) as c FROM conversations');
-  return { items: rows, total: totalResult?.c ?? 0 };
+    ORDER BY c.last_message_at DESC
+  `);
+  const mergedMap = new Map<string, any>();
+  for (const row of rows as any[]) {
+    const id = String(row.id || '');
+    // Voice session IDs can be duplicated by casing only (e.g. sRa2 vs sra2)
+    // Merge them into one visible conversation in UI.
+    const key = id.startsWith('voice_') ? id.toLowerCase() : id;
+    const existing = mergedMap.get(key);
+    if (!existing) {
+      mergedMap.set(key, { ...row });
+      continue;
+    }
+
+    existing.message_count = Number(existing.message_count || 0) + Number(row.message_count || 0);
+    const existingTs = new Date(existing.last_message_at || 0).getTime();
+    const rowTs = new Date(row.last_message_at || 0).getTime();
+    if (rowTs > existingTs) {
+      existing.last_message_at = row.last_message_at;
+      existing.updated_at = row.updated_at;
+      existing.id = row.id;
+      existing.fb_user_name = row.fb_user_name;
+    }
+  }
+
+  const mergedItems = Array.from(mergedMap.values())
+    .sort((a, b) => new Date(b.last_message_at || 0).getTime() - new Date(a.last_message_at || 0).getTime())
+    .map((row: any) => ({
+      ...row,
+      fb_user_name: inferConversationDisplayName(String(row.id || ''), 'chat', row.fb_user_name),
+    }));
+  const items = mergedItems.slice(offset, offset + limit);
+  return { items, total: mergedItems.length };
 }
 
 // Conversations (with pagination)
@@ -110,16 +139,28 @@ memoryRoutes.get('/conversations/:id/messages', asyncHandler(async (req, res) =>
   const id = String(req.params.id);
 
   // Validate ID format (UUID, integer, or platform-specific ID) to prevent SQL injection or malformed requests
-  if (!id || !/^[a-zA-Z0-9\-_]+$/.test(id)) {
+  // Allow ':' for scoped conversation ids (e.g. cli:gemini-cli:...),
+  // while still blocking path traversal and control characters.
+  if (!id || !/^[a-zA-Z0-9:_\-.]+$/.test(id)) {
     return res.status(400).json({ success: false, error: 'Invalid conversation ID format' });
   }
 
   const limit = parseIntParam(req.query.limit, 50, 1, 500);
-  const rows = await dbAll(
-    'SELECT * FROM messages WHERE conversation_id = ? ORDER BY timestamp ASC LIMIT ?',
-    [id, limit],
-  );
-  res.json(rows);
+  const isVoiceSession = id.startsWith('voice_');
+  const rows = isVoiceSession
+    ? await dbAll(
+      `SELECT *
+       FROM messages
+       WHERE LOWER(conversation_id) = LOWER(?)
+       ORDER BY timestamp DESC
+       LIMIT ?`,
+      [id, limit],
+    )
+    : await dbAll(
+      'SELECT * FROM messages WHERE conversation_id = ? ORDER BY timestamp DESC LIMIT ?',
+      [id, limit],
+    );
+  res.json((rows || []).reverse());
 }));
 
 // Memory viewer (with pagination)
@@ -133,15 +174,20 @@ memoryRoutes.get('/memory/chats', (req, res) => {
       SELECT e.chat_id,
              COUNT(e.id) as episodeCount,
              MAX(e.timestamp) as lastSeen,
+             c.fb_user_name as displayNameRaw,
              COUNT(*) OVER() as totalCount
       FROM episodes e
+      LEFT JOIN conversations c ON c.id = e.chat_id
       GROUP BY e.chat_id
       ORDER BY lastSeen DESC
       LIMIT ? OFFSET ?
     `).all([limit, offset]) as any[];
 
     const total = rows.length > 0 ? rows[0].totalCount : 0;
-    const items = rows.map(({ totalCount, ...rest }) => rest);
+    const items = rows.map(({ totalCount, displayNameRaw, ...rest }) => ({
+      ...rest,
+      display_name: inferConversationDisplayName(String(rest.chat_id || ''), 'chat', displayNameRaw),
+    }));
 
     res.json({ items, total, limit, offset });
   } catch {

@@ -4,6 +4,7 @@ import { Brain, Archive, BookOpen, User, Trash2, ChevronRight, Search, RefreshCw
 
 interface ChatSummary {
   chat_id: string;
+  display_name?: string;
   episodeCount: number;
   lastSeen: string;
 }
@@ -148,7 +149,7 @@ export function MemoryViewer() {
                 }`}
               >
                 <div className="flex items-center justify-between">
-                  <span className="truncate font-mono text-xs flex-1">{chat.chat_id}</span>
+                  <span className="truncate text-xs flex-1">{chat.display_name || chat.chat_id}</span>
                   <ChevronRight className="w-3 h-3 shrink-0 text-gray-600" />
                 </div>
                 <div className="text-[10px] text-gray-600 mt-0.5">

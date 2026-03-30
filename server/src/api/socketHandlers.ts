@@ -4,7 +4,7 @@ import { login, isLoggedIn } from '../automation/facebook.js';
 import { startChatMonitor, stopChatMonitor, isChatMonitorActive } from '../automation/chatBot.js';
 import { startCommentMonitor, stopCommentMonitor, isCommentMonitorActive } from '../automation/commentBot.js';
 import { startScheduler, stopScheduler } from '../scheduler/scheduler.js';
-import { addLog } from '../database/db.js';
+import { addLog, getDb } from '../database/db.js';
 import { LiveVideoClient, resolveGeminiLiveModel } from './liveVoice.js';
 import type { AITool } from '../bot_agents/types.js';
 import { resolveProviderApiKey } from '../config/settingsSecurity.js';
@@ -135,6 +135,7 @@ export function handleSchedulerStop(io: SocketServer) {
 const liveClients = new Map<string, { client: LiveVideoClient; sessionChatId: string }>();
 const voiceAgentQueues = new Map<string, Promise<any>>();
 const log = createLogger('SocketHandlers');
+const JARVIS_PERSISTENT_CHAT_ID = 'jarvis_root_admin';
 const LIVE_AGENT_TOOL_NAME = 'jarvis_agent_execute';
 const LIVE_AGENT_TOOL_DECLARATIONS: AITool[] = [
     {
@@ -205,9 +206,8 @@ function extractLiveToolCommand(args: any): string {
     return '';
 }
 
-function buildVoiceUserId(socketId: string): string {
-    const safe = String(socketId || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 48);
-    return `voice_${safe || 'session'}`;
+function buildVoiceUserId(_socketId: string): string {
+    return JARVIS_PERSISTENT_CHAT_ID;
 }
 
 function autoEscapeWindowsPaths(text: string): string {
@@ -225,21 +225,49 @@ function autoEscapeWindowsPaths(text: string): string {
     return text;
 }
 
-function buildVoiceChatId(socketId: string): string {
-    // Return a session-specific ID to ensure a "clean slate" for every new voice call.
-    // This prevents stale memory (like old file lists) from causing hallucinations.
-    const now = new Date();
-    const dateStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
-    const timeStr = `${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
-    const safeSocket = String(socketId || 'anon').replace(/[^a-zA-Z0-9]/g, '').slice(0, 8);
-    return `voice_${dateStr}_${timeStr}_${safeSocket}`;
+function buildVoiceChatId(_socketId: string): string {
+    return JARVIS_PERSISTENT_CHAT_ID;
+}
+
+function normalizeVoiceChatId(chatId: string): string {
+    const raw = String(chatId || '').trim();
+    if (!raw) return 'voice_session';
+    if (raw === JARVIS_PERSISTENT_CHAT_ID) return raw;
+    if (raw.startsWith('voice_') || raw.startsWith('admin_web_voice_')) {
+        return raw.toLowerCase();
+    }
+    return raw;
+}
+
+function normalizeVoiceMessageForDedup(text: string): string {
+    return String(text || '')
+        .replace(/^\[TS:[^\]]+\]\s*\[USER_TEXT_INPUT\]\s*/i, '')
+        .trim();
 }
 
 function saveVoiceToMemory(chatId: string, role: 'user' | 'assistant', content: string) {
     try {
+        const normalizedChatId = normalizeVoiceChatId(chatId);
         const text = String(content || '').trim();
         if (!text || text.length < 2) return;
-        addMessage(chatId, role, text);
+        const normalizedText = normalizeVoiceMessageForDedup(text);
+        if (!normalizedText || normalizedText.length < 2) return;
+
+        const last = getDb()
+            .prepare('SELECT role, content, timestamp FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT 1')
+            .get(normalizedChatId) as { role?: string; content?: string; timestamp?: string } | undefined;
+
+        if (last?.role === role) {
+            const lastNormalized = normalizeVoiceMessageForDedup(String(last.content || ''));
+            const lastTs = new Date(String(last.timestamp || 0)).getTime();
+            const nowTs = Date.now();
+            const near = Number.isFinite(lastTs) ? Math.abs(nowTs - lastTs) <= 5000 : false;
+            if (lastNormalized === normalizedText && near) {
+                return;
+            }
+        }
+
+        addMessage(normalizedChatId, role, normalizedText);
     } catch (err: any) {
         log.warn('[VoiceMemory] Failed to save message', { chatId, role, error: String(err) });
     }
@@ -344,7 +372,7 @@ async function executeVoiceAgentCommand(command: string, socketId: string) {
 }
 
 async function executeVoiceAgentCommandWithPolicy(command: string, socketId: string, forceThaiResponse: boolean, customChatId?: string): Promise<string> {
-    const voiceUserId = customChatId || buildVoiceUserId(socketId);
+    const voiceUserId = normalizeVoiceChatId(customChatId || buildVoiceUserId(socketId));
     const timeoutMs = getVoiceToolBridgeTimeoutMs();
     const timerError = new Error(`Voice tool bridge timeout after ${timeoutMs}ms`);
     let timeoutHandle: any = null;
@@ -530,9 +558,9 @@ function handleVoiceEvents(io: SocketServer, socket: Socket) {
                 const liveModel = await resolveGeminiLiveModel(apiKey, preferredModel);
                 const liveApiVersion = process.env.GEMINI_LIVE_API_VERSION || 'v1beta';
                 
-                // Create a unique Chat ID for THIS specific voice session
+                // Use one persistent Jarvis chat ID for all voice interactions
                 const sessionChatId = buildVoiceChatId(socket.id);
-                log.info('[LiveVoice] Starting isolated session', { sessionChatId });
+                log.info('[LiveVoice] Starting persistent Jarvis voice session', { sessionChatId, socketId: socket.id });
 
                 const liveSystemInstruction = buildJarvisLiveSystemInstruction();
                 
@@ -632,7 +660,6 @@ function handleVoiceEvents(io: SocketServer, socket: Socket) {
             
             const sessionInfo = liveClients.get(socket.id);
             const sessionChatId = sessionInfo?.sessionChatId || buildVoiceChatId(socket.id);
-            saveVoiceToMemory(sessionChatId, 'user', text);
             
             const mentionPattern = /@([a-zA-Z0-9_-]+)/g;
             const mentions: string[] = [];
@@ -645,7 +672,14 @@ function handleVoiceEvents(io: SocketServer, socket: Socket) {
             const backends = getAvailableBackends();
             const cliBackends = backends.filter(b => b.kind === 'cli' && b.available);
             const validCliIds = cliBackends.map(b => b.id.replace(/-cli$/, ''));
-            const activeMentions = mentions.filter(m => validCliIds.includes(m) || ['jarvis', 'agent', 'admin', 'all'].includes(m));
+            const coreMentions = ['jarvis', 'agent', 'admin', 'all'];
+            const activeMentions = mentions.filter(m => validCliIds.includes(m) || coreMentions.includes(m));
+            const hasCliMention = activeMentions.some(m => !coreMentions.includes(m));
+            const shouldMirrorToJarvisConversation = !hasCliMention;
+
+            if (shouldMirrorToJarvisConversation) {
+                saveVoiceToMemory(sessionChatId, 'user', text);
+            }
             
             if (activeMentions.length === 0 && mentions.length > 0) {
                 socket.emit('voice:text_recv', { text: `⚠️ ไม่พบ CLI: @${mentions.join(', @')} (หรือ CLI ยังไม่พร้อมใช้)`, source: 'agent' });
@@ -670,7 +704,9 @@ function handleVoiceEvents(io: SocketServer, socket: Socket) {
                         });
                             socket.emit('voice:agent_reply', { input: text, reply: summary, method });
                             socket.emit('voice:text_recv', { text: `👑 **Meeting Room สรุป:**\n\n${summary}`, source: 'agent' });
-                        saveVoiceToMemory(socket.id, 'assistant', summary);
+                        if (shouldMirrorToJarvisConversation) {
+                            saveVoiceToMemory(sessionChatId, 'assistant', summary);
+                        }
                     } catch (err: any) {
                         socket.emit('voice:agent_reply', { input: text, reply: `Meeting Room error: ${err?.message || String(err)}` });
                     } finally {
@@ -717,7 +753,9 @@ function handleVoiceEvents(io: SocketServer, socket: Socket) {
                         const fullReply = parts.join('\n\n---\n\n') || 'ไม่มี CLI ตอบกลับ';
                         socket.emit('voice:agent_reply', { input: text, reply: fullReply, method });
                         socket.emit('voice:text_recv', { text: fullReply, source: 'agent' });
-                        saveVoiceToMemory(socket.id, 'assistant', fullReply);
+                        if (shouldMirrorToJarvisConversation) {
+                            saveVoiceToMemory(sessionChatId, 'assistant', fullReply);
+                        }
                     } catch (err: any) {
                         socket.emit('voice:agent_reply', { input: text, reply: `Multi-CLI error: ${err?.message || String(err)}` });
                     } finally {
@@ -736,7 +774,9 @@ function handleVoiceEvents(io: SocketServer, socket: Socket) {
                         socket.emit('voice:cli_reply', { agent: target, reply, status: 'success' });
                         socket.emit('voice:agent_reply', { input: text, reply, method });
                         socket.emit('voice:text_recv', { text: reply, source: 'agent' });
-                        saveVoiceToMemory(socket.id, 'assistant', reply);
+                        if (shouldMirrorToJarvisConversation) {
+                            saveVoiceToMemory(sessionChatId, 'assistant', reply);
+                        }
                     } catch (err: any) {
                         socket.emit('voice:agent_reply', { input: text, reply: `@${target} error: ${err?.message || String(err)}` });
                     } finally {

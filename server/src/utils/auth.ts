@@ -38,7 +38,8 @@ function getJwtSecret(): string {
   // Fallback for first-boot or unconfigured systems
   const fallback = 'pAIbV2-Super-Secret-Token-Key-2026';
   if (!STARTUP_COMPACT && NODE_ENV === 'production') {
-    log.error('CRITICAL: JWT_SECRET not set in DB or ENV. Using insecure fallback!');
+    log.error('CRITICAL: JWT_SECRET not set in DB or ENV.');
+    throw new Error('JWT_SECRET must be set in production');
   }
   return fallback;
 }
@@ -78,22 +79,22 @@ function validateCredentials(username: string, password: string): User | null {
     return null;
   }
 
-  log.warn(`[AuthDebug] validateCredentials Attempt -> User: ${username}, SystemAdmin: ${adminUser}, ConfiguredPassExists: ${!!configuredAdminPass}`);
+  log.debug(`[AuthDebug] validateCredentials Attempt -> User: ${username}, SystemAdmin: ${adminUser}, ConfiguredPassExists: ${!!configuredAdminPass}`);
 
   if (configuredAdminPass) {
     // If a password is explicitly set electronically (ENV or DB), require it
     if (username === adminUser && password === configuredAdminPass) {
-      log.warn(`[AuthDebug] SUCCESS via configuredAdminPass`);
+      log.debug(`[AuthDebug] SUCCESS via configuredAdminPass`);
       return { username: adminUser, role: 'admin' };
     }
-    log.warn(`[AuthDebug] FAILED via configuredAdminPass (password mismatch)`);
+    log.warn(`[AuthDebug] FAILED via configuredAdminPass (password mismatch) for user: ${username}`);
   } else {
     // Fallback if completely unconfigured to prevent permanent lock-out
     if (username === adminUser && password === DEFAULT_DEV_ADMIN_PASSWORD) {
-      log.warn(`[AuthDebug] SUCCESS via fallback admin/admin`);
+      log.debug(`[AuthDebug] SUCCESS via fallback admin/admin`);
       return { username: adminUser, role: 'admin' };
     }
-    log.warn(`[AuthDebug] FAILED via fallback (expected admin/admin)`);
+    log.warn(`[AuthDebug] FAILED via fallback (expected admin/admin) for user: ${username}`);
   }
 
   const viewerUser = process.env.VIEWER_USER;

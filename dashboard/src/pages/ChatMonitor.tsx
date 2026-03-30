@@ -66,7 +66,31 @@ export function ChatMonitor({ status, emit, on }: Props) {
     setLoadingMessages(true);
     try {
       const data = await api.getConversationMessages(convId);
-      setMessages(data);
+      const sanitizeVoiceTrace = (text: string) =>
+        String(text || '').replace(/^\[TS:[^\]]+\]\s*\[USER_TEXT_INPUT\]\s*/, '').trim();
+
+      const normalized = (Array.isArray(data) ? data : []).map((msg: any) => ({
+        ...msg,
+        content: sanitizeVoiceTrace(String(msg?.content || '')),
+      }));
+
+      const deduped: any[] = [];
+      for (const msg of normalized) {
+        const prev = deduped[deduped.length - 1];
+        if (!prev) {
+          deduped.push(msg);
+          continue;
+        }
+        const sameRole = String(prev.role || '') === String(msg.role || '');
+        const sameContent = String(prev.content || '') === String(msg.content || '');
+        const prevTs = new Date(prev.timestamp || prev.created_at || 0).getTime();
+        const curTs = new Date(msg.timestamp || msg.created_at || 0).getTime();
+        const nearDuplicate = Number.isFinite(prevTs) && Number.isFinite(curTs) && Math.abs(curTs - prevTs) <= 3000;
+        if (sameRole && sameContent && nearDuplicate) continue;
+        deduped.push(msg);
+      }
+
+      setMessages(deduped);
     } catch (err) {
       console.error('Failed to load messages:', err);
     } finally {
@@ -79,9 +103,11 @@ export function ChatMonitor({ status, emit, on }: Props) {
     loadMessages(convId);
   }
 
-  const filtered = conversations.filter(c =>
-    !debouncedSearch || c.fb_user_name?.toLowerCase().includes(debouncedSearch.toLowerCase())
-  );
+  const filtered = conversations.filter(c => {
+    if (!debouncedSearch) return true;
+    const q = debouncedSearch.toLowerCase();
+    return (c.fb_user_name || '').toLowerCase().includes(q) || String(c.id || '').toLowerCase().includes(q);
+  });
 
   return (
     <div className="flex h-[calc(100vh-64px)]">

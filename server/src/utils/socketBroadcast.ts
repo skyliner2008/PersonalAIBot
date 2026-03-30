@@ -62,4 +62,26 @@ export const agentEvents = {
   trace(data: { runId?: string; message: string; level?: 'info'|'debug'|'error' }) {
     broadcast('agent:trace', data);
   },
+  /** Agent became active (processing a task) — triggers Brain Visualizer node flash */
+  active(data: { agentId: string }) {
+    broadcast('agent:active', data);
+  },
+  /** Token usage from LLM call — triggers Brain Visualizer token pulse animation */
+  tokenUsage(data: { promptTokens: number; completionTokens: number }) {
+    broadcast('agent:tokenUsage', data);
+  },
+};
+
+/**
+ * Broadcast evolution lifecycle events for Brain Visualizer
+ */
+export const evolutionEvents = {
+  /** Self-upgrade scanning/coding started */
+  started(data: { filePath?: string; actionType: string }) {
+    broadcast('evolution:started', data);
+  },
+  /** Self-upgrade scanning/coding finished */
+  finished() {
+    broadcast('evolution:finished');
+  },
 };

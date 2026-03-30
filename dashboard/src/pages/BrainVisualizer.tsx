@@ -43,6 +43,12 @@ interface BrainNode {
 }
 interface BrainLink { source: string; target: string; type: string; weight: number; }
 interface TokenPulseData { id: string; type: 'in' | 'out'; startTime: number; }
+interface FloatingLine {
+  id: string;
+  side: 'left' | 'right';
+  text: string;
+  createdAt: number;
+}
 
 // ─── Brain ellipsoid axes (shared by shell geometry AND internal cloud) ────────
 const BRX = 6.8;   // lateral half-width
@@ -181,33 +187,6 @@ const Node = React.forwardRef<THREE.Group, {
             transparent opacity={visualSettings.nodeOpacity} roughness={0.0} metalness={0.05} depthWrite={false} />
           <Edges threshold={15} lineWidth={2.5} color={visualSettings.nodeColor} />
         </mesh>
-      )}
-      {/* Hover label */}
-      {(hov || node.isAgent || node.status !== undefined) && (
-        <Html position={[0, node.isAgent ? 0 : 1.5, 0]} center zIndexRange={[100, 0]} transform sprite>
-          <div className="pointer-events-none select-none text-center">
-            <div className="px-3 py-1.5 rounded-lg border backdrop-blur-md"
-              style={{ background: 'rgba(0,0,0,0.84)', border: '1px solid rgba(255,255,255,0.22)', boxShadow: '0 0 14px rgba(255,255,255,0.1)', fontFamily: 'monospace' }}>
-              <span className="text-[12px] font-black tracking-wider text-white">{node.label || node.id}</span>
-              {node.isAgent && node.status && (
-                <div className="flex items-center gap-1.5 mt-0.5">
-                  <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${node.status === 'offline' ? 'bg-red-400' : node.status === 'degraded' ? 'bg-yellow-400' : 'bg-green-400'}`} />
-                  <span className={`text-[9px] font-bold uppercase ${node.status === 'offline' ? 'text-red-400' : node.status === 'degraded' ? 'text-yellow-400' : 'text-green-400'}`}>{node.status}</span>
-                </div>
-              )}
-            </div>
-          </div>
-        </Html>
-      )}
-      {/* Row count */}
-      {node.rowCount !== undefined && !isAgentNode && (
-        <Html position={[0, 0, 0]} center zIndexRange={[100, 0]} transform sprite>
-          <div className="pointer-events-none select-none text-center drop-shadow-[0_0_8px_rgba(0,0,0,1)]">
-            <span style={{ color: act > 0.25 ? '#ffffff' : 'rgba(210,245,255,0.78)', fontSize: 11, fontWeight: 900, fontFamily: 'monospace', textShadow: act > 0.25 ? '0 0 10px #fff,0 0 24px #fff' : 'none' }}>
-              {node.rowCount.toLocaleString()}
-            </span>
-          </div>
-        </Html>
       )}
     </group>
   );
@@ -852,6 +831,7 @@ const BrainVisualizer: React.FC = () => {
   const [tokenPulses, setTokenPulses] = useState<TokenPulseData[]>([]);
   const [isEditMode, setIsEditMode] = useState(false);
   const [isSimulating, setIsSimulating] = useState(false);
+  const [floatingLines, setFloatingLines] = useState<FloatingLine[]>([]);
   const [showSettings, setShowSettings] = useState(false);
   const [visualSettings, setVisualSettings] = useState<VisualSettings>(() => {
     try { const s = localStorage.getItem('brain_visual_settings'); if (s) return { ...DEFAULT_SETTINGS, ...JSON.parse(s) }; } catch { }
@@ -950,6 +930,32 @@ const BrainVisualizer: React.FC = () => {
 
   const { on } = useSocket();
   const agentStatus = useRef<Record<string, string>>({});
+  const specialistCycle = useRef(0);
+  const BOT_MANAGER_SPECIALISTS = ['coder', 'tester', 'general'] as const;
+
+  const trimFloatingText = (raw: unknown, maxLen = 78) => {
+    const text = String(raw ?? '').replace(/\s+/g, ' ').trim();
+    if (!text) return '';
+    return text.length > maxLen ? `${text.slice(0, maxLen)}...` : text;
+  };
+
+  const pushFloatingLine = (side: 'left' | 'right', raw: unknown) => {
+    const text = trimFloatingText(raw);
+    if (!text) return;
+    const line: FloatingLine = {
+      id: `${side}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      side,
+      text,
+      createdAt: Date.now(),
+    };
+    setFloatingLines(prev => [...prev, line].slice(-20));
+  };
+
+  const pushBotManagerSpecialistLine = () => {
+    const spec = BOT_MANAGER_SPECIALISTS[specialistCycle.current % BOT_MANAGER_SPECIALISTS.length];
+    specialistCycle.current += 1;
+    pushFloatingLine('right', `BotManager: ${spec}`);
+  };
 
   useEffect(() => {
     let tid: ReturnType<typeof setInterval>;
@@ -1000,6 +1006,8 @@ const BrainVisualizer: React.FC = () => {
       const st = d.actionType === 'scanning' ? 'Scanning...' : 'Coding...';
       agentStatus.current['bot-manager'] = st;
       setData(p => ({ ...p, nodes: p.nodes.map((n: any) => n.id === 'bot-manager' ? { ...n, status: st } : n) })); flashNode('bot-manager');
+      pushFloatingLine('left', `System: Self-Upgrade ${st}`);
+      pushBotManagerSpecialistLine();
     });
     const cef = on('evolution:finished', () => {
       agentStatus.current['bot-manager'] = 'active';
@@ -1007,15 +1015,50 @@ const BrainVisualizer: React.FC = () => {
     });
     const ca = on('agent:active', (d: any) => { if (d.agentId) flashNode(d.agentId); });
     const cd = on('db:access', (d: any) => { if (d.table) flashNode(d.table); });
-    const tr = on('agent:trace', () => { flashNode('bot-manager'); });
+    const tr = on('agent:trace', (d: any) => {
+      flashNode('bot-manager');
+      if (d?.message && /coder|tester|general|self-upgrade|swarm/i.test(String(d.message))) {
+        pushFloatingLine('right', d.message);
+      }
+    });
     const ct = on('agent:tokenUsage', (d: any) => {
       const now = performance.now() / 1000, ps: TokenPulseData[] = [];
       if (d.promptTokens > 0) ps.push({ id: `in-${Math.random()}`, type: 'in', startTime: now });
       if (d.completionTokens > 0) ps.push({ id: `out-${Math.random()}`, type: 'out', startTime: now });
       if (ps.length) setTokenPulses(p => [...p.slice(-10), ...ps]); flashNode('bot-manager');
     });
-    return () => { clearInterval(tid); cu(); ce(); cef(); ca(); cd(); ct(); };
+    const cnew = on('chatbot:newMessage', (d: any) => {
+      const sender = trimFloatingText(d?.userName || 'User', 22);
+      pushFloatingLine('left', `${sender}: ${d?.message || ''}`);
+    });
+    const creply = on('chatbot:sentReply', (d: any) => {
+      pushFloatingLine('right', d?.reply || '');
+    });
+    return () => { clearInterval(tid); cu(); ce(); cef(); ca(); cd(); tr(); ct(); cnew(); creply(); };
   }, [on]);
+
+  useEffect(() => {
+    const ttlMs = 4200;
+    const tid = setInterval(() => {
+      const now = Date.now();
+      setFloatingLines(prev => prev.filter(item => now - item.createdAt < ttlMs));
+    }, 350);
+    return () => clearInterval(tid);
+  }, []);
+
+  const leftFloating = useMemo(() => {
+    for (let i = floatingLines.length - 1; i >= 0; i--) {
+      if (floatingLines[i].side === 'left') return floatingLines[i];
+    }
+    return null;
+  }, [floatingLines]);
+
+  const rightFloating = useMemo(() => {
+    for (let i = floatingLines.length - 1; i >= 0; i--) {
+      if (floatingLines[i].side === 'right') return floatingLines[i];
+    }
+    return null;
+  }, [floatingLines]);
 
   // Simulation Logic: Randomly activate 1-2 nodes periodically
   useEffect(() => {
@@ -1061,6 +1104,14 @@ const BrainVisualizer: React.FC = () => {
       <div className="absolute inset-0 z-0 pointer-events-none" style={{ background: 'radial-gradient(ellipse 80% 60% at 30% 40%,rgba(120,0,180,0.05) 0%,transparent 60%),radial-gradient(ellipse 70% 50% at 70% 55%,rgba(0,100,180,0.05) 0%,transparent 60%),#010208' }} />
       <div className="absolute inset-0 z-10 pointer-events-none" style={{ backgroundImage: 'repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.06) 2px,rgba(0,0,0,0.06) 4px)', mixBlendMode: 'multiply' }} />
       <div className="absolute inset-0 z-10 pointer-events-none" style={{ background: 'radial-gradient(ellipse at center,transparent 48%,rgba(1,2,8,0.94) 100%)' }} />
+      <style>{`
+        @keyframes bvFloatFade {
+          0% { opacity: 0; transform: translateY(20px) scale(0.98); }
+          12% { opacity: 1; transform: translateY(8px) scale(1); }
+          75% { opacity: 0.92; transform: translateY(-12px) scale(1); }
+          100% { opacity: 0; transform: translateY(-24px) scale(1.01); }
+        }
+      `}</style>
 
       <div className="absolute top-0 left-0 w-full z-50 p-2 sm:p-3 pointer-events-none">
         <div className="flex items-center justify-center gap-2 overflow-x-auto no-scrollbar pb-1">
@@ -1073,6 +1124,27 @@ const BrainVisualizer: React.FC = () => {
           ))}
           {activeInfra.length === 0 && <div className="px-4 py-1 rounded-full bg-white/5 border border-white/10 text-white/30 text-[9px] uppercase tracking-widest backdrop-blur-md" style={{ fontFamily: 'monospace' }}>System Standby</div>}
         </div>
+      </div>
+
+      <div className="absolute inset-0 z-40 pointer-events-none">
+        {leftFloating && (
+          <div key={leftFloating.id} className="absolute left-6 top-28 max-w-[38%]"
+            style={{ animation: 'bvFloatFade 4.2s ease-out forwards' }}>
+            <div className="px-3 py-2 rounded-xl border backdrop-blur-md text-[11px] text-blue-100"
+              style={{ fontFamily: 'monospace', background: 'rgba(30,58,138,0.22)', borderColor: 'rgba(96,165,250,0.35)', boxShadow: '0 0 18px rgba(59,130,246,0.18)' }}>
+              {leftFloating.text}
+            </div>
+          </div>
+        )}
+        {rightFloating && (
+          <div key={rightFloating.id} className="absolute right-6 top-28 max-w-[38%]"
+            style={{ animation: 'bvFloatFade 4.2s ease-out forwards' }}>
+            <div className="px-3 py-2 rounded-xl border backdrop-blur-md text-[11px] text-fuchsia-100"
+              style={{ fontFamily: 'monospace', background: 'rgba(107,33,168,0.22)', borderColor: 'rgba(217,70,239,0.35)', boxShadow: '0 0 18px rgba(192,38,211,0.2)' }}>
+              {rightFloating.text}
+            </div>
+          </div>
+        )}
       </div>
 
       <Canvas camera={{ position: [0, 10, 32], fov: 44 }}>

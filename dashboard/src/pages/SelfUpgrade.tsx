@@ -85,7 +85,7 @@ export default function SelfUpgrade() {
   const [status, setStatus] = useState<UpgradeStatus | null>(null);
   const [stats, setStats] = useState<ProposalStats | null>(null);
   const [proposals, setProposals] = useState<Proposal[]>([]);
-  const [filterStatus, setFilterStatus] = useState<string>('');
+  const [filterStatus, setFilterStatus] = useState<string>('pending');
   const [filterType, setFilterType] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
@@ -113,7 +113,8 @@ export default function SelfUpgrade() {
         setStats(statusData.stats);
       }
       if (proposalData) {
-        setProposals(proposalData.proposals);
+        const sorted = [...proposalData.proposals].sort((a, b) => b.id - a.id);
+        setProposals(sorted);
         if (proposalData.stats) setStats(proposalData.stats);
       }
     } catch (err) {
@@ -224,6 +225,28 @@ export default function SelfUpgrade() {
     }
   };
 
+  const resetAllProposals = async () => {
+    if (!confirm('ยืนยันรีเซ็ตรายการข้อเสนอทั้งหมด? ระบบจะลบรายการทั้งหมดในฐานข้อมูล Self-Upgrade แต่จะไม่ลบความรู้ที่ AI ใช้เรียนรู้')) return;
+    try {
+      await api.resetAllUpgradeProposals();
+      await fetchData();
+    } catch (err) {
+      console.error('Failed to reset all proposals:', err);
+      alert('เกิดข้อผิดพลาดในการรีเซ็ตรายการทั้งหมด');
+    }
+  };
+
+  const resetUpgradeTokens = async () => {
+    if (!confirm('ยืนยันรีเซ็ตสถิติการใช้ AI Tokens ของ Self-Upgrade?')) return;
+    try {
+      await api.resetUpgradeTokens();
+      await fetchData();
+    } catch (err) {
+      console.error('Failed to reset upgrade tokens:', err);
+      alert('เกิดข้อผิดพลาดในการรีเซ็ต Tokens');
+    }
+  };
+
   const deleteProposal = async (id: number) => {
     if (!confirm('ลบ proposal นี้?')) return;
     
@@ -240,12 +263,10 @@ export default function SelfUpgrade() {
   const triggerScan = async () => {
     setScanning(true);
     try {
-      const data = await api.triggerUpgradeScan();
-      if (data) {
-        fetchData();
-      }
+      await api.triggerUpgradeScan();
+      await fetchData();
     } finally {
-      setTimeout(() => setScanning(false), 2000);
+      setTimeout(() => setScanning(false), 300);
     }
   };
 
@@ -357,7 +378,7 @@ export default function SelfUpgrade() {
     const newPaused = !status.paused;
     try {
       await api.toggleUpgradePaused(newPaused);
-      setStatus(prev => prev ? { ...prev, paused: newPaused } : prev);
+      await fetchData();
     } catch (err) {
       console.error('Failed to toggle pause:', err);
       alert('Failed to toggle Auto-Upgrade state.');
@@ -385,6 +406,28 @@ export default function SelfUpgrade() {
     { label: '1D', value: 24 * 60 * 60 * 1000 },
   ];
 
+  const operationStatusText =
+    status.paused || !status.running
+      ? 'หยุดการทำงาน'
+      : status.isManualScanActive || status.isContinuousActive
+        ? 'กำลัง Scan...'
+        : status.isBatchActive || status.isUpgrading
+          ? 'กำลัง Update...'
+          : 'รอรอบถัดไป...';
+
+  const operationStatusColor =
+    status.paused || !status.running
+      ? 'text-gray-500'
+      : status.isManualScanActive || status.isContinuousActive
+        ? 'text-orange-400'
+      : status.isBatchActive || status.isUpgrading
+          ? 'text-fuchsia-400'
+          : 'text-green-400';
+
+  const totalForPercent = Math.max(stats?.total || 0, 1);
+  const implementedPercent = Math.round(((stats?.implemented || 0) / totalForPercent) * 100);
+  const rejectedPercent = Math.round(((stats?.rejected || 0) / totalForPercent) * 100);
+
 
   return (
     <div className="p-4 md:p-6 space-y-4 animate-in fade-in duration-700">
@@ -409,38 +452,31 @@ export default function SelfUpgrade() {
         <div className="flex items-center gap-3">
           <button
             onClick={togglePause}
-            disabled={status?.isUpgrading || status?.isBatchActive}
             title={
-              status?.isUpgrading ? 'ระบบกำลัง Upgrade อยู่ ไม่สามารถเปลี่ยนสถานะได้'
-              : status?.isBatchActive ? 'ระบบกำลังดำเนินการแบบชุด ไม่สามารถเปลี่ยนสถานะได้'
-              : 'ปุ่มนี้ควบคุมทั้งระบบ Auto-Upgrade และ Auto-Scan พร้อมกัน'
+              status?.paused
+                ? 'เปิดโหมด Auto-Upgrade & Scan (เริ่มสแกนทันที)'
+                : 'พักโหมด Auto-Upgrade & Scan'
             }
             className={`flex items-center gap-2 px-3 py-1.5 rounded-lg font-bold text-xs transition-all duration-300 shadow-sm border ${
-              (status?.isUpgrading || status?.isBatchActive)
-                ? 'bg-gray-500/10 text-gray-500 border-gray-500/20 cursor-not-allowed opacity-60'
-                : status?.paused
-                  ? 'bg-rose-500/10 text-rose-400 border-rose-500/20 hover:bg-rose-500/20 shadow-rose-500/10'
-                  : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20 shadow-emerald-500/10'
+              status?.paused
+                ? 'bg-rose-500/10 text-rose-400 border-rose-500/20 hover:bg-rose-500/20 shadow-rose-500/10'
+                : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20 shadow-emerald-500/10'
             }`}
           >
-            {(status?.isUpgrading || status?.isBatchActive)
-              ? '⏳ กำลัง Upgrade...'
-              : status?.paused
-                ? '▶ เปิด Auto-Upgrade & Scan'
-                : '⏸ พัก Auto-Upgrade & Scan'}
+            {status?.paused ? '▶ เปิด Auto-Upgrade & Scan' : '⏸ พัก Auto-Upgrade & Scan'}
           </button>
 
           <button
             onClick={triggerScan}
-            disabled={status?.isBatchActive || status?.isUpgrading}
+            disabled={status?.isBatchActive || (status?.isUpgrading && !status?.isManualScanActive)}
             title={
               status?.isBatchActive ? 'ระบบกำลังดำเนินการแบบชุด'
-              : status?.isUpgrading ? 'ระบบกำลัง Upgrade อยู่'
+              : (status?.isUpgrading && !status?.isManualScanActive) ? 'ระบบกำลัง Upgrade อยู่'
               : status?.isManualScanActive ? 'กดเพื่อหยุด Scan'
               : 'กดเพื่อเริ่ม Scan ทันที'
             }
             className={`flex items-center gap-2 px-3 py-1.5 rounded-lg font-bold text-xs transition-all duration-300 shadow-sm border ${
-              (status?.isBatchActive || status?.isUpgrading)
+              (status?.isBatchActive || (status?.isUpgrading && !status?.isManualScanActive))
                 ? 'bg-gray-500/10 text-gray-500 border-gray-500/20 cursor-not-allowed opacity-60'
                 : status?.isManualScanActive
                   ? 'bg-orange-500/10 text-orange-400 border-orange-500/20 hover:bg-orange-500/20 shadow-orange-500/10'
@@ -448,7 +484,7 @@ export default function SelfUpgrade() {
             }`}
           >
             <Search className={`w-3.5 h-3.5 ${scanning || status?.isManualScanActive ? 'animate-spin' : ''}`} />
-            {(status?.isBatchActive || status?.isUpgrading)
+            {(status?.isBatchActive || (status?.isUpgrading && !status?.isManualScanActive))
               ? 'กำลังทำงาน...'
               : (scanning || status?.isManualScanActive) ? 'หยุด Scan' : 'เริ่ม Scan ทันที'}
           </button>
@@ -488,6 +524,13 @@ export default function SelfUpgrade() {
       {status && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <StatusCard
+            label="สถานะการทำงาน"
+            value={operationStatusText}
+            icon={Activity}
+            color={operationStatusColor}
+          />
+          {/*
+          <StatusCard
             label="สถานะเครื่องยนต์"
             value={
               status.isBatchActive ? 'กำลัง Upgrade แบบชุด'
@@ -504,6 +547,7 @@ export default function SelfUpgrade() {
               : 'text-gray-500'
             }
           />
+          */}
           <StatusCard 
             label="เวลาที่หยุดนิ่ง (Idle)" 
             value={`${status.idleMinutes} นาที`}
@@ -739,7 +783,28 @@ export default function SelfUpgrade() {
               <Zap className="w-3.5 h-3.5 text-yellow-400" />
               สรุปสถิติเชิงลึก
             </h2>
-            
+            {false && (<div className="mb-3">
+              <button
+                onClick={resetAllProposals}
+                className="w-full flex items-center justify-center gap-1.5 text-[11px] px-2 py-1.5 rounded-md border border-rose-500/30 text-rose-300 bg-rose-500/10 hover:bg-rose-500/20 transition-colors"
+                title="รีเซ็ตรายการข้อเสนอทั้งหมด (ไม่ลบหน่วยความจำการเรียนรู้ของ AI)"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                รีเซ็ตรายการทั้งหมด
+              </button>
+            </div>)}
+
+            <div className="mb-3">
+              <button
+                onClick={resetAllProposals}
+                className="w-full flex items-center justify-center gap-1.5 text-[11px] px-2 py-1.5 rounded-md border border-rose-500/30 text-rose-300 bg-rose-500/10 hover:bg-rose-500/20 transition-colors"
+                title="รีเซ็ตรายการข้อเสนอทั้งหมด (ไม่ลบหน่วยความจำการเรียนรู้ของ AI)"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                รีเซ็ตรายการทั้งหมด
+              </button>
+            </div>
+
             {stats && (
               <div className="space-y-3">
                 <div className="grid grid-cols-2 gap-2">
@@ -747,6 +812,30 @@ export default function SelfUpgrade() {
                   <StatBox label="อนุมัติแล้ว" value={stats.approved} color="text-emerald-400" />
                   <StatBox label="ปฏิเสธ" value={stats.rejected} color="text-rose-400" />
                   <StatBox label="สำเร็จ/ข้าม" value={stats.implemented + (stats.skipped || 0)} color="text-purple-400" />
+                </div>
+
+                <div className="pt-1">
+                  <div className="text-[9px] text-gray-500 uppercase font-bold tracking-widest mb-2">Scale % (Implemented / Rejected)</div>
+                  <div className="space-y-2">
+                    <div>
+                      <div className="flex items-center justify-between text-[10px] mb-1">
+                        <span className="text-purple-300 font-semibold">Implemented</span>
+                        <span className="text-purple-300 font-mono">{implementedPercent}%</span>
+                      </div>
+                      <div className="w-full h-2 bg-white/5 rounded-full overflow-hidden">
+                        <div className="h-full bg-purple-500 rounded-full transition-all duration-700" style={{ width: `${implementedPercent}%` }} />
+                      </div>
+                    </div>
+                    <div>
+                      <div className="flex items-center justify-between text-[10px] mb-1">
+                        <span className="text-rose-300 font-semibold">Rejected</span>
+                        <span className="text-rose-300 font-mono">{rejectedPercent}%</span>
+                      </div>
+                      <div className="w-full h-2 bg-white/5 rounded-full overflow-hidden">
+                        <div className="h-full bg-rose-500 rounded-full transition-all duration-700" style={{ width: `${rejectedPercent}%` }} />
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 <div className="pt-3 border-t border-white/5">
@@ -785,6 +874,16 @@ export default function SelfUpgrade() {
                     <Bot className="w-2.5 h-2.5 text-cyan-400" />
                     การใช้ AI Tokens (Self-Upgrade)
                   </label>
+                  <div className="mb-2">
+                    <button
+                      onClick={resetUpgradeTokens}
+                      className="w-full flex items-center justify-center gap-1.5 text-[11px] px-2 py-1.5 rounded-md border border-cyan-500/30 text-cyan-300 bg-cyan-500/10 hover:bg-cyan-500/20 transition-colors"
+                      title="รีเซ็ตสถิติการใช้ Tokens"
+                    >
+                      <RefreshCcw className="w-3.5 h-3.5" />
+                      รีเซ็ต Tokens
+                    </button>
+                  </div>
                   <div className="grid grid-cols-2 gap-2 mb-2">
                     <div className="bg-white/5 rounded-lg p-2 border border-white/5">
                       <div className="text-[9px] text-gray-400 mb-0.5 flex items-center gap-1">
@@ -1084,4 +1183,3 @@ function ActionButton({ onClick, icon: Icon, color, title, disabled, spin }: any
     </button>
   );
 }
-

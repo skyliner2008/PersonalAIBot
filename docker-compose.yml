@@ -1,5 +1,5 @@
 # =============================================================
-# PersonalAIBotV2 — Docker Compose
+# PersonalAIBot — Docker Compose
 # Usage:
 #   docker compose up -d          # Start
 #   docker compose logs -f        # View logs

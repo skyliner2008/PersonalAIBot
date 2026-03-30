@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-03-29",
+  "lastUpdated": "2026-03-30",
   "description": "Unified Provider Registry — เพิ่ม provider ใหม่ได้ที่ไฟล์นี้ ไม่ต้องแก้โค้ด",
   "providers": {
     "gemini": {
@@ -656,12 +656,13 @@
       "category": "llm",
       "type": "gemini",
       "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
-      "defaultModel": "gemini-2.5-flash",
+      "defaultModel": "gemini-2.0-flash",
       "models": [
         "gemini-2.5-pro",
         "gemini-2.5-flash",
         "gemini-2.0-flash",
-        "gemini-2.0-flash-lite"
+        "gemini-1.5-pro",
+        "gemini-1.5-flash"
       ],
       "capabilities": {
         "chat": true,
@@ -705,7 +706,8 @@
       "models": [
         "gpt-5.3-codex",
         "o4-mini",
-        "gpt-4.1"
+        "gpt-4.1",
+        "gpt-4o"
       ],
       "capabilities": {
         "chat": true,
@@ -731,7 +733,7 @@
         "kilo/kilo-auto/frontier",
         "kilo/anthropic/claude-sonnet-4",
         "kilo/openai/gpt-4o",
-        "kilo/google/gemini-2.5-flash"
+        "kilo/google/gemini-2.0-flash"
       ],
       "capabilities": {
         "chat": true,

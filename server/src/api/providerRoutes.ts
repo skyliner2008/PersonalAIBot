@@ -16,7 +16,7 @@ import {
 import { KeyManager } from '../providers/keyManager.js';
 import { ProviderFactory } from '../providers/providerFactory.js';
 import { getProviderHealthMap, checkAllProviders } from '../providers/healthChecker.js';
-import { scanOAuthCredentials, refreshOAuthToken, type OAuthCredential } from '../providers/oauthDetector.js';
+import { scanOAuthCredentials, refreshOAuthToken, fetchLiveModelsForProvider, type OAuthCredential } from '../providers/oauthDetector.js';
 import { setManagedSetting } from '../config/settingsSecurity.js';
 
 const log = createLogger('ProviderRoutes');
@@ -143,6 +143,7 @@ router.get('/:id/models', async (req: Request, res: Response) => {
     let source: 'api' | 'registry' = 'registry';
 
     if (key) {
+      // First try: ProviderFactory (standard API-based listing)
       try {
         const instance = await ProviderFactory.createProvider(id, key);
         if (instance && typeof instance.listModels === 'function') {
@@ -153,15 +154,29 @@ router.get('/:id/models', async (req: Request, res: Response) => {
         }
       } catch (apiErr: any) {
         const errStr = String(apiErr?.message || apiErr || '');
-        // Downgrade auth failures to debug — CLI providers without valid API keys
-        // (e.g. kilo-cli) will constantly 401 and spam the logs otherwise.
         if (/401|403|auth|token|credential/i.test(errStr)) {
-          log.info(`Skipped live model listing for "${id}" (auth not available)`);
+          log.info(`Skipped ProviderFactory model listing for "${id}" (auth not available)`);
         } else {
-          log.warn('Failed to fetch live models, using registry fallback', {
+          log.warn('ProviderFactory model listing failed', {
             provider: id,
             error: errStr.slice(0, 200),
           });
+        }
+      }
+
+      // Fallback: direct API model listing for CLI-based providers
+      if (liveModels.length === 0) {
+        try {
+          const directModels = fetchLiveModelsForProvider(
+            id, key, providerDef.type, providerDef.baseUrl
+          );
+          if (directModels.length > 0) {
+            liveModels = directModels;
+            source = 'api';
+            log.info(`Direct API model listing succeeded for "${id}": ${directModels.length} models`);
+          }
+        } catch (directErr) {
+          log.info(`Direct model listing also failed for "${id}"`);
         }
       }
     }

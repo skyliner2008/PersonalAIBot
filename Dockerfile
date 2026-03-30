@@ -1,5 +1,5 @@
 # =============================================================
-# PersonalAIBotV2 — Multi-stage Docker Build
+# PersonalAIBot — Multi-stage Docker Build
 # Stage 1: Build Dashboard (React + Vite)
 # Stage 2: Build Server (TypeScript)
 # Stage 3: Production Runtime

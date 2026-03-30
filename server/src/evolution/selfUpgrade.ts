@@ -18,6 +18,7 @@ import { Node } from 'ts-morph';
 import { aiChat } from '../ai/aiRouter.js';
 import { getSwarmCoordinator } from '../swarm/swarmCoordinator.js';
 import { getRootAdminIdentity } from '../system/rootAdmin.js';
+import { evolutionEvents } from '../utils/socketBroadcast.js';
 import { exec, execFileSync } from 'child_process';
 import os from 'os';
 import { fileURLToPath } from 'url';
@@ -122,10 +123,21 @@ let isUpgrading = false;
 let upgradeInterval: NodeJS.Timeout | null = null;
 let _continuousScanTimeout: NodeJS.Timeout | null = null;
 export let _isManualScanActive = false; // Expose manual scan state
+let _manualScanStopRequested = false;
 let _paused = true;  // Default: OFF on first start — user must explicitly enable
 let _scanCursor = 0;     // ตำแหน่งที่สแกนถึง
 let _fileIndex: string[] = [];
 let _initialized = false;
+let _activeScanMode: 'none' | 'continuous' | 'manual' = 'none';
+
+function resetScanCursor(): void {
+  _scanCursor = 0;
+  try { setSetting('upgrade_scan_cursor', '0'); } catch { /* ignore */ }
+}
+
+function isScanRoundComplete(): boolean {
+  return _fileIndex.length > 0 && _scanCursor >= _fileIndex.length;
+}
 export async function resumeBatchImplementation(rootDir: string): Promise<void> {
   const db = getDb();
 
@@ -146,7 +158,7 @@ export async function resumeBatchImplementation(rootDir: string): Promise<void> 
     console.log(`\x1b[36m╚══════════════════════════════════════════════════════════╝\x1b[0m`);
   }
 
-  while (getSetting('upgrade_implement_all') === 'true') {
+  while (getSetting('upgrade_implement_all') === 'true' && !_paused) {
     const nextProposal = db.prepare(`
       SELECT id, title FROM upgrade_proposals
       WHERE status = 'approved'
@@ -746,6 +758,39 @@ export function deleteAllRejectedProposals(): number {
   }
 }
 
+export function resetAllUpgradeProposals(): { deletedProposals: number; deletedScanLogs: number } {
+  try {
+    const db = getDb();
+    const tx = db.transaction(() => {
+      const deletedProposals = (db.prepare('DELETE FROM upgrade_proposals').run() as any).changes || 0;
+      const deletedScanLogs = (db.prepare('DELETE FROM upgrade_scan_log').run() as any).changes || 0;
+      return { deletedProposals, deletedScanLogs };
+    });
+    const result = tx();
+
+    // Stop batch queue and reset scan progress cursor.
+    try { setSetting('upgrade_implement_all', 'false'); } catch { /* ignore */ }
+    try { setSetting('upgrade_scan_cursor', '0'); } catch { /* ignore */ }
+
+    return result;
+  } catch (err: any) {
+    log.error(`Failed to reset all upgrade proposals: ${err.message}`);
+    return { deletedProposals: 0, deletedScanLogs: 0 };
+  }
+}
+
+export function resetUpgradeTokenUsage(): boolean {
+  try {
+    setSetting('upgrade_tokens_in', '0');
+    setSetting('upgrade_tokens_out', '0');
+    setSetting('upgrade_cost_usd', '0');
+    return true;
+  } catch (err: any) {
+    log.error(`Failed to reset upgrade token usage: ${err.message}`);
+    return false;
+  }
+}
+
 function logScan(filePath: string, findingsCount: number): void {
   try {
     getDb().prepare(
@@ -790,9 +835,9 @@ async function scanBatch(rootDir: string, ignoreIdle: boolean = false): Promise<
   let newFindings = 0;
 
   for (const filePath of batch) {
-    // Check if user came back (only if not forced)
-    if (!ignoreIdle && (_paused || !isSystemIdle())) {
-      log.info('Scan paused — user activity detected');
+    // Check if user came back (only if not forced) or system paused
+    if (_paused || _manualScanStopRequested || (!ignoreIdle && !isSystemIdle())) {
+      log.info(`Scan ${_manualScanStopRequested ? 'STOP REQUESTED' : (_paused ? 'PAUSED' : 'yielding to user')}`);
       return { totalFindings, newFindings, batchProcessed: batch };
     }
 
@@ -936,6 +981,7 @@ async function analyzeBatchWithLLM(rootDir: string, batchFiles: string[]): Promi
 
   for (const filePath of batchFiles) {
     if (llmCalls >= MAX_LLM_CALLS_PER_CYCLE) break;
+    if (_manualScanStopRequested) break;
     // check if idle unless it's a small carry-over? No, let's just keep same logic.
     // If it's called from forceScan, maybe it should also ignore idle.
     // But scanBatch is already done.
@@ -955,7 +1001,8 @@ async function analyzeBatchWithLLM(rootDir: string, batchFiles: string[]): Promi
       }
 
       for (const chunk of chunks) {
-      if (llmCalls >= MAX_LLM_CALLS_PER_CYCLE) break;
+        if (_paused || _manualScanStopRequested) break;
+        if (llmCalls >= MAX_LLM_CALLS_PER_CYCLE) break;
 
       const chunkContent = chunk.code;
       const chunkInfo = chunks.length > 1 ? ` [Chunk: ${chunk.chunkLabel}]` : '';
@@ -1026,10 +1073,25 @@ ${chunkContent}`;
       try {
         let parsed: any = null;
         try {
-          parsed = JSON.parse(matchText);
+          // 1. Clean up potential invisible characters or junk
+          const cleanedText = matchText.trim().replace(/^[^\{]*/, '').replace(/[^\}]*$/, '');
+          parsed = JSON.parse(cleanedText);
         } catch {
+          // 2. Fallback: regex for the first { ... } block
           const objMatch = matchText.match(/\{[\s\S]*\}/);
-          if (objMatch) parsed = JSON.parse(objMatch[0]);
+          if (objMatch) {
+            try {
+              // Try to fix common trailing/leading junk inside/outside the match
+              const likelyJson = objMatch[0].trim();
+              parsed = JSON.parse(likelyJson);
+            } catch {
+              // 3. Last resort: aggressive cleanup of trailing commas before closing braces/brackets
+              const aggressiveClean = objMatch[0]
+                .replace(/,\s*\}/g, '}')
+                .replace(/,\s*\]/g, ']');
+              parsed = JSON.parse(aggressiveClean);
+            }
+          }
         }
 
         if (parsed) {
@@ -1106,7 +1168,7 @@ async function mapProtectedCoresToSecondBrain(rootDir: string): Promise<void> {
     'database/db.ts', 'evolution/selfUpgrade.ts', 'evolution/selfReflection.ts',
     'terminal/terminalGateway.ts', 'api/routes.ts', 'api/socketHandlers.ts', 'api/upgradeRoutes.ts',
     'automation/chatBot.ts', 'automation/browser.ts',
-    'bot_agents/tools/index.ts', 'bot_agents/agent.ts',
+    'bot_agents/tools/index.ts', 'bot_agents/agent.ts', 'bot_agents/botManager.ts',
   ]);
 
   let mapped = 0;
@@ -3498,6 +3560,10 @@ async function implementPendingProposals(rootDir: string): Promise<number> {
 
   let implementedCount = 0;
   for (const row of toProcess) {
+    if (_paused) {
+      log.info('[SelfUpgrade] Batch implementation detected pause. Yielding.');
+      break;
+    }
     const success = await implementProposalById(row.id, rootDir);
     if (success) implementedCount++;
   }
@@ -3599,6 +3665,7 @@ async function runUpgradeCycle(rootDir: string, forceStart: boolean = false): Pr
   try {
     log.info(`Self-upgrade cycle starting (idle ${Math.round((Date.now() - lastUserActivity) / 60000)}min)${DRY_RUN ? ' [DRY RUN]' : ''}`);
     addLog('evolution', 'Self-Upgrade', 'เริ่มรอบสแกนอัตโนมัติ', 'info');
+    evolutionEvents.started({ actionType: 'scanning' });
 
     // Pre-scan: Ensure Protected Core Files are in Second Brain (read-only architecture).
     // These files are not scanned for proposals but their exports/deps MUST be known
@@ -3626,7 +3693,7 @@ async function runUpgradeCycle(rootDir: string, forceStart: boolean = false): Pr
         approvedCount = row?.cnt || 0;
       } catch { /* ignore */ }
 
-      if (approvedCount > 0 && !_isManualScanActive) {
+      if (approvedCount > 0 && !_isManualScanActive && _activeScanMode !== 'continuous') {
         // Auto-Fix with pending approved tasks (from timer-based auto cycle): implement first
         const implemented = await implementPendingProposals(rootDir);
         if (implemented > 0) {
@@ -3634,7 +3701,7 @@ async function runUpgradeCycle(rootDir: string, forceStart: boolean = false): Pr
           isUpgrading = false;
           return;
         }
-      } else if (scanComplete && approvedCount > 0) {
+      } else if (scanComplete && approvedCount > 0 && _activeScanMode !== 'continuous') {
         // Scan reached 100% — now implement approved proposals
         log.info(`[SelfUpgrade] Scan 100% complete. Now implementing ${approvedCount} approved proposals...`);
         const implemented = await implementPendingProposals(rootDir);
@@ -3677,6 +3744,7 @@ async function runUpgradeCycle(rootDir: string, forceStart: boolean = false): Pr
     log.error('Upgrade cycle failed', { error: err.message });
   } finally {
     isUpgrading = false;
+    evolutionEvents.finished();
   }
 }
 
@@ -3759,7 +3827,7 @@ export async function startSelfUpgrade(rootDir: string): Promise<void> {
       const isContinuous = getSetting('upgrade_continuous_scan');
       if (isContinuous === 'true') {
         log.info('[SelfUpgrade] Resuming Continuous Scan mode after server restart...');
-        _paused = true;
+        _paused = false;
         executeContinuousStart(rootDir);
       }
 
@@ -3789,7 +3857,9 @@ export function stopSelfUpgrade(): void {
     clearTimeout(_continuousScanTimeout);
     _continuousScanTimeout = null;
   }
+  _manualScanStopRequested = true;
   _isManualScanActive = false;
+  _activeScanMode = 'none';
 }
 
 /** Toggle pause status of the self-upgrade loop (Master switch) */
@@ -3800,16 +3870,28 @@ export function setUpgradePaused(paused: boolean): void {
 
   // When pausing: also stop any active continuous scan
   if (paused) {
+    _manualScanStopRequested = true;
     if (_continuousScanTimeout) {
       clearTimeout(_continuousScanTimeout);
       _continuousScanTimeout = null;
-      _isManualScanActive = false;
-      try { setSetting('upgrade_continuous_scan', 'false'); } catch { /* ignore */ }
-      log.info('Continuous scan mode stopped via Master switch (OFF).');
+      log.info('Scan loop stopped via Master switch (OFF).');
+    }
+    _isManualScanActive = false;
+    _activeScanMode = 'none';
+    try { setSetting('upgrade_continuous_scan', 'false'); } catch { /* ignore */ }
+    // Req: If upgrade batch is running, finish current proposal then stop the queue.
+    if (getSetting('upgrade_implement_all') === 'true') {
+      try { setSetting('upgrade_implement_all', 'false'); } catch { /* ignore */ }
+      log.info('Pause detected while batch implementation is active. Queue stop requested after current proposal.');
     }
   }
-  // When un-pausing: just set _paused=false and let the normal timer-based loop handle cycles.
-  // Do NOT auto-start continuous scan — that's only triggered by the "เริ่ม Scan ทันที" button.
+  // When un-pausing: set _paused=false and resume implementation if setting is active.
+  if (!paused) {
+    if (getSetting('upgrade_implement_all') === 'true') {
+      log.info('Un-pausing: Resuming batch implementation loop...');
+      setTimeout(() => resumeBatchImplementation(_currentRootDir), 1000);
+    }
+  }
 }
 
 /** Get current upgrade system status */
@@ -3836,13 +3918,13 @@ export function getUpgradeStatus(): {
     batchActive = getSetting('upgrade_implement_all') === 'true';
   } catch { /* ignore */ }
 
-  const isContinuous = !!_continuousScanTimeout;
+  const isContinuous = _activeScanMode === 'continuous' && !!_continuousScanTimeout;
   
   return {
-    running: !!upgradeInterval || isContinuous,
+    running: !!upgradeInterval || isContinuous || _isManualScanActive,
     isContinuousActive: isContinuous,
     isManualScanActive: _isManualScanActive,
-    isUpgrading: isUpgrading,
+    isUpgrading: isUpgrading || _isManualScanActive || batchActive || isContinuous,
     paused: _paused,
     isIdle: _isManualScanActive ? false : isSystemIdle(),
     idleMinutes: _isManualScanActive ? 0 : Math.round(idleMs / 60000),
@@ -3888,12 +3970,14 @@ export async function updateUpgradeConfig(config: { intervalMs?: number, idleThr
   if (config.intervalMs) {
     CHECK_INTERVAL_MS = config.intervalMs;
     setSetting('upgrade_scan_interval_ms', String(CHECK_INTERVAL_MS));
+    setSetting('upgrade_check_interval', String(CHECK_INTERVAL_MS));
     log.info(`Scan interval updated to ${CHECK_INTERVAL_MS / 60000}min`);
   }
   
   if (config.idleThresholdMs) {
     IDLE_THRESHOLD_MS = config.idleThresholdMs;
     setSetting('upgrade_idle_threshold_ms', String(IDLE_THRESHOLD_MS));
+    setSetting('upgrade_idle_threshold', String(Math.max(1, Math.round(IDLE_THRESHOLD_MS / 60000))));
     log.info(`Idle threshold updated to ${IDLE_THRESHOLD_MS / 60000}min`);
   }
 
@@ -3915,6 +3999,7 @@ export async function forceScan(rootDir: string): Promise<{ totalFindings: numbe
   if (isUpgrading) return { totalFindings: 0, newFindings: 0 };
   isUpgrading = true;
   _paused = false;
+  evolutionEvents.started({ actionType: 'scanning' });
   try {
     const res = await scanBatch(rootDir, true);
     if (res.totalFindings > 0) {
@@ -3923,6 +4008,7 @@ export async function forceScan(rootDir: string): Promise<{ totalFindings: numbe
     return { totalFindings: res.totalFindings, newFindings: res.newFindings };
   } finally {
     isUpgrading = false;
+    evolutionEvents.finished();
   }
 }
 
@@ -3930,46 +4016,70 @@ export async function forceScan(rootDir: string): Promise<{ totalFindings: numbe
  * Internal logic to start the Continuous Scan loop securely.
  */
 function executeContinuousStart(rootDir: string): void {
-  _isManualScanActive = true;
+  _isManualScanActive = false;
+  _manualScanStopRequested = false;
+  _activeScanMode = 'continuous';
   if (_continuousScanTimeout) return;
   
   const cycle = async () => {
-    // Yield to bot interaction safely honoring the user's configured Idle Threshold
-    if (Date.now() - lastUserActivity < IDLE_THRESHOLD_MS) {
-      _continuousScanTimeout = setTimeout(cycle, 5000);
-      return;
-    }
-
     try {
+      if (_paused) {
+        log.info('[SelfUpgrade] Cycle detected pause. Stopping loop.');
+        _continuousScanTimeout = null;
+        _activeScanMode = 'none';
+        return;
+      }
+
       await runUpgradeCycle(rootDir, true);
 
-      // Req 8: After scan reaches 100%, check mode condition
-      const scanDone = _fileIndex.length > 0 && _scanCursor >= _fileIndex.length;
+      // Check pause again after possibly long runUpgradeCycle
+      if (_paused) {
+        log.info('[SelfUpgrade] Cycle completed but pause was requested. Stopping loop.');
+        _continuousScanTimeout = null;
+        _activeScanMode = 'none';
+        return;
+      }
+
+      // เมื่อสแกนครบ 100%: โหมด Propose จะรอรอบถัดไป, โหมด Auto-Fix จะ approve+implement ทั้งหมดก่อนรอรอบถัดไป
+      const scanDone = isScanRoundComplete();
       if (scanDone) {
         log.info('[SelfUpgrade] Continuous scan reached 100%.');
 
         if (!DRY_RUN) {
-          // Auto-Fix mode: auto-approve all pending proposals, then implement
           const approved = approveAllPendingProposals();
           if (approved > 0) {
-            log.info(`[SelfUpgrade] Auto-Fix: approved ${approved} pending proposals. Starting implementation...`);
+            log.info(`[SelfUpgrade] Auto-Fix: approved ${approved} pending proposals. Starting full implementation...`);
+            try { setSetting('upgrade_implement_all', 'true'); } catch { /* ignore */ }
+            await resumeBatchImplementation(rootDir);
           }
-          // Implementation will happen in the next cycle via runUpgradeCycle's Queue Zero logic
         } else {
-          // Propose mode: leave proposals as pending for user to manually approve
           log.info('[SelfUpgrade] Propose mode: scan complete. Proposals are pending for user review.');
         }
+        // เริ่มรอบสแกนใหม่หลังครบช่วงเวลาที่ผู้ใช้ตั้งไว้
+        resetScanCursor();
+        if (!_paused) {
+          _continuousScanTimeout = setTimeout(cycle, CHECK_INTERVAL_MS);
+        } else {
+          _continuousScanTimeout = null;
+          _activeScanMode = 'none';
+        }
+        return;
       }
     } catch (err: any) {
       log.warn(`Continuous scan cycle error: ${err.message}`);
     }
 
-    // Schedule next batch safely in 5 seconds
-    _continuousScanTimeout = setTimeout(cycle, 5000);
+    // ยังสแกนไม่ครบ ให้ทำ batch ถัดไปทันที
+    if (!_paused) {
+      _continuousScanTimeout = setTimeout(cycle, 250);
+    } else {
+      _continuousScanTimeout = null;
+      _activeScanMode = 'none';
+    }
   };
   
   // Kick off first cycle immediately
-  _continuousScanTimeout = setTimeout(cycle, 100);
+  _continuousScanTimeout = setTimeout(cycle, 0);
 }
 
 /** 
@@ -3981,9 +4091,8 @@ export async function toggleContinuousScan(rootDir: string): Promise<boolean> {
     clearTimeout(_continuousScanTimeout);
     _continuousScanTimeout = null;
     _isManualScanActive = false;
+    _activeScanMode = 'none';
     
-    // If we were just scanning and not actually writing files, 
-    // we can safely clear isUpgrading to make the UI feel responsive.
     if (isUpgrading) {
       log.info('Continuous scan stopped; system will finish its current file-read batch and then idle.');
     }
@@ -3993,13 +4102,72 @@ export async function toggleContinuousScan(rootDir: string): Promise<boolean> {
     return false;
   }
 
-  // Set Paused = true so that Auto-Upgrade yields natively in Dashboard UI
-  _paused = true;
+  // เปิดโหมด Auto-Upgrade & Scan
+  _paused = false;
+  try { setSetting('upgrade_paused', 'false'); } catch { /* ignore */ }
   setSetting('upgrade_continuous_scan', 'true');
+  resetScanCursor(); // เริ่มสแกนรอบใหม่ทันทีทุกครั้งที่เปิด
   
   log.info('Continuous scan mode requested');
   executeContinuousStart(rootDir);
   
+  return true;
+}
+
+/**
+ * Toggle Manual One-Shot Scan:
+ * - Start: scan one full round then stop automatically
+ * - Stop: stop scan immediately (best-effort at next checkpoint)
+ */
+export async function toggleManualScan(rootDir: string): Promise<boolean> {
+  // Stop request
+  if (_isManualScanActive && _activeScanMode === 'manual') {
+    _manualScanStopRequested = true;
+    _activeScanMode = 'none';
+    log.info('[SelfUpgrade] Manual scan stop requested by user.');
+    return false;
+  }
+
+  // Start one-shot manual scan
+  if (isUpgrading || _continuousScanTimeout) {
+    log.warn('[SelfUpgrade] Manual scan start rejected: another scan/upgrade loop is active.');
+    return false;
+  }
+
+  _isManualScanActive = true;
+  _manualScanStopRequested = false;
+  _activeScanMode = 'manual';
+  const previousPaused = _paused;
+  _paused = false;
+  resetScanCursor();
+
+  process.nextTick(async () => {
+    evolutionEvents.started({ actionType: 'scanning' });
+    try {
+      while (!_manualScanStopRequested) {
+        if (isScanRoundComplete()) break;
+
+        const scanResult = await scanBatch(rootDir, true);
+        const llmFindings = await analyzeBatchWithLLM(rootDir, scanResult.batchProcessed);
+
+        if (scanResult.totalFindings + llmFindings > 0) {
+          await exportProposalsToMarkdown(rootDir);
+        }
+
+        if (isScanRoundComplete()) break;
+      }
+    } catch (err: any) {
+      log.warn(`[SelfUpgrade] Manual scan error: ${err.message}`);
+    } finally {
+      _isManualScanActive = false;
+      _manualScanStopRequested = false;
+      _activeScanMode = 'none';
+      _paused = previousPaused;
+      evolutionEvents.finished();
+      log.info('[SelfUpgrade] Manual one-shot scan finished.');
+    }
+  });
+
   return true;
 }
 
@@ -4053,4 +4221,37 @@ export function rejectDiff(id: number, reason: string = 'Human rejected diff'): 
     log.error(`[SelfUpgrade] Failed to reject diff for #${id}: ${err.message}`);
     return false;
   }
+}
+
+/** 
+ * Force stop all upgrade activities (scanning and implementation)
+ */
+export function forceStopUpgrade(): void {
+  log.info('[SelfUpgrade] Force stop requested. Halting all activities.');
+  
+  // 1. Stop Implementation Batch
+  stopBatchImplementation();
+  
+  // 2. Stop Continuous Scan
+  _manualScanStopRequested = true;
+  if (_continuousScanTimeout) {
+    clearTimeout(_continuousScanTimeout);
+    _continuousScanTimeout = null;
+  }
+  _isManualScanActive = false;
+  _activeScanMode = 'none';
+  
+  // 3. Set global pause
+  _paused = true;
+  
+  // 4. Update settings
+  try {
+    setSetting('upgrade_paused', 'true');
+    setSetting('upgrade_continuous_scan', 'false');
+    setSetting('upgrade_implement_all', 'false');
+  } catch (e) {
+    // maybe db not ready
+  }
+  
+  log.info('[SelfUpgrade] System force-stopped and paused.');
 }

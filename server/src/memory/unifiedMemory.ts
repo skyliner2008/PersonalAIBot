@@ -227,14 +227,7 @@ export function addMessage(
 
     // 0.5 Ensure parent conversation exists before writing recall messages.
     // This prevents FOREIGN KEY failures for ad-hoc chat IDs (e.g. admin_web_session).
-    let displayName = 'Unified Memory Session';
-    if (chatId.startsWith('admin_')) {
-        displayName = 'Jarvis Terminal Admin';
-    } else if (chatId.startsWith('trace_')) {
-        displayName = `Self-Upgrade Trace #${chatId.split('_')[1]}`;
-    } else if (source === 'swarm_trace') {
-        displayName = `Swarm Intelligence Trace`;
-    }
+    const displayName = inferConversationDisplayName(chatId, source, undefined, metadata);
     upsertConversation(chatId, chatId, displayName);
 
     // 1. Save to DB (recall memory)
@@ -287,6 +280,124 @@ export function addMessage(
     }
     entry.lastActive = Date.now();
     entry.messageCount++;
+}
+
+/**
+ * Convert chat/session id to a readable display name for UI.
+ * This avoids showing repeated generic labels like "Unified Memory Session".
+ */
+export function inferConversationDisplayName(
+    chatId: string,
+    source: string = 'chat',
+    currentName?: string | null,
+    metadata?: Record<string, any> | null
+): string {
+    const normalizedCurrent = String(currentName || '').trim();
+    const isLegacySwarmAlias = /^Swarm Task \(Agent #\d+\)$/i.test(normalizedCurrent);
+    const isLegacyVoiceAlias = /^Voice Session \(\d{8}_\d{4}_\)$/i.test(normalizedCurrent);
+    if (chatId.startsWith('cli:')) {
+        const cliName = inferCliDisplayName(chatId);
+        if (cliName) return cliName;
+    }
+    if (normalizedCurrent && normalizedCurrent !== 'Unified Memory Session' && !isLegacySwarmAlias && !isLegacyVoiceAlias) {
+        return normalizedCurrent;
+    }
+
+    if (chatId === 'jarvis_root_admin') return 'Jarvis Terminal Admin';
+    if (chatId.startsWith('admin_')) return 'Jarvis Terminal Admin';
+    if (chatId.startsWith('trace_')) return `Self-Upgrade Trace #${chatId.split('_')[1] || chatId}`;
+    if (source === 'swarm_trace') return 'Swarm Intelligence Trace';
+
+    if (chatId.startsWith('swarm_task_')) {
+        const specialist =
+            extractAgentLabel(metadata) ||
+            inferSwarmTaskSpecialistFromMessages(chatId);
+        if (specialist) return `Swarm Task (${specialist})`;
+
+        const taskId = chatId.replace(/^swarm_/, '');
+        return `Swarm Task (${taskId})`;
+    }
+    if (chatId.startsWith('meeting_')) return `Meeting Room (${chatId.slice(8, 20)})`;
+    if (chatId.startsWith('voice_')) {
+        const m = /^voice_(\d{8}_\d{4})_([a-z0-9]+)$/i.exec(chatId);
+        if (m) {
+            const ts = m[1];
+            const token = m[2].toLowerCase().slice(0, 6);
+            return `Voice Session (${ts} · ${token})`;
+        }
+        return `Voice Session (${chatId.slice(6, 24)})`;
+    }
+    if (chatId.startsWith('telegram_')) return `Telegram User (${chatId.slice(9)})`;
+    if (chatId.startsWith('line_')) return `LINE User (${chatId.slice(5)})`;
+    if (chatId.startsWith('fb_')) return `Facebook User (${chatId.slice(3)})`;
+
+    if (chatId.includes('agent') || chatId.includes('-bot') || chatId.includes('_bot')) {
+        return `Agent Session (${chatId})`;
+    }
+
+    if (/^[a-zA-Z0-9]{8,}$/.test(chatId)) {
+        return `Session (${chatId.slice(0, 12)})`;
+    }
+
+    return 'Unified Memory Session';
+}
+
+function inferCliDisplayName(chatId: string): string | null {
+    const m = /^cli:([^:]+):([^:]+):([^:]+):([^:]+)$/i.exec(chatId);
+    if (!m) return null;
+    const backend = String(m[1] || '').toLowerCase();
+    const cliToken = backend.replace(/-cli$/i, '');
+    if (!cliToken) return 'CLI Session';
+    return `CLI Session (${cliToken.toUpperCase()})`;
+}
+
+function extractAgentLabel(raw: unknown): string | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const m = raw as Record<string, unknown>;
+    const candidate =
+        m.specialist ??
+        m.specialistName ??
+        m.agentName ??
+        m.agent_name ??
+        m.botName ??
+        m.bot_name ??
+        m.botId ??
+        m.bot_id;
+    if (typeof candidate !== 'string') return null;
+    const cleaned = candidate.trim();
+    if (!cleaned) return null;
+    return cleaned.replace(/^specialist[_-]/i, '');
+}
+
+function inferSwarmTaskSpecialistFromMessages(chatId: string): string | null {
+    try {
+        const rows = getDb()
+            .prepare(`
+                SELECT metadata
+                FROM messages
+                WHERE conversation_id = ?
+                  AND metadata IS NOT NULL
+                  AND metadata != ''
+                  AND metadata != '{}'
+                ORDER BY id DESC
+                LIMIT 20
+            `)
+            .all(chatId) as Array<{ metadata?: string }>;
+
+        for (const row of rows) {
+            if (!row?.metadata) continue;
+            try {
+                const parsed = JSON.parse(row.metadata);
+                const label = extractAgentLabel(parsed);
+                if (label) return label;
+            } catch {
+                // ignore malformed JSON metadata
+            }
+        }
+    } catch {
+        // best-effort fallback only
+    }
+    return null;
 }
 
 export function getWorkingMemory(chatId: string): MemoryMessage[] {
@@ -809,5 +920,3 @@ export function getMemoryStats(chatId: string): {
 
     return { coreBlocks, workingMessages, recallMessages, archivalFacts };
 }
-
-

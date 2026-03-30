@@ -1,4 +1,4 @@
-// ============================================================
+﻿// ============================================================
 // Self-Upgrade API Routes — CRUD สำหรับ upgrade proposals
 // ============================================================
 
@@ -14,7 +14,11 @@ import {
   toggleContinuousScan,
   notifyUserActivity,
   approveDiff,
-  rejectDiff
+  rejectDiff,
+  forceStopUpgrade,
+  toggleManualScan,
+  resetAllUpgradeProposals,
+  resetUpgradeTokenUsage
 } from '../evolution/selfUpgrade.js';
 import type { ProposalStatus, ProposalType } from '../evolution/selfUpgrade.js';
 import { asyncHandler } from '../utils/errorHandler.js';
@@ -117,6 +121,38 @@ router.get('/proposals/:id/trace', asyncHandler(async (req, res) => {
   }
 }));
 
+// POST /api/upgrade/proposals/retry-rejected
+router.post('/proposals/retry-rejected', asyncHandler(async (_req, res) => {
+  const count = retryAllRejectedProposals();
+  res.json({ ok: true, count, message: `${count} rejected proposals moved to pending.` });
+}));
+
+// DELETE /api/upgrade/proposals/rejected
+router.delete('/proposals/rejected', asyncHandler(async (_req, res) => {
+  const count = deleteAllRejectedProposals();
+  res.json({ ok: true, count, message: `${count} rejected proposals deleted.` });
+}));
+
+// POST /api/upgrade/proposals/reset-all — ล้างรายการข้อเสนอทั้งหมด (ไม่แตะ AI learning memory)
+router.post('/proposals/reset-all', asyncHandler(async (_req, res) => {
+  const result = resetAllUpgradeProposals();
+  res.json({
+    ok: true,
+    ...result,
+    message: `Reset complete. Deleted ${result.deletedProposals} proposals and ${result.deletedScanLogs} scan logs.`,
+  });
+}));
+
+// POST /api/upgrade/tokens/reset — รีเซ็ตสถิติการใช้ Tokens ของ Self-Upgrade
+router.post('/tokens/reset', asyncHandler(async (_req, res) => {
+  const ok = resetUpgradeTokenUsage();
+  if (!ok) {
+    res.status(500).json({ ok: false, error: 'Failed to reset token stats' });
+    return;
+  }
+  res.json({ ok: true, message: 'Upgrade token usage reset.' });
+}));
+
 // DELETE /api/upgrade/proposals/:id — ลบ proposal
 router.delete('/proposals/:id', asyncHandler(async (req, res) => {
   const id = parseInt(String(req.params.id));
@@ -133,16 +169,10 @@ router.delete('/proposals/:id', asyncHandler(async (req, res) => {
   }
 }));
 
-// POST /api/upgrade/proposals/retry-rejected
-router.post('/proposals/retry-rejected', asyncHandler(async (_req, res) => {
-  const count = retryAllRejectedProposals();
-  res.json({ ok: true, count, message: `${count} rejected proposals moved to pending.` });
-}));
-
-// DELETE /api/upgrade/proposals/rejected
-router.delete('/proposals/rejected', asyncHandler(async (_req, res) => {
-  const count = deleteAllRejectedProposals();
-  res.json({ ok: true, count, message: `${count} rejected proposals deleted.` });
+// POST /api/upgrade/force-stop — หยุดการทำงานทั้งหมดทันที
+router.post('/force-stop', asyncHandler(async (_req, res) => {
+  forceStopUpgrade();
+  res.json({ ok: true, message: 'Force stopped' });
 }));
 
 // GET /api/upgrade/proposals/:id/diff — Get before/after code diff for implemented proposals
@@ -239,13 +269,13 @@ router.get('/proposals/:id/log', asyncHandler(async (req, res) => {
   }
 }));
 
-// POST /api/upgrade/scan — เปิด/ปิด โหมดสแกนต่อเนื่อง (Continuous Scan Toggle)
+// POST /api/upgrade/scan — เปิด/ปิด Manual one-shot scan
 router.post('/scan', asyncHandler(async (_req, res) => {
   const rootDir = process.cwd();
   try {
-    const isActive = await toggleContinuousScan(rootDir);
+    const isActive = await toggleManualScan(rootDir);
     if (isActive) clearColdBootFlag();
-    res.json({ ok: true, message: isActive ? `Continuous Scan started` : `Continuous Scan stopped`, isActive });
+    res.json({ ok: true, message: isActive ? `Manual scan started` : `Manual scan stopped`, isActive });
   } catch (err: any) {
     res.status(500).json({ ok: false, error: err.message });
   }
@@ -254,6 +284,7 @@ router.post('/scan', asyncHandler(async (_req, res) => {
 // POST /api/upgrade/implement-all — สั่ง implement ทุกรายการที่ approved
 import { setSetting } from '../database/db.js';
 import { implementProposalById, ensureUpgradeTable, approveAllPendingProposals, stopBatchImplementation } from '../evolution/selfUpgrade.js';
+import { evolutionEvents } from '../utils/socketBroadcast.js';
 
 // POST /api/upgrade/approve-all — อนุมัติ proposals ที่เป็น pending ทั้งหมด
 router.post('/approve-all', asyncHandler(async (_req, res) => {
@@ -318,9 +349,14 @@ router.post('/implement/:id', asyncHandler(async (req, res) => {
   // Run the 3-5 minute task in the background
   process.nextTick(() => {
     log.info(`[upgradeRoutes] Inside process.nextTick for proposal #${id}`);
-    implementProposalById(id, rootDir).catch((err: any) => {
-      log.error(`[SelfUpgrade] Background implementation failed for #${id}: ${err.message}`);
-    });
+    evolutionEvents.started({ actionType: 'implement' });
+    implementProposalById(id, rootDir)
+      .catch((err: any) => {
+        log.error(`[SelfUpgrade] Background implementation failed for #${id}: ${err.message}`);
+      })
+      .finally(() => {
+        evolutionEvents.finished();
+      });
   });
 }));
 
@@ -349,15 +385,23 @@ router.patch('/toggle', asyncHandler(async (req, res) => {
   if (!paused) {
     clearColdBootFlag();
     setSetting('evolution_enabled', '1');
+    const current = getUpgradeStatus();
+    setUpgradePaused(false);
+    if (!current.isContinuousActive) {
+      const rootDir = process.cwd();
+      await toggleContinuousScan(rootDir);
+    }
+    res.json({ ok: true, paused: false });
+    return;
   }
   setUpgradePaused(paused);
   res.json({ ok: true, paused });
 }));
 
-// POST /api/upgrade/activity — แจ้งว่า user กำลังใช้งาน (สำหรับ dashboard ping)
-router.post('/activity', (_req, res) => {
+// POST /api/upgrade/activity — แจ้งเตือนความเคลื่อนไหวของผู้ใช้
+router.post('/activity', asyncHandler(async (_req, res) => {
   notifyUserActivity();
   res.json({ ok: true });
-});
+}));
 
 export default router;
