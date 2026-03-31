@@ -1,7 +1,8 @@
 // ============================================================
 // Embedding Provider - centralized embedding generation with caching and batching
 // ============================================================
-// Supports multiple backends (Gemini, OpenAI, etc.) with automatic failover and caching.
+// Supports multiple backends (Gemini, OpenAI, OpenRouter) with automatic failover,
+// caching, batching, retry, and graceful degradation.
 
 import crypto from 'crypto';
 import { GoogleGenAI } from '@google/genai';
@@ -20,6 +21,7 @@ export interface EmbeddingProviderStats {
   maxCacheSize: number;
   queuedRequests: number;
   activeModel: string;
+  dimensions: number;
 }
 
 export interface IEmbeddingProvider {
@@ -28,11 +30,14 @@ export interface IEmbeddingProvider {
   getStats(): EmbeddingProviderStats;
   clearCache(): void;
   getDimensions(): number;
+  getProviderType(): string;
 }
 
 const CACHE_MAX_ENTRIES = 500;
 const BATCH_SIZE = 10;
 const BATCH_TIMEOUT_MS = 500;
+const EMBED_RETRY_COUNT = 1;
+const EMBED_RETRY_DELAY_MS = 1000;
 
 // ============================================================
 // LRU Cache Implementation
@@ -69,7 +74,7 @@ class LRUCache {
 }
 
 // ============================================================
-// Base Provider with Caching and Batching
+// Base Provider with Caching, Batching, and Retry
 // ============================================================
 
 abstract class BaseEmbeddingProvider implements IEmbeddingProvider {
@@ -77,6 +82,7 @@ abstract class BaseEmbeddingProvider implements IEmbeddingProvider {
   protected batchQueue: { text: string; resolve: (v: number[]) => void; reject: (e: Error) => void }[] = [];
   protected batchTimeout: NodeJS.Timeout | null = null;
   protected processing = false;
+  protected detectedDimensions: number = 0; // Auto-detected from first successful embed
 
   async embed(text: string): Promise<number[]> {
     if (!text || !text.trim()) return [];
@@ -97,7 +103,13 @@ abstract class BaseEmbeddingProvider implements IEmbeddingProvider {
 
   protected abstract processBatchInternal(texts: string[]): Promise<number[][]>;
   public abstract getStats(): EmbeddingProviderStats;
-  public abstract getDimensions(): number;
+  public abstract getProviderType(): string;
+  protected abstract getExpectedDimensions(): number;
+
+  public getDimensions(): number {
+    // Prefer auto-detected dimensions from actual API responses
+    return this.detectedDimensions || this.getExpectedDimensions();
+  }
 
   protected async processBatch(): Promise<void> {
     if (this.processing || this.batchQueue.length === 0) return;
@@ -107,9 +119,14 @@ abstract class BaseEmbeddingProvider implements IEmbeddingProvider {
     const batch = this.batchQueue.splice(0, BATCH_SIZE);
     try {
       const texts = batch.map(b => b.text);
-      const vectors = await this.processBatchInternal(texts);
+      const vectors = await this.processBatchWithRetry(texts);
       batch.forEach((req, i) => {
         const v = vectors[i] || [];
+        // Auto-detect dimensions from first successful embed
+        if (v.length > 0 && this.detectedDimensions === 0) {
+          this.detectedDimensions = v.length;
+          log.info(`Auto-detected embedding dimensions: ${this.detectedDimensions} (provider: ${this.getProviderType()})`);
+        }
         const hash = crypto.createHash('md5').update(req.text).digest('hex');
         this.cache.set(hash, v);
         req.resolve(v);
@@ -120,6 +137,28 @@ abstract class BaseEmbeddingProvider implements IEmbeddingProvider {
       this.processing = false;
       if (this.batchQueue.length > 0) setImmediate(() => this.processBatch());
     }
+  }
+
+  /**
+   * Retry wrapper for batch processing
+   */
+  private async processBatchWithRetry(texts: string[]): Promise<number[][]> {
+    let lastError: Error | null = null;
+    for (let attempt = 0; attempt <= EMBED_RETRY_COUNT; attempt++) {
+      try {
+        return await this.processBatchInternal(texts);
+      } catch (err) {
+        lastError = err as Error;
+        if (attempt < EMBED_RETRY_COUNT) {
+          log.warn(`Embedding batch failed (attempt ${attempt + 1}/${EMBED_RETRY_COUNT + 1}), retrying in ${EMBED_RETRY_DELAY_MS}ms...`, {
+            error: (err as Error).message,
+            provider: this.getProviderType(),
+          });
+          await new Promise(r => setTimeout(r, EMBED_RETRY_DELAY_MS));
+        }
+      }
+    }
+    throw lastError;
   }
 
   clearCache(): void { this.cache.clear(); }
@@ -155,10 +194,23 @@ export class GeminiEmbeddingProvider extends BaseEmbeddingProvider {
       maxCacheSize: this.cache.max,
       queuedRequests: this.batchQueue.length,
       activeModel: this.model,
+      dimensions: this.getDimensions(),
     };
   }
 
-  getDimensions(): number { return 768; }
+  getProviderType(): string { return 'gemini'; }
+
+  /**
+   * Gemini embedding dimensions vary by model:
+   * - gemini-embedding-001: 3072
+   * - text-embedding-004: 768
+   * Auto-detection overrides this when first vector is received.
+   */
+  protected getExpectedDimensions(): number {
+    if (this.model.includes('embedding-001')) return 3072;
+    if (this.model.includes('text-embedding-004')) return 768;
+    return 3072; // Default for newer models
+  }
 }
 
 // ============================================================
@@ -175,7 +227,8 @@ export class OpenAIEmbeddingProvider extends BaseEmbeddingProvider {
     this.openaiClient = new OpenAI({ apiKey, baseURL: baseUrl });
     this.model = model;
     this.baseUrl = baseUrl;
-    log.info(`OpenAI Embedding Provider initialized with model: ${model} at ${baseUrl}`);
+    const providerName = baseUrl.includes('openrouter') ? 'OpenRouter' : 'OpenAI';
+    log.info(`${providerName} Embedding Provider initialized with model: ${model} at ${baseUrl}`);
   }
 
   protected async processBatchInternal(texts: string[]): Promise<number[][]> {
@@ -188,28 +241,45 @@ export class OpenAIEmbeddingProvider extends BaseEmbeddingProvider {
   }
 
   getStats(): EmbeddingProviderStats {
+    const providerName = this.baseUrl.includes('openrouter') ? 'openrouter' : 'openai';
     return {
-      providerType: 'openai',
+      providerType: providerName,
       cacheSize: this.cache.size,
       maxCacheSize: this.cache.max,
       queuedRequests: this.batchQueue.length,
       activeModel: this.model,
+      dimensions: this.getDimensions(),
     };
   }
 
-  getDimensions(): number {
-    return this.model.includes('3-small') ? 1536 : (this.model.includes('3-large') ? 3072 : 1536);
+  getProviderType(): string { return this.baseUrl.includes('openrouter') ? 'openrouter' : 'openai'; }
+
+  /**
+   * OpenAI embedding dimensions:
+   * - text-embedding-3-small: 1536
+   * - text-embedding-3-large: 3072
+   * - text-embedding-ada-002: 1536
+   * Auto-detection overrides this when first vector is received.
+   */
+  protected getExpectedDimensions(): number {
+    if (this.model.includes('3-small') || this.model.includes('ada-002')) return 1536;
+    if (this.model.includes('3-large')) return 3072;
+    return 1536;
   }
 }
 
 // ============================================================
-// Singleton & Lifecycle Management
+// Singleton & Lifecycle Management with Failover
 // ============================================================
 
 let defaultProvider: IEmbeddingProvider | null = null;
+let fallbackProviders: IEmbeddingProvider[] = [];
 
+/**
+ * Initialize the embedding provider with a specific API key and type.
+ * Can be called multiple times — later calls add fallback providers.
+ */
 export function initEmbeddingProvider(apiKey: string | undefined, type: 'gemini' | 'openai' = 'gemini', model?: string, baseUrl?: string): void {
-  // Use provided apiKey OR fall back to env variables
   const effectiveKey = apiKey || (type === 'gemini' ? process.env.GEMINI_API_KEY : process.env.OPENAI_API_KEY);
 
   if (!effectiveKey) {
@@ -217,28 +287,110 @@ export function initEmbeddingProvider(apiKey: string | undefined, type: 'gemini'
     return;
   }
 
+  let provider: IEmbeddingProvider;
   if (type === 'gemini') {
-    defaultProvider = new GeminiEmbeddingProvider(effectiveKey, model);
+    provider = new GeminiEmbeddingProvider(effectiveKey, model);
   } else {
-    defaultProvider = new OpenAIEmbeddingProvider(effectiveKey, model || 'text-embedding-3-small', baseUrl);
+    provider = new OpenAIEmbeddingProvider(effectiveKey, model || 'text-embedding-3-small', baseUrl);
+  }
+
+  if (!defaultProvider) {
+    defaultProvider = provider;
+  } else {
+    // Add as fallback provider
+    fallbackProviders.push(provider);
+    log.info(`Added fallback embedding provider: ${type}`);
   }
 }
 
 export function isEmbeddingReady(): boolean { return defaultProvider !== null; }
 
+/**
+ * Embed a single text — with automatic failover to fallback providers.
+ * Returns empty array if ALL providers fail (graceful degradation).
+ */
 export async function embedText(text: string): Promise<number[]> {
   if (!defaultProvider) return [];
-  try { return await defaultProvider.embed(text); }
-  catch (e) { log.error('Embedding failed:', String(e)); return []; }
+
+  // Try default provider first
+  try {
+    const result = await defaultProvider.embed(text);
+    if (result && result.length > 0) return result;
+  } catch (e) {
+    log.warn(`Primary embedding provider failed, trying fallbacks...`, { error: String(e), provider: defaultProvider.getProviderType() });
+  }
+
+  // Try fallback providers
+  for (const fb of fallbackProviders) {
+    try {
+      const result = await fb.embed(text);
+      if (result && result.length > 0) {
+        log.info(`Fallback embedding provider succeeded: ${fb.getProviderType()}`);
+        return result;
+      }
+    } catch (e) {
+      log.warn(`Fallback embedding provider also failed`, { error: String(e), provider: fb.getProviderType() });
+    }
+  }
+
+  // All providers failed — graceful degradation
+  log.error('All embedding providers failed. Returning empty vector (semantic search will be degraded).');
+  return [];
 }
 
+/**
+ * Embed multiple texts — with automatic failover.
+ */
 export async function embedTexts(texts: string[]): Promise<(number[] | null)[]> {
   if (!defaultProvider) return texts.map(() => null);
-  try { return await defaultProvider.embedBatch(texts); }
-  catch (e) { log.error('Batch embedding failed:', String(e)); return texts.map(() => null); }
+
+  // Try default provider first
+  try {
+    const results = await defaultProvider.embedBatch(texts);
+    const allNull = results.every(r => r === null || r?.length === 0);
+    if (!allNull) return results;
+  } catch (e) {
+    log.warn('Primary batch embedding failed, trying fallbacks...', { error: String(e) });
+  }
+
+  // Try fallback providers
+  for (const fb of fallbackProviders) {
+    try {
+      const results = await fb.embedBatch(texts);
+      const allNull = results.every(r => r === null || r?.length === 0);
+      if (!allNull) {
+        log.info(`Fallback batch embedding succeeded: ${fb.getProviderType()}`);
+        return results;
+      }
+    } catch (e) {
+      log.warn(`Fallback batch embedding also failed`, { error: String(e), provider: fb.getProviderType() });
+    }
+  }
+
+  log.error('All batch embedding providers failed. Returning nulls.');
+  return texts.map(() => null);
 }
 
 export function getEmbeddingStats(): EmbeddingProviderStats {
-  if (!defaultProvider) return { providerType: 'none', cacheSize: 0, maxCacheSize: 0, queuedRequests: 0, activeModel: 'none' };
+  if (!defaultProvider) return { providerType: 'none', cacheSize: 0, maxCacheSize: 0, queuedRequests: 0, activeModel: 'none', dimensions: 0 };
   return defaultProvider.getStats();
+}
+
+/**
+ * Get currently active embedding dimensions (auto-detected or expected).
+ */
+export function getEmbeddingDimensions(): number {
+  if (!defaultProvider) return 0;
+  return defaultProvider.getDimensions();
+}
+
+/**
+ * Get provider info summary for diagnostics.
+ */
+export function getEmbeddingProviderInfo(): { primary: string; fallbacks: string[]; dimensions: number } {
+  return {
+    primary: defaultProvider?.getProviderType() || 'none',
+    fallbacks: fallbackProviders.map(fb => fb.getProviderType()),
+    dimensions: defaultProvider?.getDimensions() || 0,
+  };
 }
