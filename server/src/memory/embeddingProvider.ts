@@ -1,13 +1,14 @@
 // ============================================================
 // Embedding Provider - centralized embedding generation with caching and batching
 // ============================================================
-// Supports multiple backends (Gemini, OpenAI, OpenRouter) with automatic failover,
+// Supports multiple backends (Gemini, OpenAI, OpenRouter, Local) with automatic failover,
 // caching, batching, retry, and graceful degradation.
 
 import crypto from 'crypto';
 import { GoogleGenAI } from '@google/genai';
 import { createLogger } from '../utils/logger.js';
 import OpenAI from 'openai';
+import { pipeline } from '@huggingface/transformers';
 
 const log = createLogger('EmbeddingProvider');
 
@@ -269,6 +270,76 @@ export class OpenAIEmbeddingProvider extends BaseEmbeddingProvider {
 }
 
 // ============================================================
+// Local Provider Implementation (Transformers.js ONNX)
+// ============================================================
+
+export class LocalEmbeddingProvider extends BaseEmbeddingProvider {
+  private model: string;
+  private extractorPromise: Promise<any>;
+
+  constructor(model: string = 'Xenova/bge-small-en-v1.5') {
+    super();
+    this.model = model;
+    
+    log.info(`Local Embedding Provider initializing with model: ${model} (downloads ~33MB on first run)`);
+    // Lazy load the model on first use, but start the promise here
+    this.extractorPromise = pipeline('feature-extraction', this.model).catch(err => {
+      log.error('Failed to load local embedding model', { error: String(err) });
+      throw err;
+    });
+  }
+
+  protected async processBatchInternal(texts: string[]): Promise<number[][]> {
+    try {
+      const extractor = await this.extractorPromise;
+      
+      // BGE models should ideally have "passage: " prefix for text, but we'll feed it directly 
+      // as our memory layer already prepares the text reasonably.
+      const formattedTexts = texts.map(t => typeof t === 'string' ? t.trim() : '');
+      
+      // Process batch (transformers.js handles array inputs efficiently)
+      const output = await extractor(formattedTexts, { pooling: 'mean', normalize: true });
+      
+      // output.data is a flat Float32Array. We need to chunk it.
+      const embeddings: number[][] = [];
+      const dims = this.getExpectedDimensions();
+      const flatData = Array.from(output.data);
+      
+      for (let i = 0; i < texts.length; i++) {
+        const start = i * dims;
+        const end = start + dims;
+        embeddings.push(flatData.slice(start, end) as number[]);
+      }
+      
+      return embeddings;
+    } catch (err) {
+      log.error('Local bulk embedding failed', { error: String(err) });
+      throw err;
+    }
+  }
+
+  getStats(): EmbeddingProviderStats {
+    return {
+      providerType: 'local',
+      cacheSize: this.cache.size,
+      maxCacheSize: this.cache.max,
+      queuedRequests: this.batchQueue.length,
+      activeModel: this.model,
+      dimensions: this.getDimensions(),
+    };
+  }
+
+  getProviderType(): string { return 'local'; }
+
+  /**
+   * Xenova/bge-small-en-v1.5 has 384 dimensions.
+   */
+  protected getExpectedDimensions(): number {
+    return 384;
+  }
+}
+
+// ============================================================
 // Singleton & Lifecycle Management with Failover
 // ============================================================
 
@@ -279,25 +350,33 @@ let fallbackProviders: IEmbeddingProvider[] = [];
  * Initialize the embedding provider with a specific API key and type.
  * Can be called multiple times — later calls add fallback providers.
  */
-export function initEmbeddingProvider(apiKey: string | undefined, type: 'gemini' | 'openai' = 'gemini', model?: string, baseUrl?: string): void {
-  const effectiveKey = apiKey || (type === 'gemini' ? process.env.GEMINI_API_KEY : process.env.OPENAI_API_KEY);
-
-  if (!effectiveKey) {
-    log.warn(`No API key provided or found in ENV for ${type} EmbeddingProvider initialization`);
-    return;
+export function initEmbeddingProvider(apiKey: string | undefined, type: 'gemini' | 'openai' | 'local' = 'gemini', model?: string, baseUrl?: string): void {
+  if (type !== 'local' && !apiKey) {
+    const effectiveKey = type === 'gemini' ? process.env.GEMINI_API_KEY : process.env.OPENAI_API_KEY;
+    if (!effectiveKey) {
+      log.warn(`No API key provided or found in ENV for ${type} EmbeddingProvider initialization`);
+      return;
+    }
+    apiKey = effectiveKey;
   }
 
   let provider: IEmbeddingProvider;
   if (type === 'gemini') {
-    provider = new GeminiEmbeddingProvider(effectiveKey, model);
+    provider = new GeminiEmbeddingProvider(apiKey as string, model);
+  } else if (type === 'openai') {
+    provider = new OpenAIEmbeddingProvider(apiKey as string, model || 'text-embedding-3-small', baseUrl);
   } else {
-    provider = new OpenAIEmbeddingProvider(effectiveKey, model || 'text-embedding-3-small', baseUrl);
+    provider = new LocalEmbeddingProvider(model || 'Xenova/bge-small-en-v1.5');
   }
 
   if (!defaultProvider) {
     defaultProvider = provider;
   } else {
     // Add as fallback provider
+    // Prevent duplicate local providers
+    if (type === 'local' && fallbackProviders.some(p => p.getProviderType() === 'local')) {
+      return;
+    }
     fallbackProviders.push(provider);
     log.info(`Added fallback embedding provider: ${type}`);
   }

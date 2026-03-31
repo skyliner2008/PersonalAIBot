@@ -503,15 +503,16 @@ async function main() {
       const credentialKey = `provider_key_${providerDef.id.replace('-embedding', '')}`;
       const apiKey = getCredential(credentialKey) || getCredential(envVar) || process.env[envVar];
       
-      if (!apiKey) continue; // No key available for this provider
+      if (providerDef.requiresAuth && !apiKey) continue; // Skip if it needs auth but no key is available
       
-      const providerType = providerDef.type === 'gemini' ? 'gemini' : 'openai';
+      const providerType = providerDef.type === 'gemini' ? 'gemini' : 
+                           providerDef.type === 'local' ? 'local' : 'openai';
       const model = providerDef.defaultModel;
       const baseUrl = providerDef.baseUrl;
       const label = embeddingProvidersRegistered === 0 ? '' : ' (fallback)';
       
       startupInfo(`[Embedding] Registering ${providerDef.name}${label} — model: ${model}`);
-      initEmbeddingProvider(apiKey, providerType as any, model, baseUrl);
+      initEmbeddingProvider(apiKey as string | undefined, providerType as any, model, baseUrl);
       embeddingProvidersRegistered++;
     }
   } catch (err: any) {

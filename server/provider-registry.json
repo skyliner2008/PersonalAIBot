@@ -609,6 +609,24 @@
       "enabled": false,
       "notes": "Hosts BGE-M3, E5, sentence-transformers via HuggingFace Inference API"
     },
+    "local-embedding": {
+      "id": "local-embedding",
+      "name": "Local Embeddings (Transformers.js)",
+      "category": "embedding",
+      "type": "local",
+      "baseUrl": "local",
+      "defaultModel": "Xenova/bge-small-en-v1.5",
+      "models": [
+        "Xenova/bge-small-en-v1.5"
+      ],
+      "capabilities": {
+        "embedding": true
+      },
+      "requiresAuth": false,
+      "apiKeyEnvVar": "",
+      "enabled": true,
+      "notes": "Runs BGE ONNX model locally (downloads ~33MB on first run). Does not require API key. Ultimate fallback."
+    },
     "tavily": {
       "id": "tavily",
       "name": "Tavily Search",
@@ -1073,7 +1091,8 @@
       "dashscope-embedding",
       "together-embedding",
       "fireworks-embedding",
-      "huggingface-embedding"
+      "huggingface-embedding",
+      "local-embedding"
     ],
     "search": [
       "tavily",
