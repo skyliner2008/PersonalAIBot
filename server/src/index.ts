@@ -712,7 +712,6 @@ async function main() {
 
     // Background Task Management (Self-Evolution & Subconscious)
     const evolutionEnabled = getSetting('evolution_enabled') === '1' || process.env.EVOLUTION_ENABLED === '1';
-    const subconsciousEnabled = getSetting('subconscious_enabled') === '1' || process.env.SUBCONSCIOUS_ENABLED === '1';
 
     if (evolutionEnabled) {
       // Start Proactive Idle Loop using a standalone System Agent instance
@@ -742,12 +741,10 @@ async function main() {
       }
     }
 
-    if (subconsciousEnabled) {
-      startSubconsciousSleepJob();
-      startupInfo('[Subconscious] Subconscious sleep job initialized');
-    } else {
-      startupInfo('[Subconscious] Subconscious sleep job is DISABLED (default)');
-    }
+    // Subconscious: always-on — memory consolidation (summarize, GraphRAG, prune)
+    // Runs when system is idle > 15 minutes, checks every 5 minutes
+    startSubconsciousSleepJob();
+    startupInfo('[Subconscious] Subconscious sleep job initialized (always-on)');
 
   } catch (err) {
     console.error('[BotManager] Failed to start agents:', err);

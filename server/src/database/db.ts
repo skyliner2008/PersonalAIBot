@@ -410,7 +410,7 @@ function seedDefaultData(dbInstance: SqliteDatabase): void {
   if (settingsCount && settingsCount.c === 0) {
     const defaultSettings = [
       ['evolution_enabled', '0'],
-      ['subconscious_enabled', '0'],
+      ['subconscious_enabled', '1'],
       ['upgrade_idle_threshold', '1'], // 1 minute default (for "concurrent" mode)
       ['upgrade_check_interval', '1800000'], // 30 minutes
       ['upgrade_auto_fix', 'false'],

@@ -15,8 +15,8 @@ import { extractGraphKnowledge } from '../memory/graphMemory.js';
 const log = createLogger('Subconscious');
 
 // ── Configuration ──
-const IDLE_THRESHOLD_MS = 2 * 60 * 60 * 1000;  // 2 hours
-const CHECK_INTERVAL_MS = 30 * 60 * 1000;       // 30 minutes
+const IDLE_THRESHOLD_MS = 15 * 60 * 1000;       // 15 minutes (เดิม 2 hours)
+const CHECK_INTERVAL_MS = 5 * 60 * 1000;        // 5 minutes (เดิม 30 minutes)
 const PRUNE_AGE_DAYS = 7;
 const PRUNE_KEEP_RECENT = 50;                    // ข้อความล่าสุดที่เก็บไว้ต่อ conversation
 const API_DELAY_MS = 5000;                        // delay ระหว่าง API calls
@@ -84,13 +84,13 @@ export function getSleepStatus(): {
 export function startSubconsciousSleepJob(): void {
   if (sleepInterval) clearInterval(sleepInterval);
 
-  log.info(`Subconscious Sleep Job initialized. Idle threshold: ${IDLE_THRESHOLD_MS / 1000 / 60 / 60} hours.`);
+  log.info(`Subconscious Sleep Job initialized. Idle threshold: ${IDLE_THRESHOLD_MS / 1000 / 60} minutes, check interval: ${CHECK_INTERVAL_MS / 1000 / 60} minutes.`);
 
   sleepInterval = setInterval(async () => {
     const timeSinceLastActivity = Date.now() - lastActivityTime;
 
     if (timeSinceLastActivity >= IDLE_THRESHOLD_MS && !isSleeping) {
-      log.info(`System idle for > ${IDLE_THRESHOLD_MS / 1000 / 60 / 60} hours. Entering Subconscious Sleep Mode.`);
+      log.info(`System idle for > ${IDLE_THRESHOLD_MS / 1000 / 60} minutes. Entering Subconscious Sleep Mode.`);
       isSleeping = true;
       _sleepState = {
         phase: 'idle',
