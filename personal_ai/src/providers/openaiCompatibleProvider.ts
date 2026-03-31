@@ -98,6 +98,8 @@ export class OpenAICompatibleProvider implements AIProvider {
     } catch (_) {
       if (isMiniMax) {
         return [
+          'MiniMax-M2.7',
+          'MiniMax-M2.7-highspeed',
           'MiniMax-M2.5',
           'MiniMax-M2.5-highspeed',
           'MiniMax-M2.1',
@@ -106,7 +108,7 @@ export class OpenAICompatibleProvider implements AIProvider {
           'abab6.5s-chat',
         ];
       }
-      return ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'];
+      return ['gpt-4o', 'gpt-4o-mini', 'o3-mini', 'o1-mini'];
     }
   }
 }

@@ -94,11 +94,25 @@ export class OpenAICompatibleProvider implements AIProvider {
   }
 
   async listModels(): Promise<string[]> {
+    const isMiniMax = (this.client as any).baseURL?.includes('minimax');
+
     try {
       const response = await this.client.models.list();
       return (response.data || []).map(m => m.id).sort();
     } catch {
-      return [];
+      if (isMiniMax) {
+        return [
+          'MiniMax-M2.7',
+          'MiniMax-M2.7-highspeed',
+          'MiniMax-M2.5',
+          'MiniMax-M2.5-highspeed',
+          'MiniMax-M2.1',
+          'MiniMax-M2.1-highspeed',
+          'abab7-chat-preview',
+          'abab6.5s-chat',
+        ];
+      }
+      return ['gpt-4o', 'gpt-4o-mini', 'o3-mini', 'o1-mini'];
     }
   }
 

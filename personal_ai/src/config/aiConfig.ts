@@ -21,13 +21,13 @@ export interface ModelConfig {
  * ปรับได้ผ่าน Dashboard หรือ api/config
  */
 export const modelRouting: Record<string, ModelConfig> = {
-  [TaskType.GENERAL]:  { provider: 'gemini',  modelName: 'gemini-2.0-flash' },       // อัพจาก lite → flash
-  [TaskType.COMPLEX]:  { provider: 'gemini',  modelName: 'gemini-2.5-flash' },       // ใช้ Gemini 2.5 Flash (ดีกว่า MiniMax)
-  [TaskType.VISION]:   { provider: 'gemini',  modelName: 'gemini-2.0-flash' },
-  [TaskType.WEB]:      { provider: 'gemini',  modelName: 'gemini-2.0-flash' },
-  [TaskType.THINKING]: { provider: 'gemini',  modelName: 'gemini-2.5-flash' },       // Gemini 2.5 Flash มี thinking built-in
-  [TaskType.CODE]:     { provider: 'gemini',  modelName: 'gemini-2.5-flash' },       // อัพ → 2.5 Flash สำหรับ code
-  [TaskType.DATA]:     { provider: 'gemini',  modelName: 'gemini-2.5-flash' },       // อัพ → 2.5 Flash สำหรับ data
+  [TaskType.GENERAL]:  { provider: 'gemini',  modelName: 'gemini-2.5-flash' },
+  [TaskType.COMPLEX]:  { provider: 'gemini',  modelName: 'gemini-2.5-flash' },
+  [TaskType.VISION]:   { provider: 'gemini',  modelName: 'gemini-2.5-flash' },
+  [TaskType.WEB]:      { provider: 'gemini',  modelName: 'gemini-2.5-flash' },
+  [TaskType.THINKING]: { provider: 'gemini',  modelName: 'gemini-2.5-flash' },
+  [TaskType.CODE]:     { provider: 'gemini',  modelName: 'gemini-2.5-flash' },
+  [TaskType.DATA]:     { provider: 'gemini',  modelName: 'gemini-2.5-flash' },
 };
 
 // ==========================================

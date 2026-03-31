@@ -24,9 +24,13 @@ const STALE_MODEL_MAP: Record<string, string> = {
   'gpt-5.1-codex': 'gpt-4o',
   'gpt-5-codex': 'gpt-4o',
 
-  // Legacy Gemini aliases
-  'gemini-pro': 'gemini-1.5-pro',
-  'gemini-flash': 'gemini-2.0-flash',
+  // Legacy Gemini aliases and auto-migration from deprecated versions
+  'gemini-pro': 'gemini-2.5-pro',
+  'gemini-flash': 'gemini-2.5-flash',
+  'gemini-1.5-pro': 'gemini-2.5-pro',
+  'gemini-1.5-flash': 'gemini-2.5-flash',
+  'gemini-2.0-flash': 'gemini-2.5-flash',
+  'gemini-2.0-flash-lite': 'gemini-2.5-flash',
 };
 
 // Cost-optimized model routing:
@@ -47,7 +51,7 @@ const defaultConfig: Record<TaskType, ModelConfig> = {
   [TaskType.THINKING]:    { provider: 'gemini', modelName: 'gemini-2.5-flash' },
   [TaskType.CODE]:        { provider: 'gemini', modelName: 'gemini-2.5-flash' },
   [TaskType.DATA]:        { provider: 'gemini', modelName: 'gemini-2.5-flash' },
-  [TaskType.SYSTEM]:      { provider: 'gemini', modelName: 'gemini-2.0-flash' },
+  [TaskType.SYSTEM]:      { provider: 'gemini', modelName: 'gemini-2.5-flash' },
 };
 
 export interface BotRoutingConfig {

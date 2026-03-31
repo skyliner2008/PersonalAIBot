@@ -757,7 +757,7 @@ CRITICAL RULES:
     const routes = configManager.getConfig().routes;
     return [
       { provider: routes[TaskType.GENERAL].active.provider, model: routes[TaskType.GENERAL].active.modelName },
-      { provider: 'gemini', model: 'gemini-1.5-flash' },
+      { provider: 'gemini', model: 'gemini-2.5-flash' },
       { provider: 'minimax', model: 'MiniMax-M2.7' },
     ];
   }

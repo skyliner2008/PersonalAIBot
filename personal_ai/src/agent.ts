@@ -398,11 +398,11 @@ ${knowledgeCtx}
       const fallbackProviders = ['gemini', 'openai', 'minimax'];
       for (const fbName of fallbackProviders) {
         const fbProvider = this.providers[fbName];
-        if (!fbProvider || fbProvider === this.providers[config.provider]) continue;
+        if (!fbProvider) continue;
         try {
           console.warn(`[Agent] Failover: trying ${fbName}`);
           const fbRes = await fbProvider.generateResponse(
-            fbName === 'gemini' ? 'gemini-2.0-flash-lite' : 'gpt-4o-mini',
+            fbName === 'gemini' ? 'gemini-2.5-flash' : 'gpt-4o-mini',
             'ตอบสั้นๆ ภาษาเดียวกับผู้ใช้',
             [{ role: 'user', parts: [{ text: message }] }]
           );
@@ -429,7 +429,7 @@ ${knowledgeCtx}
 
       // Timeout protection
       const extractionPromise = this.providers.gemini.generateResponse(
-        'gemini-2.0-flash-lite',
+        'gemini-2.5-flash',
         "จาก conversation นี้ ดึงข้อเท็จจริงสั้นๆ เกี่ยวกับผู้ใช้ 1 ข้อ (ชื่อ, อาชีพ, ความชอบ, นิสัย) หรือตอบว่า 'NONE' ถ้าไม่มีข้อมูลใหม่",
         [{ role: 'user', parts: [{ text: `User: ${userMsg}\nAI: ${aiMsg}` }] }]
       );

@@ -227,7 +227,7 @@ export class GeminiProvider implements AIProvider {
       return provider.models;
     }
     const res = await this.syncModels();
-    return res.models.length > 0 ? res.models : ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-3.1-flash'];
+    return res.models.length > 0 ? res.models : ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-3.1-flash'];
   }
 
   async generateImage(prompt: string, modelName?: string, options?: Record<string, any>): Promise<{ b64_json?: string; buffer?: Buffer }[]> {

@@ -79,10 +79,10 @@ export const modelRouting: Record<TaskType, MultiModelConfig> = {
     ]
   },
   [TaskType.SYSTEM]: {
-    active: { provider: 'gemini', modelName: 'gemini-2.0-flash' },
+    active: { provider: 'gemini', modelName: 'gemini-2.5-flash' },
     fallbacks: [
       { provider: 'openrouter', modelName: 'auto' },
-      { provider: 'gemini', modelName: 'gemini-2.5-flash' }
+      { provider: 'gemini', modelName: 'gemini-3.1-flash' }
     ]
   },
 };
