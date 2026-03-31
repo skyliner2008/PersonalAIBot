@@ -22,11 +22,12 @@
 - รับคำสั่งผ่าน **LINE, Telegram, Web Dashboard และ Terminal**
 - วิเคราะห์ intent และ route งานซับซ้อนไปยัง **Swarm of AI Agents**
 - **จำทุกการสนทนาตลอดชาติ** ด้วย 4-Layer Memory + Vector + GraphRAG + Embeddings 
-- **แก้โค้ดตัวเองได้ (v2.6)** พร้อมระบบ rollback ป้องกันการพัง และระบบ **Resilient Batch Implementation** ที่ทำงานต่อเนื่องข้ามการรีสตาร์ท — **[UPDATE]**: เพิ่มระบบ **Line Ending Normalization** (Windows Resilience), **Robust JSON Repair** และ **Stable Status Engine** ซึ่งช่วยให้การสแกนโค้ดสม่ำเสมอและปุ่ม Pause หยุดทำงานได้ทันทีจริง 100%
+- **แก้โค้ดตัวเองได้ (v2.6)** พร้อมระบบ rollback ป้องกันการพัง และระบบ **Resilient Batch Implementation** ที่ทำงานต่อเนื่องข้ามการรีสตาร์ท — **[UPDATE]**: เพิ่มระบบ **Line Ending Normalization** (Windows Resilience), **Robust JSON Repair**, และระบบ **Stable Status Engine** ซึ่งช่วยให้การสแกนโค้ดสม่ำเสมอและปุ่ม Pause หยุดทำงานได้ทันทีจริง 100%
+- **Gemini SDK Patch (Mar 2026)**: แก้ไขปัญหา `systemInstruction` อยู่ผิดตำแหน่งใน SDK v1.43.0 ทำให้ AI รับรู้ Identity และกฎเกณฑ์ต่างๆ ได้ถูกต้องแม่นยำ
 - **Zero-Config Voice Experience**: ระบบสำรองการโทรด้วยเสียง (Automatic STT Fallback) พร้อมระบบล้าง URL Autostart ป้องกันการโทรเองซ้ำซ้อน
 - **AI Provider และ Tooling ให้เป็นสากล (Universal AI Platform)** พัฒนาให้รองรับทุก Provider ได้อย่างราบรื่น
 - **🛡️ New Security & Stability (Mar 2026)**: เพิ่มระบบ **Cold Boot Protection** และระบบ **Specialist Protocol** เพื่อให้ Jarvis ควบคุมทิศทางการใช้เครื่องมือของ Specialist ได้อย่างแม่นยำ 100%
-- **🚀 UX & Resilience (Mar 2026)**: นำระบบแจ้งเตือน (Alerts) ออกทั้งหมดเพื่อความลื่นไหล, เพิ่มปุ่ม **Force Stop** หยุดงาน AI ได้ทันที และมีระบบ **JSON Self-Healing** ซ่อมแซมคำตอบจาก LLM อัตโนมัติ
+- **🚀 UX & Resilience (Mar 2026)**: นำระบบแจ้งเตือน (Alerts) ออกทั้งหมดเพื่อความลื่นไหล, เพิ่มปุ่ม **Force Stop** หยุดงาน AI ได้ทันที, ระบบ **JSON Self-Healing** ซ่อมแซมคำตอบจาก LLM อัตโนมัติ และการปรับปรุง Interaction ใน Brain Visualizer
 
 - **Automate Facebook** ตอบแชท/คอมเมนต์/โพสต์อัตโนมัติ
 
@@ -149,8 +150,8 @@ Scan → Filter → Validate → Impact Analysis → Learning → Trauma → Sec
 ระบบแสดงผลโครงสร้าง "สมอง" ของ AI แบบ 3D ทรงประสาท (Neural Graph Visualization) ที่ช่วยให้เห็นการทำงานภายในแบบ Real-time:
 - **First Brain**: แสดงผลตารางหน่วยความจำส่วนหน้า (Conversations, Messages, Core Memory)
 - **Second Brain**: แสดงผลโครงสร้างสถาปัตยกรรมโค้ด (Codebase Map, Dependencies, Evolution Log)
-- **Real-time Activity Pulse**: แสดงผลการรับส่ง Token และการทำงานของตารางฐานข้อมูลด้วยเอฟเฟกต์วงแหวนแสงและอนุภาค
-- **Unified Topology**: เชื่อมโยง Agent ต่างๆ (Jarvis, Bots, Specialists) เข้ากับส่วนประกอบของระบบที่พวกมันกำลังใช้งานอยู่
+- **Real-time Activity Pulse**: แสดงผลการรับส่ง Token และการทำงานของตารางฐานข้อมูลด้วยเอฟเฟกต์ **Saturn-like pulse rings** และอนุภาค
+- **Unified Topology**: เชื่อมโยง Agent ต่างๆ (Jarvis, Bots, Specialists) เข้ากับส่วนประกอบของระบบที่พวกมันกำลังใช้งานอยู่ พร้อมระบบ **Enhanced Interaction** ที่สามารถคลิกทะลุ Hemisphere เพื่อเลือก Node ภายในได้
 
 
 ### 🛡️ Boot Guardian & Immortal Core
@@ -606,6 +607,6 @@ PersonalAIBot/
 <div align="center">
   <i>"I am Jarvis. What are we building today, sir?"</i>
   <br/><br/>
-  <sub>Built with ❤️ — PersonalAIBot v2.6 | Last updated: 30 March 2026</sub>
+  <sub>Built with ❤️ — PersonalAIBot v2.6 (Original Release) | Last updated: 31 March 2026</sub>
 </div>
 

@@ -322,7 +322,6 @@ function createWorkPackages(
   mode: ObjectiveMode,
   signals: ObjectiveSignals,
 ): WorkPackage[] {
-  // TODO: Implement work package creation logic here, or remove if this function is not needed.
   const rawMaxLanes = Number.parseInt(String(process.env.JARVIS_MAX_STAGE_A_LANES || ''), 10);
   const maxLanes = Number.isFinite(rawMaxLanes) && rawMaxLanes > 0
     ? Math.min(6, Math.max(1, rawMaxLanes))
@@ -471,7 +470,6 @@ function rationaleFor(
   mode: ObjectiveMode,
   health: JarvisPlannerOptions['health'],
 ): string {
-  // TODO: Implement rationale generation logic here, or remove if this function is not needed.
   const capabilityLabel = profile.primaryCapabilities.includes(workPackage.taskType) ? 'primary' : 'secondary';
   const healthSignal = health?.[profile.specialist];
   const healthNote = healthSignal?.state === 'degraded'
@@ -512,7 +510,6 @@ function buildDirectTerminalDelegationMessage(
   assignment: AssignedPackage,
   objective: string,
 ): string {
-  // TODO: Implement direct terminal delegation message building logic here, or remove if this function is not needed.
   const taskLines = assignment.instructions.filter((line) => !/^Objective:/i.test(line));
   const roleHint = assignment.specialist === 'gemini-cli-agent'
     ? 'ค้นหาข้อมูลเชิงข้อเท็จจริงจากแหล่งอ้างอิงที่เชื่อถือได้'
@@ -537,7 +534,6 @@ function buildDelegationMessage(
     omitRawObjective?: boolean;
   },
 ): string {
-  // TODO: Implement delegation message building logic here, or remove if this function is not needed.
   if (JARVIS_TERMINAL_DIRECT_MODE) {
     return buildDirectTerminalDelegationMessage(assignment, objective);
   }
@@ -601,7 +597,6 @@ function buildFollowUpMessage(
   mode: ObjectiveMode,
   assignment: AssignedPackage,
 ): string {
-  // TODO: Implement follow-up message building logic here, or remove if this function is not needed.
   const profile = CLI_PROFILES.find((item) => item.specialist === assignment.specialist);
   const modeRules = buildModeRules(mode);
   const followUpGoal = assignment.intent === 'risk_review'
@@ -643,7 +638,6 @@ function buildAssignedStageA(
   signals: ObjectiveSignals,
   health: JarvisPlannerOptions['health'],
 ): AssignedPackage[] {
-  // TODO: Implement assigned stage A logic here, or remove if this function is not needed.
   const usage: Record<CliSpecialistName, number> = {
     'gemini-cli-agent': 0,
     'codex-cli-agent': 0,

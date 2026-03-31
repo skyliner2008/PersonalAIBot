@@ -18,7 +18,13 @@ import {
   forceStopUpgrade,
   toggleManualScan,
   resetAllUpgradeProposals,
-  resetUpgradeTokenUsage
+  resetUpgradeTokenUsage,
+  implementProposalById,
+  ensureUpgradeTable,
+  approveAllPendingProposals,
+  stopBatchImplementation,
+  updateUpgradeConfig,
+  setUpgradePaused
 } from '../evolution/selfUpgrade.js';
 import type { ProposalStatus, ProposalType } from '../evolution/selfUpgrade.js';
 import { asyncHandler } from '../utils/errorHandler.js';
@@ -26,6 +32,8 @@ import { createLogger } from '../utils/logger.js';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import * as fs from 'fs';
+import { setSetting } from '../database/db.js';
+import { evolutionEvents } from '../utils/socketBroadcast.js';
 
 const _filename = fileURLToPath(import.meta.url);
 const _dirname = path.dirname(_filename);
@@ -282,9 +290,6 @@ router.post('/scan', asyncHandler(async (_req, res) => {
 }));
 
 // POST /api/upgrade/implement-all — สั่ง implement ทุกรายการที่ approved
-import { setSetting } from '../database/db.js';
-import { implementProposalById, ensureUpgradeTable, approveAllPendingProposals, stopBatchImplementation } from '../evolution/selfUpgrade.js';
-import { evolutionEvents } from '../utils/socketBroadcast.js';
 
 // POST /api/upgrade/approve-all — อนุมัติ proposals ที่เป็น pending ทั้งหมด
 router.post('/approve-all', asyncHandler(async (_req, res) => {
@@ -361,8 +366,6 @@ router.post('/implement/:id', asyncHandler(async (req, res) => {
 }));
 
 // PATCH /api/upgrade/config — ปรับแต่งค่าระบบ
-import { updateUpgradeConfig, setUpgradePaused } from '../evolution/selfUpgrade.js';
-
 router.patch('/config', asyncHandler(async (req, res) => {
   const { intervalMs, idleThresholdMs, autoFix } = req.body as { intervalMs?: number, idleThresholdMs?: number, autoFix?: boolean };
   

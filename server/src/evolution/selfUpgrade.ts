@@ -31,6 +31,31 @@ const execPromise = util.promisify(exec);
 
 const log = createLogger('SelfUpgrade');
 
+// ── Protected Core Files (Immortal Sandbox) ──
+// ไฟล์เหล่านี้ถูก hard-block จาก auto-upgrade ทุกกรณี
+// แก้ไขที่นี่ที่เดียวเท่านั้น
+const PROTECTED_CORE_FILES = new Set([
+  'index.ts',
+  'config.ts',
+  'configValidator.ts',
+  'queue.js',
+  'boot.ts',
+  'bootGuardian.ts',
+  'database/db.ts',
+  'database/db.js',
+  'evolution/selfUpgrade.ts',
+  'evolution/selfReflection.ts',
+  'terminal/terminalGateway.ts',
+  'api/routes.ts',
+  'api/socketHandlers.ts',
+  'api/upgradeRoutes.ts',
+  'automation/chatBot.ts',
+  'automation/browser.ts',
+  'bot_agents/tools/index.ts',
+  'bot_agents/agent.ts',
+  'bot_agents/botManager.ts',
+]);
+
 function getImplementModel(): string {
   // Use premium Code or Agent Model for actual patching/implementation
   // Fallback is empty string — provider runtime resolves to the first enabled provider's default
@@ -369,24 +394,7 @@ async function buildFileIndex(rootDir: string): Promise<string[]> {
   // 🛡️ Immortal Core Sandbox (Self-Preservation)
   // These files are the heart of the backend. They are strictly invisible to the scanner 
   // and immune to Auto-Upgrades so the AI cannot accidentally break the Node server permanently.
-  const PROTECTED_CORE_FILES = new Set([
-    'index.ts',
-    'config.ts',
-    'configValidator.ts',
-    'queue.js',
-    'database/db.ts',
-    'database/db.js',
-    'evolution/selfUpgrade.ts',
-    'evolution/selfReflection.ts',
-    'terminal/terminalGateway.ts',
-    'api/routes.ts',
-    'api/socketHandlers.ts',
-    'api/upgradeRoutes.ts',
-    'automation/chatBot.ts',
-    'automation/browser.ts',
-    'bot_agents/tools/index.ts',
-    'bot_agents/agent.ts',
-  ]);
+  // PROTECTED_CORE_FILES defined at module level (see top of file)
 
   function walk(dir: string): void {
     try {
@@ -1163,13 +1171,7 @@ ${chunkContent}`;
  * Uses lightweight static analysis (no LLM calls) — parses import/export lines directly.
  */
 async function mapProtectedCoresToSecondBrain(rootDir: string): Promise<void> {
-  const PROTECTED_CORE_FILES = new Set([
-    'index.ts', 'config.ts', 'configValidator.ts',
-    'database/db.ts', 'evolution/selfUpgrade.ts', 'evolution/selfReflection.ts',
-    'terminal/terminalGateway.ts', 'api/routes.ts', 'api/socketHandlers.ts', 'api/upgradeRoutes.ts',
-    'automation/chatBot.ts', 'automation/browser.ts',
-    'bot_agents/tools/index.ts', 'bot_agents/agent.ts', 'bot_agents/botManager.ts',
-  ]);
+  // PROTECTED_CORE_FILES defined at module level (see top of file)
 
   let mapped = 0;
   for (const relPath of PROTECTED_CORE_FILES) {
@@ -2369,15 +2371,7 @@ export async function implementProposalById(id: number, rootDir: string): Promis
   
   // 🛡️ Immortal Core Sandbox Hard-Blocker
   // Failsafe in case a proposal targeting a core file was generated manually or pre-dates the blacklist
-  const PROTECTED_CORE_FILES = new Set([
-    'index.ts', 'config.ts', 'configValidator.ts', 'queue.js',
-    'database/db.ts', 'database/db.js',
-    'evolution/selfUpgrade.ts', 'evolution/selfReflection.ts',
-    'terminal/terminalGateway.ts', 'api/routes.ts', 'api/socketHandlers.ts', 'api/upgradeRoutes.ts',
-    'bot_agents/tools/index.ts', 'bot_agents/agent.ts',
-    'automation/chatBot.ts', 'automation/browser.ts',
-  ]);
-  
+  // PROTECTED_CORE_FILES defined at module level (see top of file)
   if (PROTECTED_CORE_FILES.has(relativePath)) {
     log.warn(`[SelfUpgrade] Hard-blocked implementation of proposal #${proposal.id} because "${relativePath}" is an Immortal Core Sandbox file.`);
     db.prepare(`UPDATE upgrade_proposals SET status = 'rejected', description = description || ? WHERE id = ?`)
