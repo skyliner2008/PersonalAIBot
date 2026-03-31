@@ -11,6 +11,8 @@ import fs from 'fs';
 import { config } from './config.js';
 import { initDb, addLog, upsertConversation, getCredential, getSetting, checkCredentialIntegrity } from './database/db.js';
 import { ensureBotTables } from './bot_agents/registries/botRegistry.js';
+import { syncFromDeclarations } from './bot_agents/registries/toolRegistry.js';
+import { tools as allToolDeclarations } from './bot_agents/tools/index.js';
 import { setupSocketHandlers, attachSocketAuth } from './api/socketHandlers.js';
 import { setSocketIO } from './utils/socketBroadcast.js';
 import { startBots, stopBots, stopBotsAsync } from './bot_agents/botManager.js';
@@ -441,6 +443,11 @@ async function main() {
   ensureGoalTables();
   ensureQueueTable();
   await initSelfReflection();
+
+  // --- Auto-sync Tool Registry ---
+  // Registers any tools in the live declarations array that are missing
+  // from the static registry, so new tools appear in the Web UI automatically.
+  syncFromDeclarations(allToolDeclarations);
 
   // --- Cold Boot Protection (Self-Upgrade Safety) ---
   // COLD_BOOT.flag is created by start_unified.bat/start.bat at project root

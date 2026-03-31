@@ -266,15 +266,23 @@ export class Agent {
       const userParts: AIMessagePart[] = [{ text: message }];
       if (attachments) userParts.push(...attachments);
 
-      // Pre-search for web
+      // Pre-search for web — inject results directly into context before LLM call
+      let preSearchSuccess = false;
       if (taskType === TaskType.WEB_BROWSER) {
         try {
           const { webSearch } = await import('./tools/limitless.js');
+          console.log(`[PreSearch] Searching for: "${cleanMessage}"`);
           const searchResults = await webSearch({ query: cleanMessage });
-          if (searchResults && !searchResults.includes('ไม่พบผลลัพธ์')) {
-            userParts.push({ text: `\n\n[ผลการค้นหา]:\n${searchResults}` });
+          if (searchResults && !searchResults.includes('ไม่พบผลลัพธ์') && !searchResults.includes('❌')) {
+            userParts.push({ text: `\n\n[ข้อมูลจากอินเทอร์เน็ต - ค้นหาล่วงหน้า]:\n${searchResults}` });
+            preSearchSuccess = true;
+            console.log(`[PreSearch] ✅ Success (${searchResults.length} chars)`);
+          } else {
+            console.warn(`[PreSearch] ⚠️ No results or error: ${searchResults?.substring(0, 100)}`);
           }
-        } catch {}
+        } catch (err: any) {
+          console.warn(`[PreSearch] ❌ Failed: ${err.message} — LLM will use tool call instead`);
+        }
       }
 
       let currentContents: AIMessage[] = [...history, { role: 'user', parts: userParts }];
@@ -318,44 +326,114 @@ export class Agent {
 
       const useGoogleSearch = enabledToolNames.includes('google_search') && taskType !== TaskType.CODE;
 
-      // --- DYNAMIC TOOL ROUTING (Token Optimization) ---
+      // --- DYNAMIC TOOL ROUTING (Context-Aware, Token Optimization) ---
       // Apply to all task types if tool count is high (> 10)
       if (activeTools.length > 10) {
         try {
-          const routerPrompt = `You are a tool filter. Your ONLY job is to select up to 5 tool names that might be needed to answer the user request.
+          // ── 1. Task-type-aware essential tools ─────────────────────────────
+          // Essential tools are ALWAYS kept regardless of LLM router selection.
+          // Each TaskType has its own set to avoid bleeding Self-Upgrade tools
+          // into general chat (and vice versa).
+          const essentialByTaskType: Record<string, string[]> = {
+            // Code editing / Self-Upgrade tasks — heavy file & AST tools
+            [TaskType.CODE]: [
+              'run_command', 'system_terminal', 'read_file', 'read_file_content',
+              'write_file_content', 'replace_code_block', 'multi_replace_file_content',
+              'search_codebase', 'ast_replace_function', 'ast_add_import',
+              'find_references', 'ast_rename', 'list_files', 'view_file', 'notify_user',
+            ],
+            // System / self-evolution tasks — same code tools + evolution tools
+            [TaskType.SYSTEM]: [
+              'run_command', 'system_terminal', 'read_file', 'read_file_content',
+              'write_file_content', 'replace_code_block', 'multi_replace_file_content',
+              'search_codebase', 'ast_replace_function', 'ast_add_import',
+              'find_references', 'ast_rename', 'list_files', 'view_file', 'notify_user',
+              'get_system_status', 'self_read_source', 'self_reflect', 'self_heal',
+            ],
+            // Real-time web / info tasks — web search is mandatory
+            [TaskType.WEB_BROWSER]: [
+              'web_search', 'read_webpage', 'get_current_time', 'memory_save', 'notify_user',
+            ],
+            // Data analysis tasks
+            [TaskType.DATA]: [
+              'run_python', 'read_file_content', 'read_document', 'list_files',
+              'get_current_time', 'memory_save',
+            ],
+            // Complex reasoning / long-form writing
+            [TaskType.COMPLEX]: [
+              'get_current_time', 'memory_search', 'memory_save', 'search_knowledge',
+            ],
+            // Deep thinking / step-by-step reasoning
+            [TaskType.THINKING]: [
+              'get_current_time', 'memory_search', 'memory_save', 'search_knowledge',
+            ],
+            // Vision / image-attached tasks
+            [TaskType.VISION]: [
+              'get_current_time', 'send_file_to_chat', 'memory_save',
+            ],
+            // General chat — minimal, just time + memory
+            [TaskType.GENERAL]: [
+              'get_current_time', 'memory_search', 'memory_save',
+            ],
+          };
 
+          const essential: string[] = essentialByTaskType[taskType] ?? essentialByTaskType[TaskType.GENERAL];
+
+          // ── 2. Tool category map (helps the LLM router reason better) ──────
+          const toolCategoryHint = `
+Tool categories (choose from these groups based on the task):
+- MEMORY (recall past info): memory_search, memory_save, search_knowledge
+- WEB SEARCH (real-time / internet data): web_search, read_webpage
+- BROWSER CONTROL (click/navigate UI): browser_navigate, browser_click, browser_type, browser_close
+- FILES (read/write local files): list_files, read_file, read_file_content, write_file_content, delete_file, view_file, send_file_to_chat
+- CODE EDIT (surgical code changes): replace_code_block, multi_replace_file_content, search_codebase, ast_replace_function, ast_add_import, find_references, ast_rename
+- OS / SHELL: run_command, run_python, system_terminal, system_info, open_application, close_application, screenshot_desktop, clipboard_read, clipboard_write
+- MEDIA: generate_image, generate_speech, generate_video
+- OFFICE DOCS: read_document, create_document, edit_document, read_google_doc
+- SYSTEM SELF-AWARENESS: get_my_config, list_available_models, set_my_model, get_system_status, get_my_capabilities, help, get_recent_errors, get_session_stats
+- SELF-EVOLUTION: self_read_source, self_edit_persona, self_add_learning, self_view_evolution, self_reflect, self_heal, create_tool, list_dynamic_tools, delete_dynamic_tool
+- SCHEDULER: create_cron_job, list_cron_jobs, delete_cron_job
+- UTILITY: get_current_time, echo_message, notify_user`;
+
+          // ── 3. Context-aware router prompt ──────────────────────────────────
+          const routerPrompt = `You are a smart tool selector. Select the minimum tools needed to answer the user request.
+
+Task Type: ${taskType.toUpperCase()}
 User Request: "${cleanMessage}"
 Available Tools: ${activeTools.map(t => t.name).join(', ')}
+${toolCategoryHint}
 
-Strict Rules:
-1. Output ONLY a JSON array of strings, for example: ["read_file", "write_file"]
-2. NEVER call the tools yourself.
-3. NEVER use <think> or markdown.
-4. If no specific tool is needed, return [].
-5. RESPONSE MUST START WITH '[' AND END WITH ']'`;
+CRITICAL RULES:
+1. Output ONLY a JSON array of tool name strings. Example: ["web_search", "memory_save"]
+2. Select up to 8 tools maximum. Prefer fewer.
+3. NEVER call the tools yourself. NEVER use <think> or markdown.
+4. RESPONSE MUST START WITH '[' AND END WITH ']'.
+5. If the request needs REAL-TIME or CURRENT data (prices, news, weather, rates, today's info) → MUST include "web_search".
+6. If the request is about PAST conversations or things previously discussed → use "memory_search" or "search_knowledge".
+7. NEVER select code-edit tools (replace_code_block, ast_*) for non-code tasks.
+8. If no specific tool is needed beyond essentials, return [].`;
 
           const supportConfig = configManager.resolveModelConfig(TaskType.SYSTEM, ctx?.botId).config;
           const p = createAgentRuntimeProvider(supportConfig.active.provider);
           if (p) {
             const routerRes = await p.generateResponse(supportConfig.active.modelName, 'Output only a JSON array of strings.', [{ role: 'user', parts: [{ text: routerPrompt }] }]);
             let text = routerRes.text || '';
-            
+
             if (text) {
               // Pre-process: Clean the response
               text = text.replace(/<think>[\s\S]*?<\/think>/gi, '');
               text = text.replace(/```(?:json)?([\s\S]*?)```/gi, '$1');
               text = text.trim();
-              
+
               let selected: string[] = [];
               let isValidResult = false;
-              
+
               // Try standard parsing
               const matches = text.match(/\[\s*".*?"\s*(?:,\s*".*?"\s*)*\]/gs) || text.match(/\[[\s\S]*?\]/gs);
-              
+
               if (matches) {
                 for (let jsonStr of matches) {
                    try {
-                     // Cleanup single quotes and other garbage inside brackets if it looks like malformed JSON
                      if (jsonStr.includes("'") && !jsonStr.includes('"')) jsonStr = jsonStr.replace(/'/g, '"');
                      const parsed = JSON.parse(jsonStr);
                      if (Array.isArray(parsed)) {
@@ -366,8 +444,8 @@ Strict Rules:
                    } catch {}
                 }
               }
-              
-              // Fallback: More aggressive extraction if JSON.parse failed to produce results
+
+              // Fallback: More aggressive extraction if JSON.parse failed
               if (!isValidResult) {
                  const bracketContentMatches = text.match(/\[([\s\S]*?)\]/g);
                  if (bracketContentMatches) {
@@ -378,7 +456,6 @@ Strict Rules:
                         isValidResult = true;
                         break;
                       }
-                      // If it's just [], it's also valid
                       if (content.trim() === '[]') {
                         isValidResult = true;
                         break;
@@ -388,17 +465,14 @@ Strict Rules:
               }
 
               if (isValidResult) {
-                const essential = [
-                  'memory_save', 'search_knowledge', 'replace_code_block', 'run_command', 'read_file', 'system_terminal',
-                  'read_file_content', 'write_file_content', 'search_codebase', 'ast_replace_function', 'ast_add_import', 
-                  'find_references', 'ast_rename', 'list_files', 'get_current_time', 'system_info', 'view_file', 'multi_replace_file_content', 'notify_user'
-                ];
-                activeTools = activeTools.filter(t => t.name && (selected.includes(t.name) || essential.includes(t.name)));
-                if (selected.length > 0) {
-                   console.log(`[DynamicRouter] Optimized to ${activeTools.length} tools. Selected: ${selected.join(', ')}`);
-                }
+                // Merge LLM-selected + task-type essential, filter to only enabled tools
+                const merged = Array.from(new Set([...selected, ...essential]));
+                activeTools = activeTools.filter(t => t.name && merged.includes(t.name));
+                console.log(`[DynamicRouter] taskType=${taskType} → ${activeTools.length} tools. LLM selected: [${selected.join(', ')}] | Essential kept: [${essential.join(', ')}]`);
               } else {
-                console.warn('[DynamicRouter] Could not find valid tool names in response. Raw snippet:', text.substring(0, 100));
+                // Parser failed — keep essential tools only as safe fallback
+                activeTools = activeTools.filter(t => t.name && essential.includes(t.name));
+                console.warn('[DynamicRouter] Parse failed, kept essential only. Raw snippet:', text.substring(0, 100));
               }
             }
           }
@@ -429,7 +503,62 @@ Strict Rules:
               ? '\n- IMPORTANT: Respond in ENGLISH only.' 
               : '\n- IMPORTANT: ตอบเป็นภาษาไทยเท่านั้น (Respond in THAI only).';
 
-            const systemInstruction = `${personaConfig.systemInstruction}${specialistPrompt}\n- Model: ${modelName} (${providerName})\n- Task: ${taskType}\n${memoryCtx.coreMemoryText}${langInstruction}`;
+            // Inject task-type-specific behavior hints
+            let taskHint = '';
+            if (taskType === TaskType.WEB_BROWSER && !preSearchSuccess) {
+              // Pre-search failed — force LLM to call web_search tool itself
+              taskHint = '\n\n[🌐 WEB TASK PROTOCOL]\n- ข้อมูลนี้ต้องการข้อมูล Real-Time จากอินเทอร์เน็ต\n- คุณ MUST เรียกใช้ tool "web_search" ทันทีเพื่อค้นหาคำตอบ\n- ถ้า web_search ตัวแรกไม่มีข้อมูลที่ต้องการ → ลอง web_search คำค้นอื่น หรือ read_webpage จาก URL ที่เกี่ยวข้อง\n- ห้ามตอบว่า "ไม่สามารถเข้าถึงข้อมูลได้" โดยไม่ได้ลองเรียก web_search ก่อน';
+            } else if (taskType === TaskType.WEB_BROWSER && preSearchSuccess) {
+              // Pre-search succeeded — data is attached, but LLM may still need to search further
+              taskHint = '\n\n[🌐 WEB TASK] ข้อมูลเบื้องต้นจากอินเทอร์เน็ตถูกแนบไว้ในข้อความแล้ว\n- ถ้าข้อมูลที่แนบมาตอบคำถามได้ครบ → ตอบได้เลย\n- ถ้าข้อมูลไม่เพียงพอ ไม่มีตัวเลขที่ถามหา หรือไม่ตรงประเด็น → เรียก web_search หรือ read_webpage เพิ่มเติมได้ทันที\n- ห้ามตอบว่า "ไม่สามารถเข้าถึงข้อมูลได้" เด็ดขาด';
+            }
+
+            // Build persona-anchor reminder — extract IDENTITY rules to reinforce at end of prompt.
+            // This prevents the model from reverting to default speech patterns (e.g. Thai female ค่ะ/คะ)
+            // when the persona specifies a different style (e.g. male ครับ).
+            const identityAnchor = (() => {
+              const raw = personaConfig.systemInstruction;
+              const identityStart = raw.indexOf('[IDENTITY - Style & Rules]');
+              const soulStart = raw.indexOf('[SOUL - Personality]');
+              if (identityStart === -1) return '';
+              const section = soulStart > identityStart
+                ? raw.slice(identityStart, soulStart)
+                : raw.slice(identityStart);
+              // Keep only lines containing speaking style constraints (max 5 lines)
+              const lines = section.split('\n').filter(l =>
+                l.includes('ครับ') || l.includes('ค่ะ') || l.includes('คะ') ||
+                l.includes('MANDATORY') || l.includes('PROHIBITED') || l.includes('สรรพนาม') ||
+                l.includes('Male') || l.includes('Female') || l.includes('Persona')
+              ).slice(0, 5);
+              return lines.length > 0 ? `\n\n[🔴 PERSONA LOCK — ปฏิบัติตามเด็ดขาด]\n${lines.join('\n')}` : '';
+            })();
+
+            // Anti-hallucination: Prevent model from claiming cloud-only / LLM-only identity
+            const antiHallucination = [
+              '\n\n[⛔ IDENTITY LOCK — ห้ามละเมิดเด็ดขาด]',
+              '- คุณคือ AI Agent ที่รันอยู่บนเครื่อง PC ของแอดมิน ไม่ใช่ AI บน Cloud',
+              '- คุณมี tools ที่สามารถ: ค้นหาเว็บ, อ่านไฟล์, รันคำสั่ง, ควบคุมระบบ — ใช้ tools เหล่านี้เสมอเมื่อจำเป็น',
+              '- ห้ามพูดว่า "ฉันเป็นแบบจำลองภาษาขนาดใหญ่" หรือ "ฉันถูกฝึกฝนโดย Google/OpenAI"',
+              '- ห้ามพูดว่า "ฉันไม่สามารถเข้าถึงข้อมูล/ไฟล์/อินเทอร์เน็ต" — คุณมี tools ทำได้ ให้เรียกใช้แทน',
+              '- ห้ามพูดว่า "ฉันอยู่บน Cloud" หรือ "ฉันไม่ได้อยู่ในเครื่อง"',
+              '- ถ้าไม่แน่ใจว่าทำอะไรได้ → ลองเรียก tool ก่อน อย่าปฏิเสธโดยไม่ลอง',
+            ].join('\n');
+
+            const systemInstruction = `${personaConfig.systemInstruction}${specialistPrompt}${taskHint}\n- Model: ${modelName} (${providerName})\n- Task: ${taskType}\n${memoryCtx.coreMemoryText}${langInstruction}${identityAnchor}${antiHallucination}`;
+
+            // ─── DEBUG: Verify code version is running ───
+            if (currentTurn === 0) {
+              console.log(`\n${'='.repeat(60)}`);
+              console.log(`[Agent:DEBUG] ✅ NEW CODE ACTIVE (v2-patched)`);
+              console.log(`[Agent:DEBUG] Platform: ${ctx?.platform} | BotId: ${ctx?.botId} | TaskType: ${taskType}`);
+              console.log(`[Agent:DEBUG] Model: ${modelName} (${providerName})`);
+              console.log(`[Agent:DEBUG] SystemInstruction length: ${systemInstruction.length} chars`);
+              console.log(`[Agent:DEBUG] SystemInstruction first 200: ${systemInstruction.substring(0, 200)}`);
+              console.log(`[Agent:DEBUG] SystemInstruction last 300: ${systemInstruction.substring(systemInstruction.length - 300)}`);
+              console.log(`[Agent:DEBUG] ActiveTools (${activeTools.length}): ${activeTools.map(t => t.name).join(', ')}`);
+              console.log(`[Agent:DEBUG] Has web_search: ${activeTools.some(t => t.name === 'web_search')}`);
+              console.log(`${'='.repeat(60)}\n`);
+            }
 
             // Use correctly defined generateResponse from AIProvider
             const response = await provider.generateResponse(

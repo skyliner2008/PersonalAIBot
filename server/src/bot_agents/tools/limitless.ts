@@ -3,6 +3,47 @@ import { runCommand } from './os.js';
 import * as cheerio from 'cheerio';
 import { createLogger } from '../../utils/logger.js';
 
+// ── Google Custom Search Engine helper ────────────────────────────────────────
+// ใช้ Google CSE API ถ้ามี key — ดึง key จาก DB (getCredential) หรือ env
+async function searchGoogle(query: string): Promise<string | null> {
+    try {
+        // ดึง key/cx จาก DB ก่อน ถ้าไม่มีค่อยดึงจาก env
+        let apiKey = '';
+        let cx = '';
+        try {
+            const { getCredential, getSetting } = await import('../../database/db.js');
+            apiKey = getCredential('GOOGLE_SEARCH_API_KEY') || process.env.GOOGLE_SEARCH_API_KEY || '';
+            cx = getSetting('GOOGLE_SEARCH_CX') || process.env.GOOGLE_SEARCH_CX || '';
+        } catch {
+            apiKey = process.env.GOOGLE_SEARCH_API_KEY || '';
+            cx = process.env.GOOGLE_SEARCH_CX || '';
+        }
+
+        if (!apiKey || !cx) return null; // ไม่มี key → skip
+
+        const url = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${cx}&q=${encodeURIComponent(query)}&num=5&hl=th`;
+        const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+        if (!res.ok) {
+            logger.warn(`[web_search] Google CSE error ${res.status}: ${res.statusText}`);
+            return null;
+        }
+        const data = await res.json() as any;
+        const items: any[] = data.items || [];
+        if (items.length === 0) return null;
+
+        let result = `🔍 ผลการค้นหา (Google): "${query}"\n\n`;
+        items.slice(0, 5).forEach((item, i) => {
+            result += `${i + 1}. **${item.title}**\n`;
+            result += `   ${item.snippet || ''}\n`;
+            result += `   🔗 ${item.link}\n\n`;
+        });
+        return result;
+    } catch (err: any) {
+        logger.warn(`[web_search] Google CSE failed: ${err.message}`);
+        return null;
+    }
+}
+
 const logger = createLogger('limitless-tool');
 
 // ==========================================
@@ -124,6 +165,18 @@ async function searchDDGInstant(query: string): Promise<string | null> {
 
 export async function webSearch({ query }: { query: string }): Promise<string> {
     try {
+        // ── Priority Chain ─────────────────────────────────────────────────────
+        // 1. Google Custom Search (ถ้ามี GOOGLE_SEARCH_API_KEY + GOOGLE_SEARCH_CX)
+        // 2. DuckDuckGo Lite
+        // 3. DuckDuckGo Instant Answer
+        // ──────────────────────────────────────────────────────────────────────
+        const googleResult = await searchGoogle(query);
+        if (googleResult) {
+            logger.info(`[web_search] ✅ Google CSE success for: "${query}"`);
+            return googleResult;
+        }
+
+        logger.info(`[web_search] Google CSE unavailable, trying DuckDuckGo for: "${query}"`);
         // Step 1: Get search snippets + links
         const liteResult = await searchDDGLite(query).catch(() => null);
         const instantResult = !liteResult ? await searchDDGInstant(query).catch(() => null) : null;

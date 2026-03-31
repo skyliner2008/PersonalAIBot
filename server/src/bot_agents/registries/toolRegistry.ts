@@ -44,17 +44,21 @@ const defaultTools: Omit<ToolMeta, 'declaration'>[] = [
   { name: 'open_application', displayName: 'Open Application', description: 'เปิดโปรแกรมบนเครื่อง', category: 'os', riskLevel: 'high', platforms: ['all'], tags: ['os', 'app'], enabledByDefault: false },
   { name: 'close_application', displayName: 'Close Application', description: 'ปิดโปรแกรมบนเครื่อง', category: 'os', riskLevel: 'high', platforms: ['all'], tags: ['os', 'app'], enabledByDefault: false },
   { name: 'system_info', displayName: 'System Info', description: 'ข้อมูลระบบ CPU/RAM/Disk', category: 'os', riskLevel: 'low', platforms: ['all'], tags: ['os', 'info'], enabledByDefault: true },
+  { name: 'system_terminal', displayName: 'System Terminal', description: 'รันคำสั่ง terminal พร้อม output แบบ streaming', category: 'os', riskLevel: 'high', platforms: ['all'], tags: ['os', 'terminal', 'shell', 'command'], enabledByDefault: false },
   { name: 'screenshot_desktop', displayName: 'Screenshot Desktop', description: 'จับภาพหน้าจอ', category: 'os', riskLevel: 'medium', platforms: ['all'], tags: ['os', 'screenshot'], enabledByDefault: false },
   { name: 'clipboard_read', displayName: 'Clipboard Read', description: 'อ่านคลิปบอร์ด', category: 'os', riskLevel: 'medium', platforms: ['all'], tags: ['os', 'clipboard'], enabledByDefault: false },
   { name: 'clipboard_write', displayName: 'Clipboard Write', description: 'เขียนคลิปบอร์ด', category: 'os', riskLevel: 'medium', platforms: ['all'], tags: ['os', 'clipboard'], enabledByDefault: false },
 
   // File Operations
   { name: 'list_files', displayName: 'List Files', description: 'แสดงรายการไฟล์', category: 'file', riskLevel: 'low', platforms: ['all'], tags: ['file', 'list'], enabledByDefault: true },
-  { name: 'read_file_content', displayName: 'Read File', description: 'อ่านเนื้อหาไฟล์', category: 'file', riskLevel: 'low', platforms: ['all'], tags: ['file', 'read'], enabledByDefault: true },
+  { name: 'read_file_content', displayName: 'Read File Content', description: 'อ่านเนื้อหาไฟล์พร้อมเลขบรรทัด', category: 'file', riskLevel: 'low', platforms: ['all'], tags: ['file', 'read'], enabledByDefault: true },
+  { name: 'read_file', displayName: 'Read File', description: 'อ่านไฟล์พร้อม metadata (ขนาด, วันแก้ไข, จำนวนบรรทัด)', category: 'file', riskLevel: 'low', platforms: ['all'], tags: ['file', 'read', 'metadata'], enabledByDefault: true },
+  { name: 'view_file', displayName: 'View File', description: 'ดูเนื้อหาไฟล์แบบ paginated ทีละส่วน', category: 'file', riskLevel: 'low', platforms: ['all'], tags: ['file', 'view', 'read'], enabledByDefault: true },
   { name: 'write_file_content', displayName: 'Write File', description: 'เขียนเนื้อหาไฟล์', category: 'file', riskLevel: 'medium', platforms: ['all'], tags: ['file', 'write'], enabledByDefault: true },
   { name: 'delete_file', displayName: 'Delete File', description: 'ลบไฟล์', category: 'file', riskLevel: 'high', platforms: ['all'], tags: ['file', 'delete'], enabledByDefault: false },
   { name: 'send_file_to_chat', displayName: 'Send File to Chat', description: 'ส่งไฟล์ให้ผู้ใช้ในแชท', category: 'communication', riskLevel: 'low', platforms: ['telegram', 'line'], tags: ['file', 'send', 'chat'], enabledByDefault: true },
   { name: 'replace_code_block', displayName: 'Replace Code Block', description: 'ผ่าตัดโค้ด: แทนที่บล็อคโค้ดเดิมด้วยโค้ดใหม่', category: 'file', riskLevel: 'medium', platforms: ['all'], tags: ['file', 'edit', 'code', 'replace'], enabledByDefault: true },
+  { name: 'multi_replace_file_content', displayName: 'Multi Replace File', description: 'แทนที่หลายตำแหน่งในไฟล์เดียวพร้อมกัน', category: 'file', riskLevel: 'medium', platforms: ['all'], tags: ['file', 'edit', 'code', 'replace', 'batch'], enabledByDefault: true },
   { name: 'search_codebase', displayName: 'Search Codebase', description: 'ค้นหาโค้ดในโปรเจกต์', category: 'file', riskLevel: 'low', platforms: ['all'], tags: ['file', 'search', 'code', 'grep'], enabledByDefault: true },
   { name: 'ast_replace_function', displayName: 'AST Replace Function', description: 'แทนที่ฟังก์ชันด้วยความแม่นยำสูงโดยใช้ AST', category: 'file', riskLevel: 'medium', platforms: ['all'], tags: ['file', 'edit', 'code', 'ast', 'refactor'], enabledByDefault: true },
   { name: 'ast_add_import', displayName: 'AST Add Import', description: 'เพิ่มการ Import โมดูลแบบอัตโนมัติโดยใช้ AST', category: 'file', riskLevel: 'low', platforms: ['all'], tags: ['file', 'edit', 'code', 'ast', 'import'], enabledByDefault: true },
@@ -74,8 +78,10 @@ const defaultTools: Omit<ToolMeta, 'declaration'>[] = [
   { name: 'keyboard_type', displayName: 'Keyboard Type', description: 'พิมพ์คีย์บอร์ดในเว็บ', category: 'web', riskLevel: 'medium', platforms: ['all'], tags: ['web', 'keyboard'], enabledByDefault: false },
 
   // Memory
-  { name: 'memory_search', displayName: 'Memory Search', description: 'ค้นหาความทรงจำระยะยาว', category: 'memory', riskLevel: 'low', platforms: ['all'], tags: ['memory', 'search', 'archival'], enabledByDefault: true },
-  { name: 'memory_save', displayName: 'Memory Save', description: 'บันทึกความทรงจำระยะยาว', category: 'memory', riskLevel: 'low', platforms: ['all'], tags: ['memory', 'save', 'archival'], enabledByDefault: true },
+  { name: 'memory_search', displayName: 'Memory Search', description: 'ค้นหาความทรงจำระยะยาว (Archival Memory) จากบทสนทนาเก่า', category: 'memory', riskLevel: 'low', platforms: ['all'], tags: ['memory', 'search', 'archival'], enabledByDefault: true },
+  { name: 'memory_save', displayName: 'Memory Save', description: 'บันทึกข้อเท็จจริงใหม่เกี่ยวกับผู้ใช้ลงในความทรงจำระยะยาว', category: 'memory', riskLevel: 'low', platforms: ['all'], tags: ['memory', 'save', 'archival'], enabledByDefault: true },
+  { name: 'search_knowledge', displayName: 'Search Knowledge', description: 'ค้นหาความรู้จากฐานข้อมูลภายใน (Archival + Codebase Map) สำหรับข้อมูลที่เคยเรียนรู้', category: 'memory', riskLevel: 'low', platforms: ['all'], tags: ['memory', 'knowledge', 'search', 'archival', 'codebase'], enabledByDefault: true },
+  { name: 'notify_user', displayName: 'Notify User', description: 'ส่งการแจ้งเตือนหรือข้อความสถานะถึงผู้ใช้แบบ real-time', category: 'communication', riskLevel: 'low', platforms: ['all'], tags: ['notify', 'alert', 'communication', 'status'], enabledByDefault: true },
 
   // System — Self-Awareness (ความสามารถพื้นฐานทุก Agent มีตั้งแต่สร้าง)
   { name: 'get_my_config', displayName: 'Get My Config', description: 'ดูข้อมูล config ของตัวเอง (model, platform, tools)', category: 'system', riskLevel: 'low', platforms: ['all'], tags: ['system', 'self-aware', 'config'], enabledByDefault: true },
@@ -96,7 +102,8 @@ const defaultTools: Omit<ToolMeta, 'declaration'>[] = [
   { name: 'self_heal', displayName: 'Self Heal', description: 'ตรวจสอบและซ่อมแซมตัวเองอัตโนมัติ', category: 'system', riskLevel: 'high', platforms: ['all'], tags: ['evolution', 'heal', 'fix'], enabledByDefault: true },
 
   // Auto-Tool Generation Tools
-  { name: 'create_tool', displayName: 'Create Tool', description: 'สร้างเครื่องมือใหม่ที่ใช้ได้ทันที', category: 'system', riskLevel: 'high', platforms: ['all'], tags: ['evolution', 'tool', 'create', 'dynamic'], enabledByDefault: true },
+  { name: 'create_tool', displayName: 'Create Tool (Advanced)', description: 'สร้าง tool ใหม่แบบ advanced — ต้องระบุ code เอง (สำหรับ developer)', category: 'system', riskLevel: 'high', platforms: ['all'], tags: ['evolution', 'tool', 'create', 'dynamic'], enabledByDefault: true },
+  { name: 'easy_create_tool', displayName: 'Create Tool (Wizard)', description: 'สร้าง tool ใหม่แบบง่าย — ไม่ต้องเขียนโค้ด บอกแค่ว่าต้องการทำอะไร ระบบสร้างให้เอง', category: 'system', riskLevel: 'medium', platforms: ['all'], tags: ['evolution', 'tool', 'create', 'wizard', 'easy', 'dynamic'], enabledByDefault: true },
   { name: 'list_dynamic_tools', displayName: 'List Dynamic Tools', description: 'แสดงรายการเครื่องมือที่สร้างขึ้นเอง', category: 'system', riskLevel: 'low', platforms: ['all'], tags: ['evolution', 'tool', 'list', 'dynamic'], enabledByDefault: true },
   { name: 'delete_dynamic_tool', displayName: 'Delete Dynamic Tool', description: 'ลบเครื่องมือที่สร้างขึ้นเอง', category: 'system', riskLevel: 'high', platforms: ['all'], tags: ['evolution', 'tool', 'delete', 'dynamic'], enabledByDefault: true },
 
@@ -181,6 +188,53 @@ export function getToolCategories(): { category: ToolCategory; count: number }[]
 /** Get tool names that are enabled by default */
 export function getDefaultToolNames(): string[] {
   return getAllTools().filter(t => t.enabledByDefault).map(t => t.name);
+}
+
+/**
+ * Auto-register tools from the live declarations array.
+ * Any tool found in `declarations` that is NOT yet in the registry
+ * will be registered automatically with sensible defaults so that
+ * it appears in the Web UI without requiring a manual edit to this file.
+ *
+ * Default values applied to auto-registered tools:
+ *   - displayName  : snake_case → Title Case
+ *   - description  : taken from the AITool declaration
+ *   - category     : 'utility'
+ *   - riskLevel    : 'low'
+ *   - platforms    : ['all']
+ *   - tags         : []
+ *   - enabledByDefault: false  (admin must explicitly enable new tools)
+ *
+ * Call this once after initToolRegistry() and after the tools array is loaded,
+ * e.g. in index.ts during startup.
+ */
+export function syncFromDeclarations(declarations: AITool[]): void {
+  let added = 0;
+  for (const decl of declarations) {
+    if (!decl.name || registry.has(decl.name)) continue;
+
+    // Convert snake_case → Title Case for displayName
+    const displayName = decl.name
+      .split('_')
+      .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(' ');
+
+    registry.set(decl.name, {
+      name: decl.name,
+      displayName,
+      description: typeof decl.description === 'string' ? decl.description : decl.name,
+      category: 'utility',
+      riskLevel: 'low',
+      platforms: ['all'],
+      tags: [],
+      enabledByDefault: false,
+      declaration: decl,
+    });
+    added++;
+  }
+  if (added > 0) {
+    console.log(`[ToolRegistry] Auto-registered ${added} new tool(s) from declarations. Total: ${registry.size}`);
+  }
 }
 
 // Auto-init on import

@@ -595,7 +595,8 @@ export function AgentManager() {
   const handleUpdateTools = async (botId: string, toolNames: string[]) => {
     try {
       await api.updateBot(botId, { enabled_tools: toolNames });
-      loadData();
+      // Update local state only — avoids full-page reload on every toggle
+      setBots(prev => prev.map(b => b.id === botId ? { ...b, enabled_tools: toolNames } : b));
     } catch (err) {
       console.error('Failed to update bot tools:', err);
     }

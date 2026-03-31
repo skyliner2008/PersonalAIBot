@@ -116,14 +116,14 @@ export class GeminiProvider implements AIProvider {
         toolsConfig.push({ googleSearch: {} });
       }
 
-      // IMPORTANT: tools and toolConfig must be inside `config`, NOT at top-level
+      // IMPORTANT: In @google/genai v1.x, ALL config fields including systemInstruction
+      // must be inside `config`, NOT at top-level. The SDK only reads from config.
       // See: https://ai.google.dev/gemini-api/docs/function-calling
-      // SDK example: ai.models.generateContent({ model, contents, config: { tools, toolConfig, ... } })
       const requestPayload: any = {
         model: modelName,
         contents,
-        systemInstruction,
         config: {
+          systemInstruction,
           temperature: 0.7,
           maxOutputTokens: 65536,
           tools: toolsConfig.length > 0 ? toolsConfig : undefined,

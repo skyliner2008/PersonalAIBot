@@ -409,6 +409,145 @@ export async function deleteDynamicTool({ name }: { name: string }): Promise<str
     }
 }
 // ============================================================
+// Tool: easy_create_tool — User-Friendly Tool Wizard
+// สร้าง tool ใหม่แบบง่าย ไม่ต้องเขียนโค้ดเอง
+// บอกแค่ว่าต้องการทำอะไร + input ที่ต้องการ
+// ระบบจะสร้างโค้ดและบันทึกไฟล์ JSON ให้อัตโนมัติ
+// ============================================================
+export const easyCreateToolDeclaration: AITool = {
+    name: 'easy_create_tool',
+    description: 'สร้าง tool ใหม่แบบง่าย — ไม่ต้องเขียนโค้ด บอกแค่ว่าต้องการทำอะไร ระบบจะสร้างและบันทึกให้เอง',
+    parameters: {
+        type: 'object',
+        properties: {
+            tool_name: {
+                type: 'string',
+                description: 'ชื่อ tool (ภาษาอังกฤษ, ใช้ underscore เช่น get_gold_price, send_line_message)',
+            },
+            what_it_does: {
+                type: 'string',
+                description: 'อธิบายว่า tool นี้ทำอะไร เช่น "ดึงราคาทองคำจากเว็บสมาคมค้าทองคำ" หรือ "แปลงอุณหภูมิจาก C เป็น F"',
+            },
+            inputs: {
+                type: 'string',
+                description: 'รายการ input ที่ต้องการ เขียนแบบง่ายๆ เช่น "city=ชื่อเมือง" หรือ "amount=จำนวนเงิน, from_currency=สกุลเงินต้นทาง" หรือ "ไม่มี input"',
+            },
+            api_url: {
+                type: 'string',
+                description: '(ถ้ามี) URL ของ API ที่ต้องการเรียก เช่น https://api.example.com/gold',
+            },
+            example_output: {
+                type: 'string',
+                description: '(ถ้ามี) ตัวอย่างผลลัพธ์ที่ต้องการ เช่น "ราคาทองคำ: 45,000 บาท/บาท"',
+            },
+        },
+        required: ['tool_name', 'what_it_does'],
+    },
+};
+
+export async function easyCreateTool({
+    tool_name,
+    what_it_does,
+    inputs,
+    api_url,
+    example_output,
+}: {
+    tool_name: string;
+    what_it_does: string;
+    inputs?: string;
+    api_url?: string;
+    example_output?: string;
+}): Promise<string> {
+    try {
+        // ── 1. Normalize tool name ──
+        const name = tool_name.trim().toLowerCase().replace(/[\s-]+/g, '_').replace(/[^a-z0-9_]/g, '');
+        if (!name) return '❌ ชื่อ tool ไม่ถูกต้อง กรุณาใช้ตัวอักษรภาษาอังกฤษและ underscore เท่านั้น';
+
+        // ── 2. Parse inputs into parameter schema ──
+        const paramProperties: Record<string, { type: string; description: string }> = {};
+        const paramRequired: string[] = [];
+
+        if (inputs && inputs !== 'ไม่มี' && inputs !== 'ไม่มี input' && inputs.trim() !== '') {
+            const pairs = inputs.split(',').map(s => s.trim()).filter(Boolean);
+            for (const pair of pairs) {
+                const [key, desc] = pair.split('=').map(s => s.trim());
+                if (key) {
+                    const paramKey = key.toLowerCase().replace(/\s+/g, '_');
+                    paramProperties[paramKey] = { type: 'string', description: desc || key };
+                    paramRequired.push(paramKey);
+                }
+            }
+        }
+
+        const parameters = Object.keys(paramProperties).length > 0 ? {
+            type: 'object',
+            properties: paramProperties,
+            required: paramRequired,
+        } : { type: 'object', properties: {} };
+
+        // ── 3. Generate JavaScript code based on description ──
+        let code = '';
+        const paramVarLines = Object.keys(paramProperties)
+            .map(k => `const ${k} = String(args.${k} ?? '');`)
+            .join('\n');
+
+        if (api_url) {
+            // HTTP fetch template
+            const hasParams = Object.keys(paramProperties).length > 0;
+            const queryPart = hasParams
+                ? `?${Object.keys(paramProperties).map(k => `${k}=\${encodeURIComponent(${k})}`).join('&')}`
+                : '';
+            code = `${paramVarLines ? paramVarLines + '\n' : ''}// 📡 เรียก API: ${what_it_does}
+try {
+  const res = await fetch(\`${api_url}${queryPart}\`, {
+    headers: { 'Accept': 'application/json', 'User-Agent': 'PersonalAIBot/1.0' },
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!res.ok) return \`❌ API ตอบกลับ \${res.status}: \${res.statusText}\`;
+  const data = await res.json();
+  // TODO: ปรับ format ผลลัพธ์ตามโครงสร้าง JSON ที่ได้รับ
+  return \`✅ ผลลัพธ์:\\n\${JSON.stringify(data, null, 2).substring(0, 1000)}\`;
+} catch (err) {
+  return \`❌ เรียก API ไม่สำเร็จ: \${err.message}\`;
+}`;
+        } else {
+            // Generic template
+            const exampleLine = example_output ? `\n// ตัวอย่างผลลัพธ์ที่ต้องการ: ${example_output}` : '';
+            code = `${paramVarLines ? paramVarLines + '\n' : ''}// 🔧 ${what_it_does}${exampleLine}
+// TODO: เพิ่ม logic การทำงานที่นี่
+// เช่น: const result = ... หรือ const res = await fetch(...)
+return \`✅ ${name}: ยังต้องเพิ่ม logic — แก้ไขได้ที่ dynamic_tools/${name}.json\`;`;
+        }
+
+        // ── 4. Register the tool ──
+        const result = await registerDynamicTool(name, what_it_does, code, parameters as any);
+
+        if (!result.valid) {
+            return `❌ ไม่สามารถสร้าง tool ได้:\n${(result.errors || []).join('\n')}`;
+        }
+
+        // ── 5. Return clear summary ──
+        const paramSummary = Object.keys(paramProperties).length > 0
+            ? `\n📥 Input: ${Object.entries(paramProperties).map(([k, v]) => `${k} (${v.description})`).join(', ')}`
+            : '\n📥 Input: ไม่มี (ใช้งานได้เลย)';
+        const filePath = `server/dynamic_tools/${name}.json`;
+
+        let msg = `✅ สร้าง tool "${name}" สำเร็จ!\n`;
+        msg += `📋 หน้าที่: ${what_it_does}${paramSummary}\n`;
+        msg += `💾 บันทึกไว้ที่: ${filePath}\n`;
+        if (!api_url) {
+            msg += `\n⚙️ หมายเหตุ: tool นี้ยังต้องเพิ่ม logic — เปิดไฟล์ ${filePath} แล้วแก้ไข code ส่วน TODO`;
+        } else {
+            msg += `\n🌐 เชื่อมต่อ API: ${api_url}`;
+        }
+        return msg;
+
+    } catch (err: any) {
+        return `❌ Error: ${err.message}`;
+    }
+}
+
+// ============================================================
 // Export all declarations and handlers
 // ============================================================
 export const evolutionToolDeclarations: AITool[] = [
@@ -419,6 +558,7 @@ export const evolutionToolDeclarations: AITool[] = [
     selfReflectDeclaration,
     selfHealDeclaration,
     createToolDeclaration,
+    easyCreateToolDeclaration,
     listDynamicToolsDeclaration,
     deleteDynamicToolDeclaration,
 ];
@@ -431,6 +571,7 @@ export function getEvolutionToolHandlers(): Record<string, (args: any) => Promis
         self_reflect: selfReflect,
         self_heal: selfHeal,
         create_tool: createTool,
+        easy_create_tool: easyCreateTool,
         list_dynamic_tools: listDynamicToolsHandler,
         delete_dynamic_tool: deleteDynamicTool,
     };
