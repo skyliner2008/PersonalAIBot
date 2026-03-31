@@ -428,6 +428,187 @@
       "apiKeyEnvVar": "COHERE_API_KEY",
       "enabled": false
     },
+    "mistral-embedding": {
+      "id": "mistral-embedding",
+      "name": "Mistral AI Embed",
+      "category": "embedding",
+      "type": "openai-compatible",
+      "baseUrl": "https://api.mistral.ai/v1",
+      "defaultModel": "mistral-embed",
+      "models": [
+        "mistral-embed"
+      ],
+      "capabilities": {
+        "embedding": true
+      },
+      "requiresAuth": true,
+      "apiKeyEnvVar": "MISTRAL_API_KEY",
+      "enabled": false
+    },
+    "voyage-embedding": {
+      "id": "voyage-embedding",
+      "name": "Voyage AI Embed",
+      "category": "embedding",
+      "type": "openai-compatible",
+      "baseUrl": "https://api.voyageai.com/v1",
+      "defaultModel": "voyage-3",
+      "models": [
+        "voyage-3",
+        "voyage-3-large",
+        "voyage-3-lite",
+        "voyage-code-3",
+        "voyage-finance-2",
+        "voyage-law-2"
+      ],
+      "capabilities": {
+        "embedding": true
+      },
+      "requiresAuth": true,
+      "apiKeyEnvVar": "VOYAGE_API_KEY",
+      "enabled": false
+    },
+    "jina-embedding": {
+      "id": "jina-embedding",
+      "name": "Jina AI Embed",
+      "category": "embedding",
+      "type": "openai-compatible",
+      "baseUrl": "https://api.jina.ai/v1",
+      "defaultModel": "jina-embeddings-v3",
+      "models": [
+        "jina-embeddings-v3",
+        "jina-embeddings-v2-base-en",
+        "jina-embeddings-v2-base-multilingual",
+        "jina-clip-v2"
+      ],
+      "capabilities": {
+        "embedding": true
+      },
+      "requiresAuth": true,
+      "apiKeyEnvVar": "JINA_API_KEY",
+      "enabled": false
+    },
+    "nomic-embedding": {
+      "id": "nomic-embedding",
+      "name": "Nomic AI Embed",
+      "category": "embedding",
+      "type": "openai-compatible",
+      "baseUrl": "https://api-atlas.nomic.ai/v1",
+      "defaultModel": "nomic-embed-text-v1.5",
+      "models": [
+        "nomic-embed-text-v1.5",
+        "nomic-embed-text-v1"
+      ],
+      "capabilities": {
+        "embedding": true
+      },
+      "requiresAuth": true,
+      "apiKeyEnvVar": "NOMIC_API_KEY",
+      "enabled": false
+    },
+    "nvidia-embedding": {
+      "id": "nvidia-embedding",
+      "name": "NVIDIA NIM Embed",
+      "category": "embedding",
+      "type": "openai-compatible",
+      "baseUrl": "https://integrate.api.nvidia.com/v1",
+      "defaultModel": "nvidia/nv-embedqa-e5-v5",
+      "models": [
+        "nvidia/nv-embedqa-e5-v5",
+        "nvidia/nv-embed-v2",
+        "nvidia/nv-embedqa-mistral-7b-v2",
+        "baai/bge-m3",
+        "snowflake/arctic-embed-l"
+      ],
+      "capabilities": {
+        "embedding": true
+      },
+      "requiresAuth": true,
+      "apiKeyEnvVar": "NVIDIA_API_KEY",
+      "enabled": false,
+      "notes": "Hosts BAAI/BGE-M3 and other community models via NVIDIA NIM"
+    },
+    "dashscope-embedding": {
+      "id": "dashscope-embedding",
+      "name": "Alibaba DashScope Embed (GTE/Qwen)",
+      "category": "embedding",
+      "type": "openai-compatible",
+      "baseUrl": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+      "defaultModel": "text-embedding-v3",
+      "models": [
+        "text-embedding-v3",
+        "text-embedding-v2",
+        "text-embedding-v1"
+      ],
+      "capabilities": {
+        "embedding": true
+      },
+      "requiresAuth": true,
+      "apiKeyEnvVar": "DASHSCOPE_API_KEY",
+      "enabled": false,
+      "notes": "Alibaba GTE/Qwen embedding models via DashScope OpenAI-compatible API"
+    },
+    "together-embedding": {
+      "id": "together-embedding",
+      "name": "Together AI Embed",
+      "category": "embedding",
+      "type": "openai-compatible",
+      "baseUrl": "https://api.together.xyz/v1",
+      "defaultModel": "BAAI/bge-large-en-v1.5",
+      "models": [
+        "BAAI/bge-large-en-v1.5",
+        "BAAI/bge-base-en-v1.5",
+        "togethercomputer/m2-bert-80M-32k-retrieval",
+        "WhereIsAI/UAE-Large-V1"
+      ],
+      "capabilities": {
+        "embedding": true
+      },
+      "requiresAuth": true,
+      "apiKeyEnvVar": "TOGETHER_API_KEY",
+      "enabled": false,
+      "notes": "Hosts BGE-M3, E5, and other open-source embedding models"
+    },
+    "fireworks-embedding": {
+      "id": "fireworks-embedding",
+      "name": "Fireworks AI Embed",
+      "category": "embedding",
+      "type": "openai-compatible",
+      "baseUrl": "https://api.fireworks.ai/inference/v1",
+      "defaultModel": "nomic-ai/nomic-embed-text-v1.5",
+      "models": [
+        "nomic-ai/nomic-embed-text-v1.5",
+        "WhereIsAI/UAE-Large-V1",
+        "thenlper/gte-large"
+      ],
+      "capabilities": {
+        "embedding": true
+      },
+      "requiresAuth": true,
+      "apiKeyEnvVar": "FIREWORKS_API_KEY",
+      "enabled": false
+    },
+    "huggingface-embedding": {
+      "id": "huggingface-embedding",
+      "name": "HuggingFace Inference Embed",
+      "category": "embedding",
+      "type": "openai-compatible",
+      "baseUrl": "https://api-inference.huggingface.co/v1",
+      "defaultModel": "BAAI/bge-m3",
+      "models": [
+        "BAAI/bge-m3",
+        "BAAI/bge-large-en-v1.5",
+        "sentence-transformers/all-MiniLM-L6-v2",
+        "intfloat/multilingual-e5-large-instruct",
+        "jinaai/jina-embeddings-v3"
+      ],
+      "capabilities": {
+        "embedding": true
+      },
+      "requiresAuth": true,
+      "apiKeyEnvVar": "HF_API_TOKEN",
+      "enabled": false,
+      "notes": "Hosts BGE-M3, E5, sentence-transformers via HuggingFace Inference API"
+    },
     "tavily": {
       "id": "tavily",
       "name": "Tavily Search",
@@ -882,7 +1063,17 @@
     ],
     "embedding": [
       "gemini-embedding",
-      "openai-embedding"
+      "openai-embedding",
+      "cohere-embedding",
+      "mistral-embedding",
+      "voyage-embedding",
+      "jina-embedding",
+      "nomic-embedding",
+      "nvidia-embedding",
+      "dashscope-embedding",
+      "together-embedding",
+      "fireworks-embedding",
+      "huggingface-embedding"
     ],
     "search": [
       "tavily",

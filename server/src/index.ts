@@ -485,28 +485,45 @@ async function main() {
     startupInfo(`[Credentials] ⚠️ Purged ${credCheck.purged.length} unreadable key(s) — re-enter via Dashboard`);
   }
 
-  // --- Initialize Embedding Providers (Multi-Provider with Failover) ---
-  // Register ALL available providers: first = primary, rest = fallbacks
-  const geminiKey = getCredential('provider_key_gemini') || getCredential('GEMINI_API_KEY') || process.env.GEMINI_API_KEY;
-  const openaiKey = getCredential('provider_key_openai') || getCredential('OPENAI_API_KEY') || process.env.OPENAI_API_KEY;
-  const openrouterKey = getCredential('provider_key_openrouter') || getCredential('OPENROUTER_API_KEY') || process.env.OPENROUTER_API_KEY;
-
+  // --- Initialize Embedding Providers (Auto-Discovery from Registry) ---
+  // Reads all `category: 'embedding'` entries from provider-registry.json
+  // and registers them as primary + fallbacks in fallbackOrder sequence.
   let embeddingProvidersRegistered = 0;
-  if (geminiKey) {
-    startupInfo('[Embedding] Registering Gemini Embedding Provider');
-    initEmbeddingProvider(geminiKey, 'gemini');
-    embeddingProvidersRegistered++;
+  try {
+    const registryPath = path.join(process.cwd(), 'provider-registry.json');
+    const registry = JSON.parse(fs.readFileSync(registryPath, 'utf-8'));
+    const embeddingOrder: string[] = registry.fallbackOrder?.embedding || [];
+    
+    for (const providerId of embeddingOrder) {
+      const providerDef = registry.providers?.[providerId];
+      if (!providerDef || providerDef.category !== 'embedding') continue;
+      
+      // Look up API key from credentials (DB) or ENV
+      const envVar = providerDef.apiKeyEnvVar || '';
+      const credentialKey = `provider_key_${providerDef.id.replace('-embedding', '')}`;
+      const apiKey = getCredential(credentialKey) || getCredential(envVar) || process.env[envVar];
+      
+      if (!apiKey) continue; // No key available for this provider
+      
+      const providerType = providerDef.type === 'gemini' ? 'gemini' : 'openai';
+      const model = providerDef.defaultModel;
+      const baseUrl = providerDef.baseUrl;
+      const label = embeddingProvidersRegistered === 0 ? '' : ' (fallback)';
+      
+      startupInfo(`[Embedding] Registering ${providerDef.name}${label} — model: ${model}`);
+      initEmbeddingProvider(apiKey, providerType as any, model, baseUrl);
+      embeddingProvidersRegistered++;
+    }
+  } catch (err: any) {
+    console.warn('[Embedding] Failed to auto-discover from registry, falling back to manual', err.message);
+    
+    // Fallback: manual detection for core providers
+    const geminiKey = getCredential('provider_key_gemini') || getCredential('GEMINI_API_KEY') || process.env.GEMINI_API_KEY;
+    const openaiKey = getCredential('provider_key_openai') || getCredential('OPENAI_API_KEY') || process.env.OPENAI_API_KEY;
+    if (geminiKey) { initEmbeddingProvider(geminiKey, 'gemini'); embeddingProvidersRegistered++; }
+    if (openaiKey) { initEmbeddingProvider(openaiKey, 'openai'); embeddingProvidersRegistered++; }
   }
-  if (openaiKey) {
-    startupInfo(`[Embedding] Registering OpenAI Embedding Provider${embeddingProvidersRegistered > 0 ? ' (fallback)' : ''}`);
-    initEmbeddingProvider(openaiKey, 'openai');
-    embeddingProvidersRegistered++;
-  }
-  if (openrouterKey) {
-    startupInfo(`[Embedding] Registering OpenRouter Embedding Provider${embeddingProvidersRegistered > 0 ? ' (fallback)' : ''}`);
-    initEmbeddingProvider(openrouterKey, 'openai', 'openai/text-embedding-3-small', 'https://openrouter.ai/api/v1');
-    embeddingProvidersRegistered++;
-  }
+
   if (embeddingProvidersRegistered === 0) {
     startupInfo('[Embedding] ⚠️ No Embedding API Key found. Semantic memory will be disabled (system continues normally).');
   } else {
