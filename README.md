@@ -602,11 +602,204 @@ PersonalAIBot/
 - **Memory Pagination**: Working memory load ยังไม่มี pagination
 - **Credentials**: ไม่ควร fallback ไปใช้ default JWT_SECRET ใน production
 
+| **Boot Guardian** | Rollback อัตโนมัติถ้า AI แก้โค้ดแล้วพัง |
+
+---
+
+## ⚙️ Quick Start
+
+### Prerequisites
+- Node.js v22.x
+- npm หรือ yarn
+- Google Gemini API Key (required)
+- LINE / Telegram token (optional)
+
+### Installation
+
+**Windows:**
+```bat
+git clone https://github.com/skyliner2008/PersonalAIBot.git
+cd PersonalAIBot
+install.bat
+```
+
+**Linux / macOS / WSL:**
+```bash
+git clone https://github.com/skyliner2008/PersonalAIBot.git
+cd PersonalAIBot
+chmod +x install.sh
+./install.sh
+```
+
+**Docker:**
+```bash
+docker-compose up -d
+```
+
+### Configuration
+
+ระบบใช้โครงสร้างแบบ **Database-First** เพื่อความปลอดภัยระดับสูงสุด โดยค่าความลับส่วนใหญ่จะถูกเก็บและเข้ารหัส **AES-256-GCM** ไว้ในฐานข้อมูล SQLite คุณเพียงแค่ตั้งค่าพื้นฐานใน `server/.env`:
+
+```env
+# Server
+PORT=3000
+NODE_ENV=production
+
+# 🔒 Master Encryption Key (สำคัญ: ใช้ปลดล็อคฐานข้อมูลที่เข้ารหัส)
+CRED_SECRET=your_32_char_master_key
+
+# Admin Notifications
+ADMIN_TELEGRAM_IDS=5888914941
+```
+
+**สิ่งที่ถูกย้ายลงฐานข้อมูลแล้ว (ไม่ต้องใส่ใน .env)**:
+- `GEMINI_API_KEY`, `OPENAI_API_KEY` และ AI Providers อื่นๆ
+- `JWT_SECRET` (โทเค็นล็อกอิน)
+- `ADMIN_USER` & `ADMIN_PASSWORD` (รหัสผ่าน Dashboard)
+- LINE/Telegram Bot Tokens และเซสชันการเชื่อมต่อ
+
+**หมายเหตุ**: คุณสามารถตั้งค่า API Keys และรหัสผ่านได้โดยตรงผ่านหน้า Dashboard หลังจากรันระบบครั้งแรก (รหัสผ่านเริ่มต้นคือ `admin / admin`)
+
+**ระบบอัจฉริยะในเวอร์ชันนี้**:
+- **Auto-Detect Embedding**: ระบบจะตรวจจับ API Key ที่คุณมี (Gemini, OpenAI, หรือ OpenRouter) และเลือกใช้ระบบหน่วยความจำทางภาษา (Semantic Memory) ที่เหมาะสมที่สุดให้โดยอัตโนมัติ เพื่อให้ Fresh Install ทำงานได้ทันที
+- **Auto-Purge (ล้างข้อมูล)**: หากมีการเปลี่ยนแปลง `CRED_SECRET` หรือไฟล์ Salt ในภายหลัง ระบบจะทำการล้างเฉพาะส่วนที่ถอดรหัสไม่ได้ทิ้งโดยอัตโนมัติเพื่อความปลอดภัยและความเสถียรถาวร คุณเพียงแค่กรอก API Key ใหม่ผ่าน Dashboard อีกครั้งก็เป็นอันเสร็จสิ้น
+
+### Launch
+
+**Windows:**
+```bat
+start_unified.bat
+```
+
+**Linux / macOS:**
+```# Start server
+cd server && npm start
+
+# Start dashboard (separate terminal)
+cd dashboard && npm run preview
+```
+
+**Docker:**
+```bash
+docker-compose up
+```
+
+Dashboard จะเปิดที่ `http://localhost:3000`
+
+---
+
+## 📁 Project Structure
+
+```
+PersonalAIBot/
+├── server/
+│   ├── src/
+│   │   ├── index.ts                 # Main entry point
+│   │   ├── bootGuardian.ts          # Crash recovery & rollback
+│   │   ├── api/                     # Express routes + Socket handlers
+│   │   ├── ai/                      # AI routing + Persona manager
+│   │   ├── swarm/                   # Multi-agent orchestration
+│   │   │   ├── swarmCoordinator.ts  # Core orchestrator
+│   │   │   ├── jarvisPlanner.ts     # ReAct goal planner (928 lines)
+│   │   │   ├── specialists.ts       # Agent role definitions
+│   │   │   └── roundtable.ts        # Multi-agent collaboration
+│   │   ├── memory/                  # 4-layer memory engine
+│   │   │   ├── unifiedMemory.ts     # Orchestrator (930 lines)
+│   │   │   ├── embeddingProvider.ts # Gemini embeddings + HNSW
+│   │   │   ├── graphMemory.ts       # GraphRAG knowledge graph
+│   │   │   └── vectorStore.ts       # HNSW vector index
+│   │   ├── bot_agents/              # Core agent loop + 40+ tools
+│   │   │   ├── agent.ts             # Main agent loop
+│   │   │   └── tools/               # Tool implementations
+│   │   ├── terminal/                # Jarvis Terminal Gateway
+│   │   ├── evolution/               # Self-evolution (11-phase pipeline + Graph-Enhanced Second Brain)
+│   │   │   ├── selfUpgrade.ts      # Core upgrade engine (~1700 lines)
+│   │   │   ├── selfReflection.ts   # Performance analysis
+│   │   │   ├── selfHealing.ts      # Auto health checks
+│   │   │   └── learningJournal.ts  # Persistent learning + semantic search
+│   │   ├── automation/              # Facebook Playwright automation
+│   │   ├── database/                # SQLite schema + migrations
+│   │   ├── providers/               # AI provider adapters
+│   │   └── utils/                   # Auth, logger, rate limiter
+│   └── package.json
+│
+├── dashboard/                       # React 19 + Vite frontend
+│   └── src/
+│       ├── pages/                   # Home, Settings, Terminal, Memory...
+│       ├── components/              # Toast, XTerminal, GenerativeUI
+│       └── services/api.ts          # REST + Socket.IO client
+│
+├── personas/                        # Bot identity files
+│   ├── line/                        # LINE bot persona
+│   ├── telegram/                    # Telegram bot persona
+│   └── facebook/                    # Facebook bot persona
+│
+├── data/                            # Runtime data (gitignored)
+│   ├── fb-agent.db                  # SQLite database
+│   ├── cookies/                     # Browser session cookies
+│   └── uploads/                     # User uploaded files
+│
+├── docs/                            # 20+ documentation files
+├── ai_routing_config.json           # AI model routing config
+├── docker-compose.yml               # Docker deployment
+├── Dockerfile                       # Container image
+├── install.bat                      # Windows modular installer
+├── install.sh                       # Linux/macOS modular installer [NEW]
+├── start.bat                        # Start script
+└── start_unified.bat                # Unified launcher
+```
+
+---
+
+## 📊 AI Routing Configuration
+
+ระบบ route งานแต่ละ type ไปยัง model ที่เหมาะสมอัตโนมัติ (`ai_routing_config.json`):
+
+```json
+{
+  "autoRouting": true,
+  "routes": {
+    "general":  { "provider": "gemini", "model": "gemini-2.5-flash" },
+    "vision":   { "provider": "gemini", "model": "gemini-2.5-flash" },
+    "web":      { "provider": "gemini", "model": "gemini-2.5-flash" },
+    "code":     { "provider": "gemini", "model": "gemini-2.5-flash" },
+    "data":     { "provider": "gemini", "model": "gemini-2.5-flash" },
+    "complex":  { "provider": "gemini", "model": "gemini-2.5-flash" },
+    "thinking": { "provider": "gemini", "model": "gemini-2.5-flash" },
+    "system":   { "provider": "gemini", "model": "gemini-2.5-flash" }
+  }
+}
+```
+
+สามารถ override ต่อ bot ได้ด้วย `botOverrides` section
+
+---
+
+## 📚 Documentation
+
+| ไฟล์ | รายละเอียด |
+|------|-----------|
+| [ARCHITECTURE.md](ARCHITECTURE.md) | System design overview |
+| [docs/SWARM_ARCHITECTURE.md](docs/SWARM_ARCHITECTURE.md) | Multi-agent swarm details |
+| [docs/PHASE_3_VECTOR_MEMORY.md](docs/PHASE_3_VECTOR_MEMORY.md) | 4-layer memory implementation |
+| [docs/PROJECT_SYSTEM_HANDBOOK.md](docs/PROJECT_SYSTEM_HANDBOOK.md) | Comprehensive system handbook |
+| [docs/IMPLEMENTATION_CHECKLIST.md](docs/IMPLEMENTATION_CHECKLIST.md) | Boot Guardian & infrastructure protections |
+| [.agent/skills/unified_bot_v2/SKILL.md](.agent/skills/unified_bot_v2/SKILL.md) | Authoritative system design manifest |
+
+---
+
+## ⚠️ Known Limitations & Areas for Improvement
+
+- **Test Coverage**: ~13% — swarmCoordinator และ terminalGateway ยังขาด unit tests
+- **Large Files**: `swarmCoordinator.ts` และ `terminalGateway.ts` ควร refactor ต่อไป
+- **Type Safety**: มี ~239 occurrences ของ `any` type ที่ควรแก้ไข
+- **Memory Pagination**: Working memory load ยังไม่มี pagination
+- **Credentials**: ไม่ควร fallback ไปใช้ default JWT_SECRET ใน production
+
 ---
 
 <div align="center">
   <i>"I am Jarvis. What are we building today, sir?"</i>
   <br/><br/>
-  <sub>Built with ❤️ — PersonalAIBot v2.6 (Original Release) | Last updated: 31 March 2026</sub>
+  <sub>Built with ❤️ — PersonalAIBot v2.6 (Original Release) | ปรับปรุง Brain Visualizer, Gemini SDK Patch, และซ่อมแซม Missing Embeddings | 31 March 2026</sub>
 </div>
-
