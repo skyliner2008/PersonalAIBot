@@ -615,8 +615,9 @@
       "category": "embedding",
       "type": "local",
       "baseUrl": "local",
-      "defaultModel": "Xenova/bge-small-en-v1.5",
+      "defaultModel": "Xenova/paraphrase-multilingual-MiniLM-L12-v2",
       "models": [
+        "Xenova/paraphrase-multilingual-MiniLM-L12-v2",
         "Xenova/bge-small-en-v1.5"
       ],
       "capabilities": {
@@ -625,7 +626,7 @@
       "requiresAuth": false,
       "apiKeyEnvVar": "",
       "enabled": true,
-      "notes": "Runs BGE ONNX model locally (downloads ~33MB on first run). Does not require API key. Ultimate fallback."
+      "notes": "Runs Multilingual ONNX model locally (downloads ~118MB on first run). Does not require API key. Ultimate fallback."
     },
     "tavily": {
       "id": "tavily",

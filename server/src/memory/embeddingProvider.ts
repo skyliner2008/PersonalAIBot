@@ -277,11 +277,11 @@ export class LocalEmbeddingProvider extends BaseEmbeddingProvider {
   private model: string;
   private extractorPromise: Promise<any>;
 
-  constructor(model: string = 'Xenova/bge-small-en-v1.5') {
+  constructor(model: string = 'Xenova/paraphrase-multilingual-MiniLM-L12-v2') {
     super();
     this.model = model;
     
-    log.info(`Local Embedding Provider initializing with model: ${model} (downloads ~33MB on first run)`);
+    log.info(`Local Embedding Provider initializing with model: ${model} (downloads ~118MB on first run)`);
     // Lazy load the model on first use, but start the promise here
     this.extractorPromise = pipeline('feature-extraction', this.model).catch(err => {
       log.error('Failed to load local embedding model', { error: String(err) });
@@ -293,8 +293,7 @@ export class LocalEmbeddingProvider extends BaseEmbeddingProvider {
     try {
       const extractor = await this.extractorPromise;
       
-      // BGE models should ideally have "passage: " prefix for text, but we'll feed it directly 
-      // as our memory layer already prepares the text reasonably.
+      // We'll feed it directly as our memory layer already prepares the text reasonably.
       const formattedTexts = texts.map(t => typeof t === 'string' ? t.trim() : '');
       
       // Process batch (transformers.js handles array inputs efficiently)
@@ -332,7 +331,7 @@ export class LocalEmbeddingProvider extends BaseEmbeddingProvider {
   getProviderType(): string { return 'local'; }
 
   /**
-   * Xenova/bge-small-en-v1.5 has 384 dimensions.
+   * Xenova/paraphrase-multilingual-MiniLM-L12-v2 and bge-small both have 384 dimensions.
    */
   protected getExpectedDimensions(): number {
     return 384;
@@ -366,7 +365,7 @@ export function initEmbeddingProvider(apiKey: string | undefined, type: 'gemini'
   } else if (type === 'openai') {
     provider = new OpenAIEmbeddingProvider(apiKey as string, model || 'text-embedding-3-small', baseUrl);
   } else {
-    provider = new LocalEmbeddingProvider(model || 'Xenova/bge-small-en-v1.5');
+    provider = new LocalEmbeddingProvider(model || 'Xenova/paraphrase-multilingual-MiniLM-L12-v2');
   }
 
   if (!defaultProvider) {
