@@ -177,6 +177,32 @@ CREATE TABLE IF NOT EXISTS knowledge (
 CREATE INDEX IF NOT EXISTS idx_knowledge_chat ON knowledge(chat_id, timestamp);
 
 -- ============================================
+-- Knowledge Graph (Second Brain: Relationships)
+-- ============================================
+CREATE TABLE IF NOT EXISTS knowledge_nodes (
+  id TEXT PRIMARY KEY,
+  chat_id TEXT NOT NULL,
+  label TEXT NOT NULL,
+  node_type TEXT DEFAULT 'entity',
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_chat ON knowledge_nodes(chat_id);
+
+CREATE TABLE IF NOT EXISTS knowledge_edges (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  chat_id TEXT NOT NULL,
+  source_id TEXT NOT NULL,
+  target_id TEXT NOT NULL,
+  relationship TEXT NOT NULL,
+  weight REAL DEFAULT 1.0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(chat_id, source_id, target_id, relationship)
+);
+CREATE INDEX IF NOT EXISTS idx_knowledge_edges_chat ON knowledge_edges(chat_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_edges_src ON knowledge_edges(source_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_edges_tgt ON knowledge_edges(target_id);
+
+-- ============================================
 -- Processed Messages (dedup persistence)
 -- ============================================
 CREATE TABLE IF NOT EXISTS processed_messages (

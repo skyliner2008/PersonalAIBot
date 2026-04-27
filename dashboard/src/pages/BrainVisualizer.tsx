@@ -1169,7 +1169,7 @@ const BrainVisualizer: React.FC = () => {
           corpusOverride={corpusOverride} onCorpusOverrideChange={handleCorpusOverride}
           visualSettings={visualSettings}
         />
-        <OrbitControls ref={r => { (window as any).orbitControls = r; }} enableDamping dampingFactor={0.05} maxDistance={55} minDistance={4} makeDefault />
+        <OrbitControls ref={(r: any) => { (window as any).orbitControls = r; }} enableDamping dampingFactor={0.05} maxDistance={55} minDistance={4} makeDefault />
       </Canvas>
 
       <div className="absolute bottom-8 left-8 z-30 flex flex-col gap-2">

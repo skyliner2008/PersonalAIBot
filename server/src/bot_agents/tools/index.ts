@@ -36,6 +36,9 @@ import { generateImageDeclaration, generateSpeechDeclaration, generateVideoDecla
 import { readDocumentDeclaration, createDocumentDeclaration, editDocumentDeclaration, readGoogleDocDeclaration, createOfficeHandlers } from './office_tools.js';
 import { createCronJobDeclaration, listCronJobsDeclaration, deleteCronJobDeclaration, createCronHandlers } from './cron_tools.js';
 
+import { tradingTools } from './tradingTools.js';
+import { smcTools } from './smcTools.js';
+
 export type { BotContext, SystemToolContext };
 
 // Utility Tools
@@ -226,6 +229,8 @@ export const tools = [
   createCronJobDeclaration,
   listCronJobsDeclaration,
   deleteCronJobDeclaration,
+  ...tradingTools,
+  ...smcTools,
 ];
 
 // Per-request chatId holder — set by the handler wrapper
@@ -294,6 +299,9 @@ export const getFunctionHandlers = (ctx: BotContext, sysCtx?: SystemToolContext)
     multi_replace_file_content: multiReplaceFileContent,
     system_terminal: systemTerminal,
     ...createCommunicationHandlers(ctx, _currentChatId),
+    // Trading & SMC
+    ...tradingTools.reduce((acc, t) => ({ ...acc, [t.name]: t.execute }), {}),
+    ...smcTools.reduce((acc, t) => ({ ...acc, [t.name]: t.execute }), {}),
   };
 
   // Register System Self-Awareness tools (if context provided)

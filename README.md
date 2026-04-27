@@ -30,6 +30,7 @@
 - **🚀 UX & Resilience (Mar 2026)**: นำระบบแจ้งเตือน (Alerts) ออกทั้งหมดเพื่อความลื่นไหล, เพิ่มปุ่ม **Force Stop** หยุดงาน AI ได้ทันที, ระบบ **JSON Self-Healing** ซ่อมแซมคำตอบจาก LLM อัตโนมัติ และการปรับปรุง Interaction ใน Brain Visualizer
 
 - **Automate Facebook** ตอบแชท/คอมเมนต์/โพสต์อัตโนมัติ
+- **Professional AI Trading (Apr 2026)**: ยกระดับเป็น AI Trader เต็มรูปแบบ พร้อมระบบวิเคราะห์ **Smart Money Concepts (SMC)** ที่แสดงผล BOS, Order Blocks, FVG และ Liquidity บนหน้า Dashboard แบบ Real-time พร้อมชุดเครื่องมือ (Tools) สำหรับเทรด 25 รายการ
 
 ---
 
@@ -227,6 +228,7 @@ React 19 + Vite + TailwindCSS dashboard มีหน้าดังนี้:
 | **Jarvis Terminal** | Full xterm.js terminal ใน browser (shell/agent/CLI mode) |
 | **Memory Viewer** | ดู/แก้ไข Core Memory, Archival Memory, Vector Store |
 | **Personas** | จัดการ AI personality profiles |
+| **Trading Terminal** | [NEW] หน้าจอเทรดระดับสากล วิเคราะห์ SMC (BOS/OB/FVG) พร้อม AI Analysis |
 | **Logs** | Activity logs, error logs, audit trail |
 
 ---
@@ -361,6 +363,7 @@ terminal:list     → List active sessions
 | **Media** | `generate_image`, `generate_speech`, `generate_video` (Provider Agnostic) |
 | **Office** | `read_document`, `create_document`, `edit_document`, `read_google_doc` (PDF, Word, Excel, CSV) |
 | **Cron Jobs** | `create_cron_job`, `list_cron_jobs`, `delete_cron_job` (AI Self-Scheduling) |
+| **Trading** | `trading_price`, `trading_smc_analysis`, `trading_technical_analysis`, `trading_market_snapshot`, `trading_combined` (Total 25 tools) |
 | **Dynamic** | Hot-reloadable JSON-defined tools จาก `server/dynamic_tools/` |
 
 ---
@@ -801,5 +804,5 @@ PersonalAIBot/
 <div align="center">
   <i>"I am Jarvis. What are we building today, sir?"</i>
   <br/><br/>
-  <sub>Built with ❤️ — PersonalAIBot v2.6 (Original Release) | ปรับปรุง Brain Visualizer, Gemini SDK Patch, และซ่อมแซม Missing Embeddings | 31 March 2026</sub>
+  <sub>Built with ❤️ — PersonalAIBot v2.7 (Trading Edition) | อัปเกรดระบบ SMC Trader, Trading Terminal Dashboard, และชุดเครื่องมือ AI Trading 25 รายการ | 27 April 2026</sub>
 </div>

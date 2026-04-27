@@ -43,6 +43,7 @@ import { registerHttpSurface } from './api/httpSurface.js';
 import { getRootAdminIdentity } from './system/rootAdmin.js';
 import { requiresRawWebhookBody } from './utils/webhookPaths.js';
 import { verifyToken } from './utils/auth.js';
+import { tradingRouter } from './trading/api.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -433,7 +434,8 @@ async function main() {
   app.use('/api/chat', userRateLimitMiddleware(10));          // 10 AI chats/min per user
   app.use('/api/chat/reply', userRateLimitMiddleware(10));
   app.use('/api/ai/generate-post', userRateLimitMiddleware(5)); // 5 content generations/min
-  app.use('/api/memory', userRateLimitMiddleware(30));         // 30 memory ops/min
+  app.use('/api/memory', userRateLimitMiddleware(30));
+  app.use('/api/trading', tradingRouter);         // 30 memory ops/min
   app.use('/api/tools', userRateLimitMiddleware(20));          // 20 tool calls/min
 
   // --- Initialize DB ---
