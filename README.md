@@ -394,34 +394,6 @@ terminal:list     → List active sessions
   - `agent` — AI agent ด้วย full toolset
   - `cli` — Gemini / Codex / Claude CLI
 
----
-
-## 🔒 Security
-
-| Feature | รายละเอียด |
-|---
-
-<div align="center">
-  <i>"I am Jarvis. What are we building today, sir?"</i>
-  <br/><br/>
-  <sub>Built with ❤️ — PersonalAIBot v2.7 (Trading Edition) | อัปเกรดระบบ SMC Trader, Trading Terminal Dashboard, และชุดเครื่องมือ AI Trading 25 รายการ | 27 April 2026</sub>
-</div>
-�� data/                            # Runtime data (gitignored)
-│   ├── fb-agent.db                  # SQLite database
-│   ├── cookies/                     # Browser session cookies
-│   └── uploads/                     # User uploaded files
-│
-├── docs/                            # 20+ documentation files
-├── ai_routing_config.json           # AI model routing config
-├── docker-compose.yml               # Docker deployment
-├── Dockerfile                       # Container image
-├── install.bat                      # Windows modular installer
-├── install.sh                       # Linux/macOS modular installer [NEW]
-├── start.bat                        # Start script
-└── start_unified.bat                # Unified launcher
-```
-
----
 
 ## 📊 AI Routing Configuration
 
