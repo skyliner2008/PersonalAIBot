@@ -5,13 +5,18 @@
 
 ## Documentation Index
 
-### Start Here
-1. **[PHASE1_COMPLETE.md](./PHASE1_COMPLETE.md)** — Executive summary (THIS IS THE MAIN STATUS)
-2. **[QUICK_START.md](./QUICK_START.md)** — 5-minute setup guide
+## Development Phases
+1. **[PHASE1_COMPLETE.md](./PHASE1_COMPLETE.md)** — Executive summary (Phase 1: Auto-Tool Generation)
+2. **[PHASE2_SUMMARY.md](./PHASE2_SUMMARY.md)** — Phase 2: Agent Swarm Implementation
+3. **[PHASE_3_IMPLEMENTATION_SUMMARY.md](./PHASE_3_IMPLEMENTATION_SUMMARY.md)** — Phase 3: Advanced Vector Memory
+4. **[PHASE4_SUMMARY.md](./PHASE4_SUMMARY.md)** — Phase 4: Comprehensive Testing
+5. **[CHANGES.md](./CHANGES.md)** — Full Change History (Up to Phase 5: AI Trading)
 
-### Detailed Documentation
+## Detailed Documentation
 3. **[AUTO_TOOL_GENERATION.md](./AUTO_TOOL_GENERATION.md)** — Complete technical reference
-4. **[IMPLEMENTATION_SUMMARY.md](./IMPLEMENTATION_SUMMARY.md)** — Implementation details
+4. **[SWARM_ARCHITECTURE.md](./SWARM_ARCHITECTURE.md)** — Multi-agent swarm details
+5. **[PHASE_3_VECTOR_MEMORY.md](./PHASE_3_VECTOR_MEMORY.md)** — 4-layer memory implementation
+6. **[TESTING.md](./TESTING.md)** — Comprehensive testing guide
 
 ## Core Files Created
 
