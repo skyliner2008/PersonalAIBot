@@ -1,14 +1,14 @@
-﻿<div align="center">
+<div align="center">
   <h1>🤖 PersonalAIBot</h1>
   <p><strong>Advanced Agentic AI Platform with Multi-Agent Swarm Orchestration, 4-Layer Memory, and Autonomous Self-Evolution</strong></p>
 
   <p>
-    <img src="https://img.shields.io/badge/TypeScript-5.7-007ACC│style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
-    <img src="https://img.shields.io/badge/Node.js-22.x-43853D│style=for-the-badge&logo=node.js&logoColor=white" alt="Node.js" />
-    <img src="https://img.shields.io/badge/React-19-20232A│style=for-the-badge&logo=react&logoColor=61DAFB" alt="React" />
-    <img src="https://img.shields.io/badge/SQLite-3-07405E│style=for-the-badge&logo=sqlite&logoColor=white" alt="SQLite" />
-    <img src="https://img.shields.io/badge/Google_Gemini-Primary_AI-4285F4│style=for-the-badge&logo=google&logoColor=white" alt="Gemini" />
-    <img src="https://img.shields.io/badge/Playwright-Browser_Automation-2EAD33│style=for-the-badge&logo=playwright&logoColor=white" alt="Playwright" />
+    <img src="https://img.shields.io/badge/TypeScript-5.7-007ACC?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
+    <img src="https://img.shields.io/badge/Node.js-22.x-43853D?style=for-the-badge&logo=node.js&logoColor=white" alt="Node.js" />
+    <img src="https://img.shields.io/badge/React-19-20232A?style=for-the-badge&logo=react&logoColor=61DAFB" alt="React" />
+    <img src="https://img.shields.io/badge/SQLite-3-07405E?style=for-the-badge&logo=sqlite&logoColor=white" alt="SQLite" />
+    <img src="https://img.shields.io/badge/Google_Gemini-Primary_AI-4285F4?style=for-the-badge&logo=google&logoColor=white" alt="Gemini" />
+    <img src="https://img.shields.io/badge/Playwright-Browser_Automation-2EAD33?style=for-the-badge&logo=playwright&logoColor=white" alt="Playwright" />
   </p>
 </div>
 
@@ -130,7 +130,7 @@ Scan → Filter → Validate → Impact Analysis → Learning → Trauma → Sec
 | **Dependency Graph** | `codebase_edges` | Directed edges: `source --imports(symbols)--> target` สำหรับ multi-hop traversal |
 | **Semantic Embeddings** | `codebase_embeddings` | Vector embeddings ของ code summaries สำหรับค้นหาไฟล์ที่คล้ายกัน |
 
-- **Graph Traversal**: ถาม "ถ้าแก้ไฟล์นี้ จะกระทบอะไรบ้าง 2-3 ระดับลึก│" ได้ทันที
+- **Graph Traversal**: ถาม "ถ้าแก้ไฟล์นี้ จะกระทบอะไรบ้าง 2-3 ระดับลึก?" ได้ทันที
 - **Upstream Context**: AI เห็น exports ของ core modules (เช่น `db.ts` export `getDb, runSql, ...`) ก่อนแก้โค้ด
 - **Semantic Search**: ค้นหาไฟล์ที่ทำงานคล้ายกันเพื่อเป็น reference pattern
 - **Protected Core Mapping**: 14 ไฟล์ core ไม่ถูกแก้ไข แต่ architecture ถูก map ไว้ใน Second Brain
@@ -402,7 +402,7 @@ terminal:list     → List active sessions
 |---
 
 <div align="center">
-  <i>"I am Jarvis. What are we building today, sir│"</i>
+  <i>"I am Jarvis. What are we building today, sir?"</i>
   <br/><br/>
   <sub>Built with ❤️ — PersonalAIBot v2.7 (Trading Edition) | อัปเกรดระบบ SMC Trader, Trading Terminal Dashboard, และชุดเครื่องมือ AI Trading 25 รายการ | 27 April 2026</sub>
 </div>
@@ -665,7 +665,7 @@ PersonalAIBot/
 ---
 
 <div align="center">
-  <i>"I am Jarvis. What are we building today, sir│"</i>
+  <i>"I am Jarvis. What are we building today, sir?"</i>
   <br/><br/>
   <sub>Built with ❤️ — PersonalAIBot v2.7 (Trading Edition) | อัปเกรดระบบ SMC Trader, Trading Terminal Dashboard, และชุดเครื่องมือ AI Trading 25 รายการ | 27 April 2026</sub>
 </div>
