@@ -1,7 +1,7 @@
 import { YahooFinanceService } from '../../trading/yahooFinance.js';
-import { TechnicalIndicators } from '../../trading/indicators.js';
+import type { AITool } from '../types.js';
 
-export const tradingTools = [
+export const tradingTools: (AITool & { execute: Function })[] = [
   {
     name: 'trading_price',
     description: 'Get Real-time price for Stocks, Crypto, Forex, or Gold.',

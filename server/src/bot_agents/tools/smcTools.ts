@@ -1,7 +1,8 @@
 import { YahooFinanceService } from '../../trading/yahooFinance.js';
 import { SMCEngine } from '../../trading/smc.js';
+import type { AITool } from '../types.js';
 
-export const smcTools = [
+export const smcTools: (AITool & { execute: Function })[] = [
   {
     name: 'trading_smc_analysis',
     description: 'Get Full SMC Dashboard data (Order Blocks, FVGs, Structure).',
