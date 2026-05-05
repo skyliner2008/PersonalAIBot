@@ -447,14 +447,13 @@ terminal:list     → List active sessions
 ## ⚙️ Quick Start
 
 ### Prerequisites
-- Node.js v22.x
-- npm หรือ yarn
-- Google Gemini API Key (required)
-- LINE / Telegram token (optional)
+- ไม่จำเป็นต้องมีพื้นฐานโปรแกรมมิ่ง (Zero-Knowledge Installation)
+- ระบบจะทำการติดตั้ง Node.js, Python, Git และ Build Tools ให้โดยอัตโนมัติผ่านสคริปต์แบบ One-Click
 
 ### Installation
 
 **Windows:**
+ดาวน์โหลดและดับเบิลคลิกไฟล์ `install.bat` เพื่อติดตั้งแบบอัตโนมัติ หรือรันผ่าน Terminal:
 ```bat
 git clone https://github.com/skyliner2008/PersonalAIBot.git
 cd PersonalAIBot
@@ -462,6 +461,11 @@ install.bat
 ```
 
 **Linux / macOS / WSL:**
+สามารถติดตั้งรวดเดียวจบผ่านคำสั่งเดียว:
+```bash
+curl -fsSL https://raw.githubusercontent.com/skyliner2008/PersonalAIBot/main/install.sh | bash
+```
+หรือวิธีแบบ Manual:
 ```bash
 git clone https://github.com/skyliner2008/PersonalAIBot.git
 cd PersonalAIBot
@@ -476,45 +480,39 @@ docker-compose up -d
 
 ### Configuration
 
-ระบบใช้โครงสร้างแบบ **Database-First** เพื่อความปลอดภัยระดับสูงสุด โดยค่าความลับส่วนใหญ่จะถูกเก็บและเข้ารหัส **AES-256-GCM** ไว้ในฐานข้อมูล SQLite คุณเพียงแค่ตั้งค่าพื้นฐานใน `server/.env`:
+ระบบใช้โครงสร้างแบบ **Database-First** เพื่อความปลอดภัยระดับสูงสุด โดยค่าความลับจะถูกเข้ารหัสด้วย **AES-256-GCM** ตัวติดตั้งอัตโนมัติ (`install.bat` / `install.sh`) จะสร้างไฟล์ `server/.env` พร้อมสุ่ม Master Key ให้คุณโดยอัตโนมัติ
 
+**ตัวอย่าง `server/.env` อัตโนมัติ**:
 ```env
-# Server
 PORT=3000
-NODE_ENV=production
-
-# 🔒 Master Encryption Key (สำคัญ: ใช้ปลดล็อคฐานข้อมูลที่เข้ารหัส)
-CRED_SECRET=your_32_char_master_key
-
-# Admin Notifications
-ADMIN_TELEGRAM_IDS=5888914941
+NODE_ENV=development
+# 🔒 Security Keys (auto-generated)
+ENCRYPTION_KEY=...
+JWT_SECRET=...
+CRED_SECRET=...
+SOCKET_AUTH_TOKEN=...
 ```
 
-**สิ่งที่ถูกย้ายลงฐานข้อมูลแล้ว (ไม่ต้องใส่ใน .env)**:
-- `GEMINI_API_KEY`, `OPENAI_API_KEY` และ AI Providers อื่นๆ
-- `JWT_SECRET` (โทเค็นล็อกอิน)
-- `ADMIN_USER` & `ADMIN_PASSWORD` (รหัสผ่าน Dashboard)
-- LINE/Telegram Bot Tokens และเซสชันการเชื่อมต่อ
+**การจัดการ API Keys (Gemini, OpenAI, ฯลฯ)**:
+- ไม่ต้องใส่ใน `.env` อีกต่อไป
+- ให้ไปกรอกที่หน้า **Dashboard Settings** หลังจากรันระบบขึ้นมาแล้ว (รหัสผ่านเริ่มต้นคือ `admin / admin`)
 
-**หมายเหตุ**: คุณสามารถตั้งค่า API Keys และรหัสผ่านได้โดยตรงผ่านหน้า Dashboard หลังจากรันระบบครั้งแรก (รหัสผ่านเริ่มต้นคือ `admin / admin`)
+**ระบบอัจฉริยะ**:
+- **Auto-Detect Embedding**: ตรวจจับ API Key ที่มี (Gemini, OpenAI, ฯลฯ) เพื่อเปิดใช้ Semantic Memory อัตโนมัติ
+- **Auto-Purge**: หาก `CRED_SECRET` มีการเปลี่ยนแปลง ระบบจะเคลียร์คีย์ที่ถอดรหัสไม่ได้ออกเองเพื่อป้องกันระบบล่ม
 
-**ระบบอัจฉริยะในเวอร์ชันนี้**:
-- **Auto-Detect Embedding**: ระบบจะตรวจจับ API Key ที่คุณมี (Gemini, OpenAI, หรือ OpenRouter) และเลือกใช้ระบบหน่วยความจำทางภาษา (Semantic Memory) ที่เหมาะสมที่สุดให้โดยอัตโนมัติ เพื่อให้ Fresh Install ทำงานได้ทันที
-- **Auto-Purge (ล้างข้อมูล)**: หากมีการเปลี่ยนแปลง `CRED_SECRET` หรือไฟล์ Salt ในภายหลัง ระบบจะทำการล้างเฉพาะส่วนที่ถอดรหัสไม่ได้ทิ้งโดยอัตโนมัติเพื่อความปลอดภัยและความเสถียรถาวร คุณเพียงแค่กรอก API Key ใหม่ผ่าน Dashboard อีกครั้งก็เป็นอันเสร็จสิ้น
+### Launch (การเปิดใช้งานระบบ)
 
-### Launch
+รันระบบง่าย ๆ ด้วย One-Click Script ซึ่งจะตรวจสอบและเปิดทั้ง Server และ Dashboard ให้พร้อมใช้ในคำสั่งเดียว:
 
 **Windows:**
 ```bat
-start_unified.bat
+start.bat
 ```
 
 **Linux / macOS:**
-```# Start server
-cd server && npm start
-
-# Start dashboard (separate terminal)
-cd dashboard && npm run preview
+```bash
+./start.sh
 ```
 
 **Docker:**
@@ -522,7 +520,7 @@ cd dashboard && npm run preview
 docker-compose up
 ```
 
-Dashboard จะเปิดที่ `http://localhost:3000`
+Dashboard จะพร้อมใช้งานที่ `http://localhost:3000`
 
 ---
 
